@@ -45,6 +45,13 @@ Plans:
 
 **Requirements:** ADP-01, ADP-02, ADP-03, CDX-01, CDX-02, CDX-03, CDX-04, CDX-05, CDX-06
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Adapter framework: ABC base class, decorator registry, SyncResult dataclass, TOML writer utility
+- [ ] 02-02-PLAN.md — Codex adapter: rules to AGENTS.md, skills symlinks, agent-to-skill and command-to-skill conversion
+- [ ] 02-03-PLAN.md — Codex adapter: MCP server JSON-to-TOML translation, permission mapping, integration verification
+
 **Success Criteria:**
 1. Abstract adapter base class defines sync_rules(), sync_skills(), sync_agents(), sync_commands(), sync_mcp(), sync_settings() interface
 2. Adapter registry discovers and routes to target-specific adapters without modifying core engine
@@ -157,7 +164,7 @@ Plans:
 | Phase | Status | Plans | Verification | Progress |
 |-------|--------|-------|--------------|----------|
 | 1 - Foundation & State Management | Planning | 0/4 | sanity | ░░░░░░░░░░ 0% |
-| 2 - Adapter Framework & Codex Sync | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
+| 2 - Adapter Framework & Codex Sync | Planning | 0/3 | proxy | ░░░░░░░░░░ 0% |
 | 3 - Gemini & OpenCode Adapters | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
 | 4 - Plugin Interface | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
 | 5 - Safety & Validation | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
@@ -168,4 +175,5 @@ Plans:
 
 *Roadmap created: 2026-02-13*
 *Phase 1 planned: 2026-02-13*
-*Next: `/grd:execute-phase 1`*
+*Phase 2 planned: 2026-02-13*
+*Next: `/grd:execute-phase 2`*
