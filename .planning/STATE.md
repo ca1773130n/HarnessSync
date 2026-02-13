@@ -4,22 +4,22 @@
 
 **Core Value:** One harness to rule them all — configure Claude Code once, sync everywhere (Codex, Gemini CLI, OpenCode) without manual duplication or format translation.
 
-**Current Focus:** Phase 1 - Foundation & State Management
+**Current Focus:** Phase 2 - Adapter Framework & Codex Sync
 
 ---
 
 ## Current Position
 
-**Phase:** 1
-**Plan:** 04 (completed)
-**Status:** Complete
+**Phase:** 2
+**Plan:** 01 (completed)
+**Status:** In Progress
 
 **Progress:**
 ```
-Phase 1: Foundation & State Management
-██████████ 100% (4/4 plans complete)
+Phase 2: Adapter Framework & Codex Sync
+███░░░░░░░ 33% (1/3 plans complete)
 
-Overall Project: 1/7 phases complete
+Overall Project: 1.33/7 phases complete
 ```
 
 ---
@@ -27,19 +27,19 @@ Overall Project: 1/7 phases complete
 ## Performance Metrics
 
 ### Velocity
-- **Phases completed:** 1/7
-- **Plans completed:** 4 (01-01, 01-02, 01-03, 01-04)
-- **Average plan duration:** 2.6 min
+- **Phases completed:** 1/7 (Phase 2 in progress)
+- **Plans completed:** 5 (01-01, 01-02, 01-03, 01-04, 02-01)
+- **Average plan duration:** 2.7 min
 - **Estimated completion:** TBD after Phase 2
 
 ### Quality
-- **Verification passes:** 7 (Logger, Hashing, Paths, StateManager, SourceReader-basic, SourceReader-edges, Phase1-Integration)
+- **Verification passes:** 9 (Logger, Hashing, Paths, StateManager, SourceReader-basic, SourceReader-edges, Phase1-Integration, AdapterFramework, TOMLWriter)
 - **Verification failures:** 0
 - **Pass rate:** 100%
 
 ### Scope
-- **Requirements delivered:** 11/44 (CORE-01 through CORE-05, SRC-01 through SRC-06)
-- **v1 coverage:** 25%
+- **Requirements delivered:** 14/44 (CORE-01 through CORE-05, SRC-01 through SRC-06, ADP-01 through ADP-03)
+- **v1 coverage:** 32%
 - **Deferred to v2:** 0
 
 ---
@@ -79,40 +79,46 @@ No deferred validations yet. All phases use proxy or sanity verification.
 16. **Plugin manifest declares future structure** - plugin.json includes hooks/commands/mcp even though Phase 4-6 scripts don't exist yet (standard plugin pattern) (01-04, 2026-02-13)
 17. **Preserve migration code during rebrand** - migrate_from_cc2all() retains intentional old path references for backwards compatibility (01-04, 2026-02-13)
 18. **Integration tests use tempdir mocks** - Test against mock project instead of real ~/.claude/ for safety and CI compatibility (01-04, 2026-02-13)
+19. **Manual TOML generation via f-strings** - tomllib (stdlib 3.11+) is read-only, manual generation maintains zero-dep constraint (02-01, 2026-02-13)
+20. **Backslash-first escaping order** - TOML string escaping must process \ before " to prevent double-escaping (02-01, 2026-02-13)
+21. **Registry validates at registration time** - AdapterRegistry checks issubclass at decorator application, not instantiation (02-01, 2026-02-13)
+22. **sync_rules receives list[dict]** - Allows adapters to merge multiple rule files instead of single concatenated string (02-01, 2026-02-13)
+23. **Env var references preserved in TOML** - ${VAR} syntax kept literal, target CLI expands at runtime not sync time (02-01, 2026-02-13)
 
 ### Active Todos
 - [x] Complete Plan 01-01: Foundation utilities (Logger, hashing, paths)
 - [x] Complete Plan 01-02: State Manager with drift detection
 - [x] Complete Plan 01-03: Source Reader with .claude/ discovery
 - [x] Complete Plan 01-04: Integration verification and plugin manifest
-- [ ] Begin Phase 2: Adapter Framework
-- [ ] Research TOML parsing options for Python 3.10 (needed for Plan 02-01 Codex adapter)
+- [x] Complete Plan 02-01: Adapter framework infrastructure
+- [ ] Complete Plan 02-02: Codex adapter implementation
+- [ ] Complete Plan 02-03: Codex integration and verification
 
 ### Blockers
 None currently.
 
 ### Recent Changes
+- **2026-02-13:** Completed Plan 02-01 (Adapter framework) - AdapterBase ABC with 6 sync methods, AdapterRegistry decorator-based, SyncResult dataclass, manual TOML writer with proper escaping (2 tasks, 3min)
 - **2026-02-13:** Completed Plan 01-04 (Plugin manifest & integration) - plugin.json created, HarnessSync rebranding, 9-step integration test validates entire Phase 1 pipeline (2 tasks, 1.6min)
 - **2026-02-13:** Completed Plan 01-03 (Source Reader) - 6 discovery methods (rules, skills, agents, commands, mcp, settings), plugin cache support, edge case handling (2 tasks, 4.3min)
 - **2026-02-13:** Completed Plan 01-02 (State Manager) - Atomic writes, drift detection, per-target tracking (1 task, 1.7min)
 - **2026-02-13:** Completed Plan 01-01 (Foundation utilities) - Logger, hashing, paths (3 tasks, 2.5min)
-- **2026-02-13:** Roadmap created with 7 phases, 44 requirements mapped
 
 ---
 
 ## Session Continuity
 
 ### What Just Happened
-Completed Plan 01-04 (Plugin manifest & integration verification). Created plugin.json with full Claude Code plugin structure (hooks, commands, mcp). Rebranded all user-facing content from cc2all to HarnessSync (README.md, env vars, commands). Ran comprehensive 9-step integration test validating entire Phase 1 pipeline: SourceReader discovers 6 config types → hashing computes SHA256 → symlinks created → Logger tracks operations → StateManager records sync → drift detection works → stale cleanup works → package imports work. All verification passed. Phase 1 COMPLETE. Task committed (b321222).
+Completed Plan 02-01 (Adapter framework infrastructure). Created AdapterBase ABC with 6 abstract sync methods (sync_rules, sync_skills, sync_agents, sync_commands, sync_mcp, sync_settings) plus concrete sync_all orchestrator. Implemented AdapterRegistry with decorator-based registration validating inheritance at decoration time. Built SyncResult dataclass with merge(), total, and status properties. Created manual TOML writer utilities with correct escaping order (backslash first), format_mcp_server_toml for Codex config.toml, and write_toml_atomic for safe writes. All verification passed (8 adapter tests + 7 TOML tests). Tasks committed (a4a1f54, e08a4cc).
 
 ### What's Next
-Begin Phase 2 (Adapter Framework). Start with Plan 02-01 (Codex adapter) implementing the most complex target first (TOML config, skill conversions, MCP mapping). Phase 1 foundation (Logger, StateManager, SourceReader, hashing, paths) is solid and validated.
+Continue Phase 2 with Plan 02-02 (Codex adapter implementation). Implement CodexAdapter class using AdapterBase interface and TOML writer utilities to sync Claude Code config to Codex CLI format (AGENTS.md, config.toml, skills/).
 
 ### Context for Next Session
-Phase 1 Foundation complete - all 4 plans executed (01-01 utilities, 01-02 state, 01-03 discovery, 01-04 integration). All 11 Phase 1 requirements delivered (CORE-01 through CORE-05, SRC-01 through SRC-06). Integration test proves pipeline works end-to-end. Ready for Phase 2 adapters. Research TOML parsing before starting 02-01 (Codex uses config.toml, need stdlib-only solution).
+Phase 2 adapter framework complete (Plan 02-01). AdapterBase provides interface contract, AdapterRegistry ready for CodexAdapter registration, SyncResult available for tracking, TOML writer utilities ready for config.toml generation. Zero external dependencies maintained. Ready for Codex adapter implementation (Plan 02-02).
 
 ---
 
 *Last updated: 2026-02-13*
-*Session: Plan 01-04 execution*
-*Stopped at: Completed 01-04-PLAN.md (Phase 1 complete)*
+*Session: Plan 02-01 execution*
+*Stopped at: Completed 02-01-PLAN.md*
