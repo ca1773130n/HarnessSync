@@ -11,15 +11,15 @@
 ## Current Position
 
 **Phase:** 2
-**Plan:** 02 (completed)
-**Status:** In Progress
+**Plan:** 03 (completed)
+**Status:** Complete
 
 **Progress:**
 ```
 Phase 2: Adapter Framework & Codex Sync
-██████░░░░ 67% (2/3 plans complete)
+██████████ 100% (3/3 plans complete)
 
-Overall Project: 1.67/7 phases complete
+Overall Project: 2/7 phases complete
 ```
 
 ---
@@ -27,19 +27,19 @@ Overall Project: 1.67/7 phases complete
 ## Performance Metrics
 
 ### Velocity
-- **Phases completed:** 1/7 (Phase 2 in progress)
-- **Plans completed:** 6 (01-01, 01-02, 01-03, 01-04, 02-01, 02-02)
-- **Average plan duration:** 2.7 min
-- **Estimated completion:** TBD after Phase 2
+- **Phases completed:** 2/7 (Phase 2 complete)
+- **Plans completed:** 7 (01-01, 01-02, 01-03, 01-04, 02-01, 02-02, 02-03)
+- **Average plan duration:** 3.1 min
+- **Estimated completion:** TBD after Phase 3
 
 ### Quality
-- **Verification passes:** 11 (Logger, Hashing, Paths, StateManager, SourceReader-basic, SourceReader-edges, Phase1-Integration, AdapterFramework, TOMLWriter, CodexRulesSkills, CodexAgentsCommands)
+- **Verification passes:** 13 (Logger, Hashing, Paths, StateManager, SourceReader-basic, SourceReader-edges, Phase1-Integration, AdapterFramework, TOMLWriter, CodexRulesSkills, CodexAgentsCommands, CodexMCPSettings, Phase2-Integration)
 - **Verification failures:** 0
 - **Pass rate:** 100%
 
 ### Scope
-- **Requirements delivered:** 18/44 (CORE-01 through CORE-05, SRC-01 through SRC-06, ADP-01 through ADP-03, CDX-01 through CDX-04)
-- **v1 coverage:** 41%
+- **Requirements delivered:** 20/44 (CORE-01 through CORE-05, SRC-01 through SRC-06, ADP-01 through ADP-03, CDX-01 through CDX-06)
+- **v1 coverage:** 45%
 - **Deferred to v2:** 0
 
 ---
@@ -88,6 +88,9 @@ No deferred validations yet. All phases use proxy or sanity verification.
 25. **Marker-based AGENTS.md management** - Use HTML comment markers to delineate synced content in AGENTS.md, preserving user content outside markers (02-02, 2026-02-13)
 26. **Role extraction with fallback** - Extract agent instructions from <role> tags when present, use full body as fallback (02-02, 2026-02-13)
 27. **Agent/command directory prefixes** - Agents sync to .agents/skills/agent-{name}/, commands to cmd-{name}/ to prevent naming conflicts (02-02, 2026-02-13)
+28. **Python 3.10 TOML parser** - Minimal parse_toml_simple for Python 3.10 compatibility since tomllib requires 3.11+ (02-03, 2026-02-13)
+29. **Config merge preservation** - Always read existing config.toml, merge changes, write atomically to preserve both settings and MCP sections (02-03, 2026-02-13)
+30. **Conservative sandbox mapping** - ANY denied tool -> read-only sandbox mode, never auto-map to danger-full-access for security (02-03, 2026-02-13)
 
 ### Active Todos
 - [x] Complete Plan 01-01: Foundation utilities (Logger, hashing, paths)
@@ -96,33 +99,34 @@ No deferred validations yet. All phases use proxy or sanity verification.
 - [x] Complete Plan 01-04: Integration verification and plugin manifest
 - [x] Complete Plan 02-01: Adapter framework infrastructure
 - [x] Complete Plan 02-02: Codex adapter implementation
-- [ ] Complete Plan 02-03: Codex integration and verification
+- [x] Complete Plan 02-03: Codex integration and verification
+- [ ] Begin Phase 3: Main sync orchestration
 
 ### Blockers
 None currently.
 
 ### Recent Changes
+- **2026-02-13:** Completed Plan 02-03 (Codex integration) - sync_mcp with MCP-to-TOML translation and env var preservation, sync_settings with conservative permission mapping, Python 3.10 TOML parser, 15 verification tests passed (2 tasks, 5.5min)
 - **2026-02-13:** Completed Plan 02-02 (Codex adapter) - CodexAdapter with rules→AGENTS.md (marker-based), skills→symlinks, agents/commands→SKILL.md conversion, regex frontmatter parsing (2 tasks, 2.6min)
 - **2026-02-13:** Completed Plan 02-01 (Adapter framework) - AdapterBase ABC with 6 sync methods, AdapterRegistry decorator-based, SyncResult dataclass, manual TOML writer with proper escaping (2 tasks, 3min)
 - **2026-02-13:** Completed Plan 01-04 (Plugin manifest & integration) - plugin.json created, HarnessSync rebranding, 9-step integration test validates entire Phase 1 pipeline (2 tasks, 1.6min)
 - **2026-02-13:** Completed Plan 01-03 (Source Reader) - 6 discovery methods (rules, skills, agents, commands, mcp, settings), plugin cache support, edge case handling (2 tasks, 4.3min)
-- **2026-02-13:** Completed Plan 01-02 (State Manager) - Atomic writes, drift detection, per-target tracking (1 task, 1.7min)
 
 ---
 
 ## Session Continuity
 
 ### What Just Happened
-Completed Plan 02-02 (Codex adapter implementation). Implemented CodexAdapter class with 4 of 6 sync methods: sync_rules (writes AGENTS.md with marker-based managed sections, preserves user content), sync_skills (creates symlinks to .agents/skills/), sync_agents (converts Claude Code agents to SKILL.md format with frontmatter parsing and role extraction), sync_commands (converts commands to SKILL.md). Added helper methods for regex-based frontmatter parsing (no PyYAML), role extraction from <role> tags, and SKILL.md formatting. All verification passed (6 rules/skills tests + 7 agents/commands tests). Tasks committed (2fe11c7, f22b97b).
+Completed Plan 02-03 (Codex integration and verification) and finished Phase 2. Implemented sync_mcp (MCP server JSON-to-TOML translation with env var preservation and config merging) and sync_settings (conservative permission mapping: any deny -> read-only sandbox). Added Python 3.10 TOML parser (parse_toml_simple, read_toml_safe) to handle tomllib absence. All 8 Task 1 verification tests passed (MCP stdio/HTTP, env vars, settings, coexistence). 7-step Phase 2 integration test passed (7 synced, 5 adapted, 0 failed). All 9 Phase 2 requirements (ADP-01/02/03, CDX-01/02/03/04/05/06) delivered. Task committed (1f55572).
 
 ### What's Next
-Continue Phase 2 with Plan 02-03 (Codex integration and verification). Implement remaining sync_mcp and sync_settings methods, create end-to-end integration test validating full sync pipeline.
+Begin Phase 3 (Main Sync Orchestration). Implement SyncOrchestrator to coordinate SourceReader + AdapterRegistry, add CLI commands (init, sync, status), implement dry-run mode and logging.
 
 ### Context for Next Session
-CodexAdapter 4/6 sync methods complete (rules, skills, agents, commands). sync_mcp and sync_settings stub methods ready for implementation. TOML writer utilities available from Plan 02-01 for config.toml generation. Zero dependencies maintained through regex-based frontmatter parsing. Ready for MCP/settings sync and integration testing (Plan 02-03).
+Phase 2 complete with zero dependencies maintained. CodexAdapter has all 6 sync methods working end-to-end. Python 3.10+ compatible via parse_toml_simple. Ready for orchestration layer that ties SourceReader -> AdapterRegistry -> StateManager together for production CLI. Phase 3 will add user-facing commands and workflow automation.
 
 ---
 
 *Last updated: 2026-02-13*
-*Session: Plan 02-02 execution*
-*Stopped at: Completed 02-02-PLAN.md*
+*Session: Plan 02-03 execution*
+*Stopped at: Completed 02-03-PLAN.md*
