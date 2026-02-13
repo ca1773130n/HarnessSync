@@ -11,15 +11,15 @@
 ## Current Position
 
 **Phase:** 2
-**Plan:** 01 (completed)
+**Plan:** 02 (completed)
 **Status:** In Progress
 
 **Progress:**
 ```
 Phase 2: Adapter Framework & Codex Sync
-███░░░░░░░ 33% (1/3 plans complete)
+██████░░░░ 67% (2/3 plans complete)
 
-Overall Project: 1.33/7 phases complete
+Overall Project: 1.67/7 phases complete
 ```
 
 ---
@@ -28,18 +28,18 @@ Overall Project: 1.33/7 phases complete
 
 ### Velocity
 - **Phases completed:** 1/7 (Phase 2 in progress)
-- **Plans completed:** 5 (01-01, 01-02, 01-03, 01-04, 02-01)
+- **Plans completed:** 6 (01-01, 01-02, 01-03, 01-04, 02-01, 02-02)
 - **Average plan duration:** 2.7 min
 - **Estimated completion:** TBD after Phase 2
 
 ### Quality
-- **Verification passes:** 9 (Logger, Hashing, Paths, StateManager, SourceReader-basic, SourceReader-edges, Phase1-Integration, AdapterFramework, TOMLWriter)
+- **Verification passes:** 11 (Logger, Hashing, Paths, StateManager, SourceReader-basic, SourceReader-edges, Phase1-Integration, AdapterFramework, TOMLWriter, CodexRulesSkills, CodexAgentsCommands)
 - **Verification failures:** 0
 - **Pass rate:** 100%
 
 ### Scope
-- **Requirements delivered:** 14/44 (CORE-01 through CORE-05, SRC-01 through SRC-06, ADP-01 through ADP-03)
-- **v1 coverage:** 32%
+- **Requirements delivered:** 18/44 (CORE-01 through CORE-05, SRC-01 through SRC-06, ADP-01 through ADP-03, CDX-01 through CDX-04)
+- **v1 coverage:** 41%
 - **Deferred to v2:** 0
 
 ---
@@ -84,6 +84,10 @@ No deferred validations yet. All phases use proxy or sanity verification.
 21. **Registry validates at registration time** - AdapterRegistry checks issubclass at decorator application, not instantiation (02-01, 2026-02-13)
 22. **sync_rules receives list[dict]** - Allows adapters to merge multiple rule files instead of single concatenated string (02-01, 2026-02-13)
 23. **Env var references preserved in TOML** - ${VAR} syntax kept literal, target CLI expands at runtime not sync time (02-01, 2026-02-13)
+24. **Simple regex frontmatter parsing** - Use regex pattern matching for YAML frontmatter instead of PyYAML to maintain zero-dependency constraint (02-02, 2026-02-13)
+25. **Marker-based AGENTS.md management** - Use HTML comment markers to delineate synced content in AGENTS.md, preserving user content outside markers (02-02, 2026-02-13)
+26. **Role extraction with fallback** - Extract agent instructions from <role> tags when present, use full body as fallback (02-02, 2026-02-13)
+27. **Agent/command directory prefixes** - Agents sync to .agents/skills/agent-{name}/, commands to cmd-{name}/ to prevent naming conflicts (02-02, 2026-02-13)
 
 ### Active Todos
 - [x] Complete Plan 01-01: Foundation utilities (Logger, hashing, paths)
@@ -91,34 +95,34 @@ No deferred validations yet. All phases use proxy or sanity verification.
 - [x] Complete Plan 01-03: Source Reader with .claude/ discovery
 - [x] Complete Plan 01-04: Integration verification and plugin manifest
 - [x] Complete Plan 02-01: Adapter framework infrastructure
-- [ ] Complete Plan 02-02: Codex adapter implementation
+- [x] Complete Plan 02-02: Codex adapter implementation
 - [ ] Complete Plan 02-03: Codex integration and verification
 
 ### Blockers
 None currently.
 
 ### Recent Changes
+- **2026-02-13:** Completed Plan 02-02 (Codex adapter) - CodexAdapter with rules→AGENTS.md (marker-based), skills→symlinks, agents/commands→SKILL.md conversion, regex frontmatter parsing (2 tasks, 2.6min)
 - **2026-02-13:** Completed Plan 02-01 (Adapter framework) - AdapterBase ABC with 6 sync methods, AdapterRegistry decorator-based, SyncResult dataclass, manual TOML writer with proper escaping (2 tasks, 3min)
 - **2026-02-13:** Completed Plan 01-04 (Plugin manifest & integration) - plugin.json created, HarnessSync rebranding, 9-step integration test validates entire Phase 1 pipeline (2 tasks, 1.6min)
 - **2026-02-13:** Completed Plan 01-03 (Source Reader) - 6 discovery methods (rules, skills, agents, commands, mcp, settings), plugin cache support, edge case handling (2 tasks, 4.3min)
 - **2026-02-13:** Completed Plan 01-02 (State Manager) - Atomic writes, drift detection, per-target tracking (1 task, 1.7min)
-- **2026-02-13:** Completed Plan 01-01 (Foundation utilities) - Logger, hashing, paths (3 tasks, 2.5min)
 
 ---
 
 ## Session Continuity
 
 ### What Just Happened
-Completed Plan 02-01 (Adapter framework infrastructure). Created AdapterBase ABC with 6 abstract sync methods (sync_rules, sync_skills, sync_agents, sync_commands, sync_mcp, sync_settings) plus concrete sync_all orchestrator. Implemented AdapterRegistry with decorator-based registration validating inheritance at decoration time. Built SyncResult dataclass with merge(), total, and status properties. Created manual TOML writer utilities with correct escaping order (backslash first), format_mcp_server_toml for Codex config.toml, and write_toml_atomic for safe writes. All verification passed (8 adapter tests + 7 TOML tests). Tasks committed (a4a1f54, e08a4cc).
+Completed Plan 02-02 (Codex adapter implementation). Implemented CodexAdapter class with 4 of 6 sync methods: sync_rules (writes AGENTS.md with marker-based managed sections, preserves user content), sync_skills (creates symlinks to .agents/skills/), sync_agents (converts Claude Code agents to SKILL.md format with frontmatter parsing and role extraction), sync_commands (converts commands to SKILL.md). Added helper methods for regex-based frontmatter parsing (no PyYAML), role extraction from <role> tags, and SKILL.md formatting. All verification passed (6 rules/skills tests + 7 agents/commands tests). Tasks committed (2fe11c7, f22b97b).
 
 ### What's Next
-Continue Phase 2 with Plan 02-02 (Codex adapter implementation). Implement CodexAdapter class using AdapterBase interface and TOML writer utilities to sync Claude Code config to Codex CLI format (AGENTS.md, config.toml, skills/).
+Continue Phase 2 with Plan 02-03 (Codex integration and verification). Implement remaining sync_mcp and sync_settings methods, create end-to-end integration test validating full sync pipeline.
 
 ### Context for Next Session
-Phase 2 adapter framework complete (Plan 02-01). AdapterBase provides interface contract, AdapterRegistry ready for CodexAdapter registration, SyncResult available for tracking, TOML writer utilities ready for config.toml generation. Zero external dependencies maintained. Ready for Codex adapter implementation (Plan 02-02).
+CodexAdapter 4/6 sync methods complete (rules, skills, agents, commands). sync_mcp and sync_settings stub methods ready for implementation. TOML writer utilities available from Plan 02-01 for config.toml generation. Zero dependencies maintained through regex-based frontmatter parsing. Ready for MCP/settings sync and integration testing (Plan 02-03).
 
 ---
 
 *Last updated: 2026-02-13*
-*Session: Plan 02-01 execution*
-*Stopped at: Completed 02-01-PLAN.md*
+*Session: Plan 02-02 execution*
+*Stopped at: Completed 02-02-PLAN.md*
