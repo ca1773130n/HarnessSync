@@ -19,6 +19,13 @@ from .base import AdapterBase
 from .registry import AdapterRegistry
 from .result import SyncResult
 from src.utils.paths import create_symlink_with_fallback, ensure_dir
+from src.utils.toml_writer import (
+    format_mcp_servers_toml,
+    format_mcp_server_toml,
+    write_toml_atomic,
+    escape_toml_string,
+    read_toml_safe,
+)
 
 
 # Codex CLI constants
@@ -26,6 +33,7 @@ HARNESSSYNC_MARKER = "<!-- Managed by HarnessSync -->"
 HARNESSSYNC_MARKER_END = "<!-- End HarnessSync managed content -->"
 AGENTS_MD = "AGENTS.md"
 SKILLS_DIR = ".agents/skills"
+CONFIG_TOML = "codex.toml"
 
 
 @AdapterRegistry.register("codex")
@@ -262,28 +270,139 @@ class CodexAdapter(AdapterBase):
     def sync_mcp(self, mcp_servers: dict[str, dict]) -> SyncResult:
         """Translate MCP server configs to Codex config.toml.
 
-        Placeholder implementation - will be completed in Plan 02-03.
+        Converts Claude Code MCP server JSON configs to Codex TOML format.
+        Preserves environment variable references (${VAR}) as literal strings.
+        Merges with existing config.toml preserving non-MCP settings.
 
         Args:
             mcp_servers: Dict mapping server name to server config dict
 
         Returns:
-            Empty SyncResult (stub)
+            SyncResult with synced count and config.toml path
         """
-        return SyncResult()
+        if not mcp_servers:
+            return SyncResult()
+
+        result = SyncResult()
+
+        try:
+            # Config target path
+            config_path = self.project_dir / ".codex" / CONFIG_TOML
+
+            # Read existing config to preserve settings and merge MCP servers
+            existing_config = self._read_existing_config()
+
+            # Merge MCP servers (new servers override existing with same name)
+            merged_mcp_servers = existing_config.get('mcp_servers', {}).copy()
+            merged_mcp_servers.update(mcp_servers)
+
+            # Generate MCP servers TOML section from merged servers
+            mcp_toml = format_mcp_servers_toml(merged_mcp_servers)
+
+            # Build settings section from existing config
+            settings_lines = []
+            for key in ['sandbox_mode', 'approval_policy']:
+                if key in existing_config:
+                    val = existing_config[key]
+                    if isinstance(val, str):
+                        settings_lines.append(f'{key} = "{val}"')
+                    elif isinstance(val, bool):
+                        settings_lines.append(f'{key} = {"true" if val else "false"}')
+                    else:
+                        settings_lines.append(f'{key} = {val}')
+
+            settings_section = '\n'.join(settings_lines) if settings_lines else ''
+
+            # Build complete config.toml
+            final_toml = self._build_config_toml(settings_section, mcp_toml)
+
+            # Write atomically
+            write_toml_atomic(config_path, final_toml)
+
+            # Track results
+            result.synced = len(mcp_servers)
+            result.synced_files.append(str(config_path))
+
+        except Exception as e:
+            result.failed = len(mcp_servers)
+            result.failed_files.append(f"MCP servers: {str(e)}")
+
+        return result
 
     def sync_settings(self, settings: dict) -> SyncResult:
         """Map Claude Code settings to Codex configuration.
 
-        Placeholder implementation - will be completed in Plan 02-03.
+        Maps Claude Code permission settings to Codex sandbox_mode and approval_policy.
+        Uses conservative defaults: any denied tool -> read-only sandbox.
+        Never auto-maps to danger-full-access.
 
         Args:
             settings: Settings dict from Claude Code configuration
 
         Returns:
-            Empty SyncResult (stub)
+            SyncResult with synced count
         """
-        return SyncResult()
+        if not settings:
+            return SyncResult()
+
+        result = SyncResult()
+
+        try:
+            # Config target path
+            config_path = self.project_dir / ".codex" / CONFIG_TOML
+
+            # Extract permissions
+            permissions = settings.get('permissions', {})
+            allow_list = permissions.get('allow', [])
+            deny_list = permissions.get('deny', [])
+
+            # Determine sandbox_mode (conservative mapping)
+            sandbox_mode = 'workspace-write'  # Default
+            if deny_list:
+                # ANY denied tool -> most restrictive
+                sandbox_mode = 'read-only'
+            elif allow_list and any(tool in allow_list for tool in ['Write', 'Edit', 'Bash']):
+                sandbox_mode = 'workspace-write'
+
+            # Determine approval_policy
+            approval_mode = settings.get('approval_mode', 'ask')
+            if approval_mode == 'auto':
+                approval_policy = 'on-failure'
+            else:
+                approval_policy = 'on-request'  # Conservative default
+
+            # Read existing config to preserve MCP servers
+            existing_config = self._read_existing_config()
+
+            # Build settings section
+            settings_lines = [
+                f'sandbox_mode = "{sandbox_mode}"',
+                f'approval_policy = "{approval_policy}"',
+            ]
+            settings_section = '\n'.join(settings_lines)
+
+            # Preserve MCP servers section if present
+            mcp_section = ''
+            if 'mcp_servers' in existing_config:
+                # Re-generate MCP section from existing config
+                mcp_section = format_mcp_servers_toml(existing_config['mcp_servers'])
+
+            # Build complete config.toml
+            final_toml = self._build_config_toml(settings_section, mcp_section)
+
+            # Write atomically
+            write_toml_atomic(config_path, final_toml)
+
+            # Track results
+            result.synced = 1
+            result.adapted = 1
+            result.synced_files.append(str(config_path))
+
+        except Exception as e:
+            result.failed = 1
+            result.failed_files.append(f"Settings: {str(e)}")
+
+        return result
 
     # Helper methods for parsing and formatting
 
@@ -444,3 +563,39 @@ description: {description}
         else:
             # No markers - append managed section
             return f"{existing.rstrip()}\n\n{managed}"
+
+    # Helper methods for config.toml management
+
+    def _read_existing_config(self) -> dict:
+        """Read existing config.toml if it exists.
+
+        Returns:
+            Parsed TOML dict or empty dict if file missing or parse error
+        """
+        config_path = self.project_dir / ".codex" / CONFIG_TOML
+        return read_toml_safe(config_path)
+
+    def _build_config_toml(self, settings_section: str, mcp_section: str) -> str:
+        """Combine settings and MCP sections into complete config.toml.
+
+        Args:
+            settings_section: Settings TOML content (sandbox_mode, approval_policy)
+            mcp_section: MCP servers TOML content
+
+        Returns:
+            Complete config.toml string with header comment
+        """
+        lines = [
+            '# Codex configuration managed by HarnessSync',
+            '# Do not edit MCP servers section manually',
+            '',
+        ]
+
+        if settings_section:
+            lines.append(settings_section)
+            lines.append('')
+
+        if mcp_section:
+            lines.append(mcp_section)
+
+        return '\n'.join(lines)

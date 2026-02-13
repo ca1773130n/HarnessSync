@@ -1,13 +1,18 @@
-"""Manual TOML string formatting utilities.
+"""Manual TOML string formatting and parsing utilities.
 
-This module provides manual TOML generation since Python's tomllib is read-only.
-We use f-strings and templates with proper escaping per TOML v1.0.0 spec.
+This module provides manual TOML generation and minimal parsing for Python 3.10 compatibility.
 
-Why manual generation:
-- tomllib (stdlib 3.11+) is read-only - no write support
-- Zero-dependency constraint prevents using tomli-w or tomlkit
-- TOML format is simple enough for manual generation
-- Full control over formatting and escaping
+Why manual implementation:
+- tomllib (stdlib 3.11+) is not available in Python 3.10
+- Zero-dependency constraint prevents using third-party TOML libraries
+- TOML format is simple enough for manual implementation
+- Only need to parse the config.toml we generate (not arbitrary TOML)
+
+TOML parsing scope:
+- Basic key-value pairs (strings, numbers, booleans, arrays)
+- Tables [table] and nested tables [table.subtable]
+- Sufficient for reading Codex config.toml we generate
+- Does NOT support multi-line strings, inline tables, etc.
 
 Escaping rules (TOML v1.0.0):
 - Backslash must be escaped FIRST: \ -> \\
@@ -24,6 +29,7 @@ Atomic writes:
 """
 
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -301,3 +307,168 @@ def write_toml_atomic(path: Path, content: str) -> None:
         if temp_path.exists():
             temp_path.unlink()
         raise
+
+
+def parse_toml_simple(content: str) -> dict:
+    """Parse simple TOML content into a dict.
+
+    Minimal TOML parser for Python 3.10 compatibility. Only supports the
+    subset of TOML we generate (basic types, tables, nested tables).
+
+    Args:
+        content: TOML content string
+
+    Returns:
+        Parsed dict
+
+    Raises:
+        ValueError: If TOML is malformed
+
+    Note:
+        This is NOT a full TOML parser. It only handles:
+        - Basic key-value pairs (strings, numbers, booleans, arrays)
+        - Tables [table] and nested tables [table.subtable]
+        - Comments starting with #
+        Does NOT support: multi-line strings, inline tables, dates, etc.
+    """
+    result = {}
+    current_table = result
+    table_path = []
+
+    for line in content.split('\n'):
+        # Strip whitespace and comments
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+
+        # Table headers [table] or [table.subtable]
+        if line.startswith('[') and line.endswith(']'):
+            table_name = line[1:-1]
+
+            # Handle quoted table names like [mcp_servers."name"]
+            # Split by dots, preserving quoted segments
+            parts = []
+            current_part = ''
+            in_quotes = False
+            for char in table_name:
+                if char == '"':
+                    in_quotes = not in_quotes
+                elif char == '.' and not in_quotes:
+                    if current_part:
+                        parts.append(current_part.strip('"'))
+                    current_part = ''
+                else:
+                    current_part += char
+            if current_part:
+                parts.append(current_part.strip('"'))
+
+            # Navigate to nested table location
+            current_table = result
+            table_path = parts
+            for part in parts[:-1]:
+                if part not in current_table:
+                    current_table[part] = {}
+                current_table = current_table[part]
+
+            # Create final table
+            final_key = parts[-1]
+            if final_key not in current_table:
+                current_table[final_key] = {}
+            current_table = current_table[final_key]
+            continue
+
+        # Key-value pairs: key = value
+        if '=' in line:
+            key, val = line.split('=', 1)
+            key = key.strip().strip('"')
+            val = val.strip()
+
+            # Parse value
+            parsed_val = _parse_toml_value(val)
+            current_table[key] = parsed_val
+
+    return result
+
+
+def _parse_toml_value(val: str):
+    """Parse a TOML value string to Python type.
+
+    Args:
+        val: TOML value string
+
+    Returns:
+        Parsed Python value (str, int, float, bool, list)
+    """
+    val = val.strip()
+
+    # Boolean
+    if val == 'true':
+        return True
+    if val == 'false':
+        return False
+
+    # Array
+    if val.startswith('[') and val.endswith(']'):
+        # Simple array parsing
+        inner = val[1:-1].strip()
+        if not inner:
+            return []
+        elements = []
+        current = ''
+        in_quotes = False
+        for char in inner:
+            if char == '"':
+                in_quotes = not in_quotes
+                current += char
+            elif char == ',' and not in_quotes:
+                if current.strip():
+                    elements.append(_parse_toml_value(current.strip()))
+                current = ''
+            else:
+                current += char
+        if current.strip():
+            elements.append(_parse_toml_value(current.strip()))
+        return elements
+
+    # String
+    if val.startswith('"') and val.endswith('"'):
+        # Unescape TOML string
+        s = val[1:-1]
+        s = s.replace('\\\\', '\x00')  # Temp placeholder
+        s = s.replace('\\"', '"')
+        s = s.replace('\\n', '\n')
+        s = s.replace('\\r', '\r')
+        s = s.replace('\\t', '\t')
+        s = s.replace('\x00', '\\')  # Restore backslash
+        return s
+
+    # Number (int or float)
+    try:
+        if '.' in val:
+            return float(val)
+        return int(val)
+    except ValueError:
+        pass
+
+    # Fallback: return as string
+    return val
+
+
+def read_toml_safe(path: Path) -> dict:
+    """Read and parse TOML file, returning empty dict on error.
+
+    Args:
+        path: Path to TOML file
+
+    Returns:
+        Parsed dict or empty dict if file doesn't exist or parse fails
+    """
+    if not path.exists():
+        return {}
+
+    try:
+        content = path.read_text(encoding='utf-8')
+        return parse_toml_simple(content)
+    except (OSError, ValueError, UnicodeDecodeError):
+        # Graceful degradation
+        return {}
