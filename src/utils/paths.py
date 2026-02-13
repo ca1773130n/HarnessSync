@@ -6,9 +6,11 @@ fallback to junction points (Windows dirs) or file copies (last resort).
 """
 
 import json
+import os
 import platform
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -172,3 +174,50 @@ def write_json_safe(file_path: Path, data: dict) -> None:
             f.write('\n')  # Trailing newline
     except (OSError, TypeError) as e:
         print(f"Warning: Failed to write {file_path}: {e}")
+
+
+def write_json_atomic(path: Path, data: dict) -> None:
+    """Write JSON content atomically using tempfile + os.replace.
+
+    Uses the atomic write pattern to prevent corrupted JSON files on
+    interrupted writes. Follows the same pattern as write_toml_atomic.
+
+    Args:
+        path: Target file path
+        data: Dict to write as JSON
+
+    Raises:
+        OSError: If write or rename fails
+        TypeError: If data is not JSON serializable
+    """
+    # Ensure parent directory exists
+    ensure_dir(path.parent)
+
+    # Create temp file in same directory for atomic rename
+    temp_fd = tempfile.NamedTemporaryFile(
+        mode='w',
+        dir=path.parent,
+        suffix='.tmp',
+        delete=False,
+        encoding='utf-8'
+    )
+    temp_path = Path(temp_fd.name)
+
+    try:
+        # Write content
+        json.dump(data, temp_fd, indent=2, ensure_ascii=False)
+        temp_fd.write('\n')  # Trailing newline
+        temp_fd.flush()
+        os.fsync(temp_fd.fileno())
+        temp_fd.close()
+
+        # Atomic rename
+        os.replace(str(temp_path), str(path))
+
+    except Exception:
+        # Cleanup on failure
+        if not temp_fd.closed:
+            temp_fd.close()
+        if temp_path.exists():
+            temp_path.unlink()
+        raise
