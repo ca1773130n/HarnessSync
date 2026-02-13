@@ -96,6 +96,12 @@ class SourceReader:
         Returns:
             Dictionary mapping skill_name -> path_to_skill_dir
             Includes skills from ~/.claude/skills/, plugin cache, and project .claude/skills/
+
+        Note:
+            - Symlinked skill directories are recorded as-is (not followed)
+            - Plugin cache supports both dict and list formats in installed_plugins.json
+            - Only user-scope plugins are included in user-scope discovery
+            - Handles permission errors and invalid paths gracefully
         """
         skills = {}
 
@@ -161,6 +167,11 @@ class SourceReader:
         Returns:
             Dictionary mapping agent_name -> path_to_md_file
             Includes agents from ~/.claude/agents/ and project .claude/agents/
+
+        Note:
+            - Hidden files (starting with .) are filtered out
+            - Only .md files are included
+            - Non-file entries (directories) are skipped
         """
         agents = {}
 
@@ -193,6 +204,11 @@ class SourceReader:
         Returns:
             Dictionary mapping command_name -> path_to_md_file
             Includes commands from ~/.claude/commands/ and project .claude/commands/
+
+        Note:
+            - Hidden files (starting with .) are filtered out
+            - Only .md files are included
+            - Non-file entries (directories) are skipped
         """
         commands = {}
 
@@ -226,6 +242,11 @@ class SourceReader:
             Dictionary mapping server_name -> server_config_dict
             Merges configs from ~/.mcp.json, ~/.claude/.mcp.json, and project .mcp.json
             Later configs override earlier ones.
+
+        Note:
+            - Malformed entries (missing command/url) are filtered out
+            - Supports both stdio (command/args) and url-based servers
+            - Invalid JSON files are handled gracefully (returns empty dict)
         """
         servers = {}
 
@@ -269,6 +290,11 @@ class SourceReader:
             Merged settings dict
             User settings + project settings + project local settings
             Later files override earlier ones.
+
+        Note:
+            - Non-dict settings files are skipped (returns empty dict for that file)
+            - settings.local.json has highest priority (overrides base settings)
+            - Invalid JSON handled gracefully via read_json_safe
         """
         settings = {}
 
@@ -319,6 +345,14 @@ class SourceReader:
 
         Returns:
             Dictionary mapping config_type -> list of Path objects
+            Keys: rules, skills, agents, commands, mcp_servers, settings
+            Values: List of Path objects that were successfully found
+
+        Note:
+            - For skills: returns skill directory paths (not SKILL.md files)
+            - For agents/commands: returns .md file paths
+            - For rules/mcp/settings: returns source file paths
+            - NEW method added in Task 2 for state manager integration
         """
         paths = {
             "rules": [],
