@@ -298,30 +298,140 @@ class GeminiAdapter(AdapterBase):
     def sync_mcp(self, mcp_servers: dict[str, dict]) -> SyncResult:
         """Translate MCP server configs to Gemini settings.json.
 
-        Placeholder implementation for Task 2.
+        Converts Claude Code MCP server JSON configs to Gemini settings.json format.
+        Supports stdio (command+args) and URL (direct URL config) transports.
+        Preserves environment variable references (${VAR}) as literal strings.
+        Merges with existing settings.json preserving other settings.
 
         Args:
             mcp_servers: Dict mapping server name to server config dict
 
         Returns:
-            SyncResult (placeholder)
+            SyncResult with synced count and settings.json path
         """
-        # Deferred to Task 2
-        return SyncResult()
+        if not mcp_servers:
+            return SyncResult()
+
+        result = SyncResult()
+
+        try:
+            # Read existing settings.json
+            existing_settings = read_json_safe(self.settings_path)
+
+            # Initialize mcpServers section
+            existing_settings.setdefault('mcpServers', {})
+
+            # Translate each MCP server
+            for server_name, config in mcp_servers.items():
+                server_config = {}
+
+                # Stdio transport (has "command" key)
+                if 'command' in config:
+                    server_config['command'] = config['command']
+                    if 'args' in config:
+                        server_config['args'] = config.get('args', [])
+                    if 'env' in config:
+                        server_config['env'] = config['env']
+                    if 'timeout' in config:
+                        server_config['timeout'] = config['timeout']
+
+                # URL transport (has "url" key)
+                elif 'url' in config:
+                    url = config['url']
+                    # Detect SSE vs HTTP based on URL
+                    if url.endswith('/sse') or 'sse' in url.lower():
+                        server_config['url'] = url
+                    else:
+                        # Use httpUrl for plain HTTP/HTTPS
+                        server_config['httpUrl'] = url
+
+                    # Include headers if present
+                    if 'headers' in config:
+                        server_config['headers'] = config['headers']
+
+                else:
+                    # Skip servers without command or url
+                    continue
+
+                # Add to mcpServers (override if exists)
+                existing_settings['mcpServers'][server_name] = server_config
+                result.synced += 1
+
+            # Write atomically
+            write_json_atomic(self.settings_path, existing_settings)
+
+            result.synced_files.append(str(self.settings_path))
+
+        except Exception as e:
+            result.failed = len(mcp_servers)
+            result.failed_files.append(f"MCP servers: {str(e)}")
+
+        return result
 
     def sync_settings(self, settings: dict) -> SyncResult:
         """Map Claude Code settings to Gemini configuration.
 
-        Placeholder implementation for Task 2.
+        Maps Claude Code permission settings to Gemini tools configuration.
+        Uses conservative defaults: deny list -> blockedTools, allow list -> allowedTools.
+        NEVER auto-enables yolo mode (security constraint).
 
         Args:
             settings: Settings dict from Claude Code configuration
 
         Returns:
-            SyncResult (placeholder)
+            SyncResult with synced count and warning if auto-approval detected
         """
-        # Deferred to Task 2
-        return SyncResult()
+        if not settings:
+            return SyncResult()
+
+        result = SyncResult()
+
+        try:
+            # Read existing settings.json to preserve mcpServers
+            existing_settings = read_json_safe(self.settings_path)
+
+            # Extract permissions
+            permissions = settings.get('permissions', {})
+            allow_list = permissions.get('allow', [])
+            deny_list = permissions.get('deny', [])
+
+            # Conservative mapping rules
+            tools_config = {}
+
+            if deny_list:
+                # Deny list takes precedence
+                tools_config['blockedTools'] = deny_list
+                # Add warnings for blocked tools
+                for tool in deny_list:
+                    result.skipped_files.append(f"{tool}: blocked (Claude Code deny list)")
+
+            elif allow_list:
+                # Allow list only if no deny list
+                tools_config['allowedTools'] = allow_list
+
+            # Add tools config to settings if any rules defined
+            if tools_config:
+                existing_settings['tools'] = tools_config
+
+            # Check for auto-approval mode and warn (NEVER enable yolo)
+            approval_mode = settings.get('approval_mode', 'ask')
+            if approval_mode == 'auto':
+                result.skipped_files.append(
+                    "yolo mode: not enabled (conservative default, Claude Code had auto-approval)"
+                )
+
+            # Write atomically
+            write_json_atomic(self.settings_path, existing_settings)
+
+            result.synced = 1
+            result.adapted = 1
+            result.synced_files.append(str(self.settings_path))
+
+        except Exception as e:
+            result.failed = 1
+            result.failed_files.append(f"Settings: {str(e)}")
+
+        return result
 
     # Helper methods for parsing and formatting
 
