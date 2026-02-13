@@ -163,8 +163,8 @@ Plans:
 
 | Phase | Status | Plans | Verification | Progress |
 |-------|--------|-------|--------------|----------|
-| 1 - Foundation & State Management | Planning | 0/4 | sanity | ░░░░░░░░░░ 0% |
-| 2 - Adapter Framework & Codex Sync | Planning | 0/3 | proxy | ░░░░░░░░░░ 0% |
+| 1 - Foundation & State Management | Complete | 4/4 | sanity | ██████████ 100% |
+| 2 - Adapter Framework & Codex Sync | Complete | 3/3 | proxy | ██████████ 100% |
 | 3 - Gemini & OpenCode Adapters | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
 | 4 - Plugin Interface | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
 | 5 - Safety & Validation | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
@@ -176,4 +176,5 @@ Plans:
 *Roadmap created: 2026-02-13*
 *Phase 1 planned: 2026-02-13*
 *Phase 2 planned: 2026-02-13*
-*Next: `/grd:execute-phase 2`*
+*Phase 2 complete: 2026-02-13*
+*Next: `/grd:plan-phase 3`*
