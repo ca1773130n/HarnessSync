@@ -91,8 +91,59 @@
 
 ## Traceability
 
-<!-- Updated by roadmapper -->
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| CORE-01 | Phase 1 | Pending |
+| CORE-02 | Phase 1 | Pending |
+| CORE-03 | Phase 1 | Pending |
+| CORE-04 | Phase 1 | Pending |
+| CORE-05 | Phase 1 | Pending |
+| SRC-01 | Phase 1 | Pending |
+| SRC-02 | Phase 1 | Pending |
+| SRC-03 | Phase 1 | Pending |
+| SRC-04 | Phase 1 | Pending |
+| SRC-05 | Phase 1 | Pending |
+| SRC-06 | Phase 1 | Pending |
+| ADP-01 | Phase 2 | Pending |
+| ADP-02 | Phase 2 | Pending |
+| ADP-03 | Phase 2 | Pending |
+| CDX-01 | Phase 2 | Pending |
+| CDX-02 | Phase 2 | Pending |
+| CDX-03 | Phase 2 | Pending |
+| CDX-04 | Phase 2 | Pending |
+| CDX-05 | Phase 2 | Pending |
+| CDX-06 | Phase 2 | Pending |
+| GMN-01 | Phase 3 | Pending |
+| GMN-02 | Phase 3 | Pending |
+| GMN-03 | Phase 3 | Pending |
+| GMN-04 | Phase 3 | Pending |
+| GMN-05 | Phase 3 | Pending |
+| GMN-06 | Phase 3 | Pending |
+| OC-01 | Phase 3 | Pending |
+| OC-02 | Phase 3 | Pending |
+| OC-03 | Phase 3 | Pending |
+| OC-04 | Phase 3 | Pending |
+| OC-05 | Phase 3 | Pending |
+| OC-06 | Phase 3 | Pending |
+| PLG-01 | Phase 4 | Pending |
+| PLG-02 | Phase 4 | Pending |
+| PLG-03 | Phase 4 | Pending |
+| PLG-04 | Phase 4 | Pending |
+| PLG-05 | Phase 4 | Pending |
+| SAF-01 | Phase 5 | Pending |
+| SAF-02 | Phase 5 | Pending |
+| SAF-03 | Phase 5 | Pending |
+| SAF-04 | Phase 5 | Pending |
+| SAF-05 | Phase 5 | Pending |
+| MCP-01 | Phase 6 | Pending |
+| MCP-02 | Phase 6 | Pending |
+| PKG-01 | Phase 7 | Pending |
+| PKG-02 | Phase 7 | Pending |
+| PKG-03 | Phase 7 | Pending |
+
+**Coverage:** 44/44 v1 requirements mapped (100%)
 
 ---
 *Requirements defined: 2026-02-13*
 *Source: Research FEATURES.md, SUMMARY.md, PROJECT.md*
+*Traceability updated: 2026-02-13*
