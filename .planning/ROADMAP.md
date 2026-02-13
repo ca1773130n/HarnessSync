@@ -18,6 +18,14 @@ Transform the proven cc2all sync script into a production-ready Claude Code plug
 
 **Requirements:** CORE-01, CORE-02, CORE-03, CORE-04, CORE-05, SRC-01, SRC-02, SRC-03, SRC-04, SRC-05, SRC-06
 
+**Plans:** 4 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Core utilities: Logger, SHA256 hashing, OS-aware symlink with fallback chain
+- [ ] 01-02-PLAN.md — State manager with atomic writes, per-target tracking, drift detection
+- [ ] 01-03-PLAN.md — Source reader discovering all 6 Claude Code config types
+- [ ] 01-04-PLAN.md — Plugin manifest, cc2all rename, integration smoke test
+
 **Success Criteria:**
 1. State manager tracks sync timestamps and file hashes (SHA256) for all target configs in JSON format
 2. OS-aware symlink creation succeeds on macOS/Linux (native) and Windows (junction fallback, copy with marker as last resort)
@@ -148,7 +156,7 @@ Transform the proven cc2all sync script into a production-ready Claude Code plug
 
 | Phase | Status | Plans | Verification | Progress |
 |-------|--------|-------|--------------|----------|
-| 1 - Foundation & State Management | Pending | 0/TBD | sanity | ░░░░░░░░░░ 0% |
+| 1 - Foundation & State Management | Planning | 0/4 | sanity | ░░░░░░░░░░ 0% |
 | 2 - Adapter Framework & Codex Sync | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
 | 3 - Gemini & OpenCode Adapters | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
 | 4 - Plugin Interface | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
@@ -159,4 +167,5 @@ Transform the proven cc2all sync script into a production-ready Claude Code plug
 ---
 
 *Roadmap created: 2026-02-13*
-*Next: `/grd:plan-phase 1`*
+*Phase 1 planned: 2026-02-13*
+*Next: `/grd:execute-phase 1`*
