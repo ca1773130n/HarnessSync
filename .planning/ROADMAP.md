@@ -72,6 +72,12 @@ Plans:
 
 **Requirements:** GMN-01, GMN-02, GMN-03, GMN-04, GMN-05, GMN-06, OC-01, OC-02, OC-03, OC-04, OC-05, OC-06
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Gemini adapter: GEMINI.md inline content (rules, skills, agents, commands), settings.json MCP translation, permission mapping, write_json_atomic utility
+- [ ] 03-02-PLAN.md — OpenCode adapter: symlink-based sync (skills, agents, commands), opencode.json MCP translation, permission mapping, 3-adapter integration verification
+
 **Success Criteria:**
 1. Gemini adapter inlines skills content into GEMINI.md (strips YAML frontmatter, adds section headers) since Gemini cannot use symlinks
 2. Gemini adapter translates MCP servers to settings.json mcpServers format with npx mcp-remote wrapper for URL types
@@ -165,7 +171,7 @@ Plans:
 |-------|--------|-------|--------------|----------|
 | 1 - Foundation & State Management | Complete | 4/4 | sanity | ██████████ 100% |
 | 2 - Adapter Framework & Codex Sync | Complete | 3/3 | proxy | ██████████ 100% |
-| 3 - Gemini & OpenCode Adapters | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
+| 3 - Gemini & OpenCode Adapters | Planned | 0/2 | proxy | ░░░░░░░░░░ 0% |
 | 4 - Plugin Interface | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
 | 5 - Safety & Validation | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
 | 6 - MCP Server Integration | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
@@ -177,4 +183,5 @@ Plans:
 *Phase 1 planned: 2026-02-13*
 *Phase 2 planned: 2026-02-13*
 *Phase 2 complete: 2026-02-13*
-*Next: `/grd:plan-phase 3`*
+*Phase 3 planned: 2026-02-13*
+*Next: `/grd:execute-phase 3`*
