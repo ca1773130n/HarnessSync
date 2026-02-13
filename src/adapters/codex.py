@@ -143,28 +143,121 @@ class CodexAdapter(AdapterBase):
     def sync_agents(self, agents: dict[str, Path]) -> SyncResult:
         """Convert Claude Code agents to Codex SKILL.md format.
 
-        Placeholder implementation - will be completed in Task 2.
+        Extracts name/description from agent frontmatter, role instructions from <role>
+        tags, and writes to .agents/skills/agent-{name}/SKILL.md. Discards Claude-specific
+        fields like tools and color.
 
         Args:
             agents: Dict mapping agent name to agent .md file path
 
         Returns:
-            Empty SyncResult (stub)
+            SyncResult tracking synced/skipped/failed/adapted agents
         """
-        return SyncResult()
+        if not agents:
+            return SyncResult()
+
+        result = SyncResult()
+
+        for agent_name, agent_path in agents.items():
+            try:
+                # Read agent file
+                if not agent_path.exists():
+                    result.failed += 1
+                    result.failed_files.append(f"{agent_name}: file not found at {agent_path}")
+                    continue
+
+                content = agent_path.read_text(encoding='utf-8')
+
+                # Parse frontmatter and extract role
+                frontmatter, body = self._parse_frontmatter(content)
+                name = frontmatter.get('name', agent_name)
+                description = frontmatter.get('description', '')
+                instructions = self._extract_role_section(body)
+
+                # Skip if no content
+                if not instructions.strip():
+                    result.skipped += 1
+                    result.skipped_files.append(f"{agent_name}: no role content")
+                    continue
+
+                # Format as SKILL.md
+                skill_content = self._format_skill_md(name, description, instructions)
+
+                # Write to .agents/skills/agent-{name}/SKILL.md
+                skill_dir = self.skills_dir / f"agent-{agent_name}"
+                ensure_dir(skill_dir)
+                skill_md = skill_dir / "SKILL.md"
+                skill_md.write_text(skill_content, encoding='utf-8')
+
+                result.synced += 1
+                result.adapted += 1
+                result.synced_files.append(str(skill_md))
+
+            except Exception as e:
+                result.failed += 1
+                result.failed_files.append(f"{agent_name}: {str(e)}")
+
+        return result
 
     def sync_commands(self, commands: dict[str, Path]) -> SyncResult:
         """Convert Claude Code commands to Codex SKILL.md format.
 
-        Placeholder implementation - will be completed in Task 2.
+        Similar to sync_agents but writes to .agents/skills/cmd-{name}/SKILL.md.
+        Commands use full content as instructions (no <role> extraction).
 
         Args:
             commands: Dict mapping command name to command .md file path
 
         Returns:
-            Empty SyncResult (stub)
+            SyncResult tracking synced/skipped/failed/adapted commands
         """
-        return SyncResult()
+        if not commands:
+            return SyncResult()
+
+        result = SyncResult()
+
+        for cmd_name, cmd_path in commands.items():
+            try:
+                # Read command file
+                if not cmd_path.exists():
+                    result.failed += 1
+                    result.failed_files.append(f"{cmd_name}: file not found at {cmd_path}")
+                    continue
+
+                content = cmd_path.read_text(encoding='utf-8')
+
+                # Parse frontmatter
+                frontmatter, body = self._parse_frontmatter(content)
+                name = frontmatter.get('name', cmd_name)
+                description = frontmatter.get('description', f"Claude Code command: {cmd_name}")
+
+                # For commands, use full body as instructions (no <role> extraction)
+                instructions = body if body.strip() else content
+
+                # Skip if no content
+                if not instructions.strip():
+                    result.skipped += 1
+                    result.skipped_files.append(f"{cmd_name}: no content")
+                    continue
+
+                # Format as SKILL.md
+                skill_content = self._format_skill_md(name, description, instructions)
+
+                # Write to .agents/skills/cmd-{name}/SKILL.md
+                skill_dir = self.skills_dir / f"cmd-{cmd_name}"
+                ensure_dir(skill_dir)
+                skill_md = skill_dir / "SKILL.md"
+                skill_md.write_text(skill_content, encoding='utf-8')
+
+                result.synced += 1
+                result.adapted += 1
+                result.synced_files.append(str(skill_md))
+
+            except Exception as e:
+                result.failed += 1
+                result.failed_files.append(f"{cmd_name}: {str(e)}")
+
+        return result
 
     def sync_mcp(self, mcp_servers: dict[str, dict]) -> SyncResult:
         """Translate MCP server configs to Codex config.toml.
@@ -192,7 +285,94 @@ class CodexAdapter(AdapterBase):
         """
         return SyncResult()
 
-    # Helper methods
+    # Helper methods for parsing and formatting
+
+    def _parse_frontmatter(self, content: str) -> tuple[dict, str]:
+        """Extract YAML frontmatter from markdown content.
+
+        Parses simple key: value frontmatter between --- delimiters.
+        Does not use PyYAML - just simple string splitting for Claude Code format.
+
+        Args:
+            content: Markdown content with optional frontmatter
+
+        Returns:
+            Tuple of (frontmatter_dict, body_after_frontmatter)
+        """
+        # Check for frontmatter at start of file
+        if not content.startswith('---'):
+            return {}, content
+
+        # Find end of frontmatter
+        match = re.match(r'^---\n(.*?)\n---\n(.*)$', content, re.DOTALL)
+        if not match:
+            return {}, content
+
+        frontmatter_text = match.group(1)
+        body = match.group(2)
+
+        # Parse simple key: value lines
+        frontmatter = {}
+        for line in frontmatter_text.split('\n'):
+            if ':' in line:
+                key, val = line.split(':', 1)
+                key = key.strip()
+                val = val.strip()
+                # Remove quotes if present
+                if val.startswith('"') and val.endswith('"'):
+                    val = val[1:-1]
+                elif val.startswith("'") and val.endswith("'"):
+                    val = val[1:-1]
+                frontmatter[key] = val
+
+        return frontmatter, body
+
+    def _extract_role_section(self, body: str) -> str:
+        """Extract content between <role> tags.
+
+        Args:
+            body: Markdown body content
+
+        Returns:
+            Content from <role> section, or full body if no tags found
+        """
+        match = re.search(r'<role>(.*?)</role>', body, re.DOTALL | re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        return body.strip()
+
+    def _format_skill_md(self, name: str, description: str, instructions: str) -> str:
+        """Format Codex SKILL.md with frontmatter and sections.
+
+        Args:
+            name: Skill name
+            description: Skill description (used in frontmatter and trigger section)
+            instructions: Main skill instructions
+
+        Returns:
+            Formatted SKILL.md content
+        """
+        # Use name as description fallback
+        if not description:
+            description = name
+
+        # Build frontmatter
+        frontmatter = f"""---
+name: {name}
+description: {description}
+---"""
+
+        # Build skill body
+        body = f"""
+{instructions}
+
+## When to Use This Skill
+
+{description}"""
+
+        return frontmatter + body
+
+    # Helper methods for AGENTS.md
 
     def _read_agents_md(self) -> str:
         """Read existing AGENTS.md or return empty string.
