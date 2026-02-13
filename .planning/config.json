@@ -1,0 +1,18 @@
+{
+  "mode": "yolo",
+  "depth": "standard",
+  "parallelization": true,
+  "commit_docs": true,
+  "model_profile": "balanced",
+  "autonomous_mode": true,
+  "workflow": {
+    "research": true,
+    "plan_check": true,
+    "verifier": true
+  },
+  "research_gates": {
+    "verification_design": false,
+    "method_selection": false,
+    "baseline_review": false
+  }
+}
