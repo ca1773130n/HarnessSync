@@ -171,7 +171,7 @@ Plans:
 |-------|--------|-------|--------------|----------|
 | 1 - Foundation & State Management | Complete | 4/4 | sanity | ██████████ 100% |
 | 2 - Adapter Framework & Codex Sync | Complete | 3/3 | proxy | ██████████ 100% |
-| 3 - Gemini & OpenCode Adapters | Planned | 0/2 | proxy | ░░░░░░░░░░ 0% |
+| 3 - Gemini & OpenCode Adapters | Complete | 2/2 | proxy | ██████████ 100% |
 | 4 - Plugin Interface | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
 | 5 - Safety & Validation | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
 | 6 - MCP Server Integration | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
@@ -184,4 +184,5 @@ Plans:
 *Phase 2 planned: 2026-02-13*
 *Phase 2 complete: 2026-02-13*
 *Phase 3 planned: 2026-02-13*
-*Next: `/grd:execute-phase 3`*
+*Phase 3 complete: 2026-02-13*
+*Next: `/grd:plan-phase 4`*
