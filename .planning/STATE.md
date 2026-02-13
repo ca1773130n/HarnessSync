@@ -11,13 +11,13 @@
 ## Current Position
 
 **Phase:** 3
-**Plan:** 01 (completed)
+**Plan:** 02 (completed)
 **Status:** In Progress
 
 **Progress:**
 ```
 Phase 3: Gemini & OpenCode Adapters
-███░░░░░░░ 33% (1/3 plans complete)
+██████░░░░ 67% (2/3 plans complete)
 
 Overall Project: 2/7 phases complete
 ```
@@ -28,18 +28,18 @@ Overall Project: 2/7 phases complete
 
 ### Velocity
 - **Phases completed:** 2/7 (Phase 2 complete)
-- **Plans completed:** 8 (01-01, 01-02, 01-03, 01-04, 02-01, 02-02, 02-03, 03-01)
-- **Average plan duration:** 3.2 min
+- **Plans completed:** 9 (01-01, 01-02, 01-03, 01-04, 02-01, 02-02, 02-03, 03-01, 03-02)
+- **Average plan duration:** 5.8 min
 - **Estimated completion:** TBD after Phase 3
 
 ### Quality
-- **Verification passes:** 15 (Logger, Hashing, Paths, StateManager, SourceReader-basic, SourceReader-edges, Phase1-Integration, AdapterFramework, TOMLWriter, CodexRulesSkills, CodexAgentsCommands, CodexMCPSettings, Phase2-Integration, GeminiTask1, GeminiTask2)
+- **Verification passes:** 17 (Logger, Hashing, Paths, StateManager, SourceReader-basic, SourceReader-edges, Phase1-Integration, AdapterFramework, TOMLWriter, CodexRulesSkills, CodexAgentsCommands, CodexMCPSettings, Phase2-Integration, GeminiTask1, GeminiTask2, OpenCodeTask1, OpenCodeTask2)
 - **Verification failures:** 0
 - **Pass rate:** 100%
 
 ### Scope
-- **Requirements delivered:** 26/44 (CORE-01 through CORE-05, SRC-01 through SRC-06, ADP-01 through ADP-03, CDX-01 through CDX-06, GMN-01 through GMN-06)
-- **v1 coverage:** 59%
+- **Requirements delivered:** 32/44 (CORE-01 through CORE-05, SRC-01 through SRC-06, ADP-01 through ADP-03, CDX-01 through CDX-06, GMN-01 through GMN-06, OC-01 through OC-06)
+- **v1 coverage:** 73%
 - **Deferred to v2:** 0
 
 ---
@@ -94,6 +94,9 @@ No deferred validations yet. All phases use proxy or sanity verification.
 31. **Subsection markers for incremental syncing** - Use subsection markers (<!-- HarnessSync:Skills -->) within main managed block to allow incremental syncing without losing other sections (03-01, 2026-02-13)
 32. **Direct URL config for MCP** - Start with direct URL config (url/httpUrl fields) instead of npx mcp-remote wrapper for simplicity (03-01, 2026-02-13)
 33. **Never auto-enable yolo mode** - Conservative security default: even if Claude Code has auto-approval, Gemini yolo mode stays disabled, log warning instead (03-01, 2026-02-13)
+34. **Type-discriminated MCP format** - OpenCode uses type: 'local' for stdio servers and type: 'remote' for URL servers for clarity (03-02, 2026-02-13)
+35. **Command array format for OpenCode** - OpenCode expects command as array [cmd, arg1, arg2], combine command+args during translation (03-02, 2026-02-13)
+36. **Environment key for OpenCode** - OpenCode uses 'environment' not 'env' for environment variables (03-02, 2026-02-13)
 
 ### Active Todos
 - [x] Complete Plan 01-01: Foundation utilities (Logger, hashing, paths)
@@ -104,34 +107,34 @@ No deferred validations yet. All phases use proxy or sanity verification.
 - [x] Complete Plan 02-02: Codex adapter implementation
 - [x] Complete Plan 02-03: Codex integration and verification
 - [x] Complete Plan 03-01: Gemini adapter implementation
-- [ ] Complete Plan 03-02: OpenCode adapter implementation
+- [x] Complete Plan 03-02: OpenCode adapter implementation
 - [ ] Complete Plan 03-03: Phase 3 integration verification
 
 ### Blockers
 None currently.
 
 ### Recent Changes
+- **2026-02-13:** Completed Plan 03-02 (OpenCode adapter & 3-adapter integration) - OpenCodeAdapter with all 6 sync methods (symlinks to .opencode/, type-discriminated MCP to opencode.json, conservative permissions), 3-adapter integration test passes with 0 failures across Codex/Gemini/OpenCode, 18 verification tests passed (2 tasks, 25min)
 - **2026-02-13:** Completed Plan 03-01 (Gemini adapter) - GeminiAdapter with all 6 sync methods, inline content (no symlinks), YAML frontmatter stripping, MCP-to-JSON translation, conservative permission mapping (never auto-enable yolo), 17 verification tests passed (2 tasks, 4.1min)
 - **2026-02-13:** Completed Plan 02-03 (Codex integration) - sync_mcp with MCP-to-TOML translation and env var preservation, sync_settings with conservative permission mapping, Python 3.10 TOML parser, 15 verification tests passed (2 tasks, 5.5min)
 - **2026-02-13:** Completed Plan 02-02 (Codex adapter) - CodexAdapter with rules→AGENTS.md (marker-based), skills→symlinks, agents/commands→SKILL.md conversion, regex frontmatter parsing (2 tasks, 2.6min)
 - **2026-02-13:** Completed Plan 02-01 (Adapter framework) - AdapterBase ABC with 6 sync methods, AdapterRegistry decorator-based, SyncResult dataclass, manual TOML writer with proper escaping (2 tasks, 3min)
-- **2026-02-13:** Completed Plan 01-04 (Plugin manifest & integration) - plugin.json created, HarnessSync rebranding, 9-step integration test validates entire Phase 1 pipeline (2 tasks, 1.6min)
 
 ---
 
 ## Session Continuity
 
 ### What Just Happened
-Completed Plan 03-01 (Gemini adapter implementation). Implemented GeminiAdapter with all 6 sync methods: sync_rules (concatenate to GEMINI.md with markers), sync_skills (inline content, strip frontmatter, no symlinks), sync_agents (extract role section, inline), sync_commands (brief bullet list), sync_mcp (translate to settings.json mcpServers with stdio/URL support), sync_settings (conservative permission mapping, never auto-enable yolo mode). Added write_json_atomic utility to paths.py (tempfile + os.replace pattern). All 17 verification tests passed (8 Task 1, 9 Task 2). All 6 Gemini requirements (GMN-01 through GMN-06) delivered. Tasks committed (04ac6bd, dca66cb).
+Completed Plan 03-02 (OpenCode adapter & 3-adapter integration). Implemented OpenCodeAdapter with all 6 sync methods: sync_rules (AGENTS.md in project root with markers), sync_skills (symlinks to .opencode/skills/ with stale cleanup), sync_agents (symlinks to .opencode/agents/), sync_commands (symlinks to .opencode/commands/), sync_mcp (type-discriminated format to opencode.json: type=local for stdio, type=remote for URL), sync_settings (conservative permission mapping: restricted/default mode, never yolo). Updated __init__.py to auto-register all 3 adapters (codex, gemini, opencode) on import. 3-adapter integration test passes with 0 failures across all config types (rules, skills, agents, commands, MCP, settings). All 18 verification tests passed (11 Task 1, 7 Task 2). All 6 OpenCode requirements (OC-01 through OC-06) delivered. Tasks committed (25eebe1, 15d95c6).
 
 ### What's Next
-Continue Phase 3 with Plan 03-02: Implement OpenCodeAdapter with similar inline content strategy. Then Plan 03-03 for integration verification.
+Continue Phase 3 with Plan 03-03: Phase 3 integration verification (cross-adapter consistency, end-to-end sync).
 
 ### Context for Next Session
-Phase 3 started (1/3 plans complete). GeminiAdapter proves adapter pattern extensibility with fundamentally different architecture (monolithic GEMINI.md vs Codex's directory-based approach). Inline content transformation working (YAML frontmatter stripping via regex). JSON atomic writes available for all adapters. Conservative security defaults established (never auto-enable yolo mode). Ready for OpenCodeAdapter implementation following similar patterns.
+Phase 3 nearly complete (2/3 plans complete). Adapter pattern proven to scale across 3 distinct architectures (Codex: directory-based TOML, Gemini: monolithic JSON with inline content, OpenCode: symlink-based JSON with type discrimination). All 12 Phase 3 requirements delivered (GMN-01 through GMN-06, OC-01 through OC-06). AdapterRegistry.list_targets() returns ['codex', 'gemini', 'opencode']. Conservative security defaults consistent across all adapters. Ready for final Phase 3 integration verification.
 
 ---
 
 *Last updated: 2026-02-13*
-*Session: Plan 03-01 execution*
-*Stopped at: Completed 03-01-PLAN.md*
+*Session: Plan 03-02 execution*
+*Stopped at: Completed 03-02-PLAN.md*
