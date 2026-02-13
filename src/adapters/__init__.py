@@ -34,6 +34,11 @@ from .base import AdapterBase
 from .registry import AdapterRegistry
 from .result import SyncResult
 
+# Import adapter modules to trigger @AdapterRegistry.register() decorators
+from . import codex  # noqa: F401
+from . import gemini  # noqa: F401
+from . import opencode  # noqa: F401
+
 __all__ = [
     'AdapterBase',
     'AdapterRegistry',
