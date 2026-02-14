@@ -4,22 +4,22 @@
 
 **Core Value:** One harness to rule them all — configure Claude Code once, sync everywhere (Codex, Gemini CLI, OpenCode) without manual duplication or format translation.
 
-**Current Focus:** Phase 3 - Gemini & OpenCode Adapters (Complete)
+**Current Focus:** Phase 4 - Plugin Interface (Complete)
 
 ---
 
 ## Current Position
 
-**Phase:** 3
+**Phase:** 5
 **Plan:** 02 (completed)
-**Status:** Complete
+**Status:** In Progress
 
 **Progress:**
 ```
-Phase 3: Gemini & OpenCode Adapters
-██████████ 100% (2/2 plans complete)
+Phase 5: Safety Validation
+███░░░░░░░ 33% (1/3 plans complete)
 
-Overall Project: 3/7 phases complete
+Overall Project: 4/7 phases complete (Phase 5 in progress)
 ```
 
 ---
@@ -27,19 +27,19 @@ Overall Project: 3/7 phases complete
 ## Performance Metrics
 
 ### Velocity
-- **Phases completed:** 3/7 (Phase 3 complete)
-- **Plans completed:** 9 (01-01, 01-02, 01-03, 01-04, 02-01, 02-02, 02-03, 03-01, 03-02)
-- **Average plan duration:** 5.8 min
-- **Estimated completion:** TBD after Phase 3
+- **Phases completed:** 4/7 (Phase 5 in progress)
+- **Plans completed:** 13 (01-01, 01-02, 01-03, 01-04, 02-01, 02-02, 02-03, 03-01, 03-02, 04-01, 04-02, 04-03, 05-02)
+- **Average plan duration:** ~3.8 min
+- **Estimated completion:** TBD
 
 ### Quality
-- **Verification passes:** 17 (Logger, Hashing, Paths, StateManager, SourceReader-basic, SourceReader-edges, Phase1-Integration, AdapterFramework, TOMLWriter, CodexRulesSkills, CodexAgentsCommands, CodexMCPSettings, Phase2-Integration, GeminiTask1, GeminiTask2, OpenCodeTask1, OpenCodeTask2)
+- **Verification passes:** 31 (20 prior + 11 from 05-02: 5 sanity + 6 proxy)
 - **Verification failures:** 0
 - **Pass rate:** 100%
 
 ### Scope
-- **Requirements delivered:** 32/44 (CORE-01 through CORE-05, SRC-01 through SRC-06, ADP-01 through ADP-03, CDX-01 through CDX-06, GMN-01 through GMN-06, OC-01 through OC-06)
-- **v1 coverage:** 73%
+- **Requirements delivered:** 40/44 (CORE-01 through CORE-05, SRC-01 through SRC-06, ADP-01 through ADP-03, CDX-01 through CDX-06, GMN-01 through GMN-06, OC-01 through OC-06, PLG-01 through PLG-06, SAF-02 through SAF-03)
+- **v1 coverage:** 91%
 - **Deferred to v2:** 0
 
 ---
@@ -58,7 +58,18 @@ Phase 3 deferred validations (DEFER-03-01 through DEFER-03-04):
 - MCP server connection (requires MCP infrastructure)
 - Permission security audit (requires security expert review)
 
-**Integration Phase:** May need for Level 3 deferred validations from Phase 3
+Phase 4 deferred validations (DEFER-04-01 through DEFER-04-05):
+- Hook fires in live Claude Code session (requires plugin installed)
+- Concurrent hook invocations handle lock correctly (requires rapid edits)
+- Cross-platform locking on Windows (requires Windows environment)
+- Hook timeout tuning (requires production-scale config)
+- /sync command integration in live session (requires plugin installed)
+
+Phase 5 deferred validations (DEFER-05-03 through DEFER-05-04):
+- Secret detection on production .env files (requires sanitized test data)
+- Entropy-based detection (deferred per research - start with keyword+regex)
+
+**Integration Phase:** May need for Level 3 deferred validations from Phase 3/4/5
 
 ---
 
@@ -101,6 +112,13 @@ Phase 3 deferred validations (DEFER-03-01 through DEFER-03-04):
 34. **Type-discriminated MCP format** - OpenCode uses type: 'local' for stdio servers and type: 'remote' for URL servers for clarity (03-02, 2026-02-13)
 35. **Command array format for OpenCode** - OpenCode expects command as array [cmd, arg1, arg2], combine command+args during translation (03-02, 2026-02-13)
 36. **Environment key for OpenCode** - OpenCode uses 'environment' not 'env' for environment variables (03-02, 2026-02-13)
+37. **Orchestrator delegates concurrency** - SyncOrchestrator does NOT handle locks/debounce; callers (commands, hooks) manage concurrency (04-01, 2026-02-14)
+38. **Deferred imports in hook** - PostToolUse hook defers sync module imports until after config file pattern match for fast non-config edit path (04-03, 2026-02-14)
+39. **Hook always exits 0** - PostToolUse hook never blocks Claude Code tool execution even on sync errors (04-03, 2026-02-14)
+40. **hmac.compare_digest for hash comparison** - Use hmac.compare_digest() instead of == for secure hash comparison to prevent timing attacks (05-02, 2026-02-14)
+41. **Keyword+regex secret detection** - Start with keyword+regex approach (15-20% false positive rate) instead of entropy-based (60% FP), defer entropy as future enhancement (05-02, 2026-02-14)
+42. **Whitelist safe prefixes** - Skip TEST_/EXAMPLE_/DEMO_/MOCK_/FAKE_/DUMMY_ prefixes to reduce false positives in secret detection (05-02, 2026-02-14)
+43. **Never expose secret values** - Secret detector logs variable names only, never actual values, for security (05-02, 2026-02-14)
 
 ### Active Todos
 - [x] Complete Plan 01-01: Foundation utilities (Logger, hashing, paths)
@@ -112,33 +130,38 @@ Phase 3 deferred validations (DEFER-03-01 through DEFER-03-04):
 - [x] Complete Plan 02-03: Codex integration and verification
 - [x] Complete Plan 03-01: Gemini adapter implementation
 - [x] Complete Plan 03-02: OpenCode adapter implementation
-- [ ] Begin Phase 4: Plugin Interface (Commands, Hooks, Skills)
+- [x] Complete Plan 04-01: Core orchestrator, lock, diff formatter
+- [x] Complete Plan 04-02: /sync and /sync-status commands
+- [x] Complete Plan 04-03: PostToolUse hook and plugin config
+- [x] Complete Plan 05-02: ConflictDetector and SecretDetector
+- [ ] Continue Phase 5: Testing & Validation
 
 ### Blockers
 None currently.
 
 ### Recent Changes
-- **2026-02-13:** Completed Plan 03-02 (OpenCode adapter & 3-adapter integration) - OpenCodeAdapter with all 6 sync methods (symlinks to .opencode/, type-discriminated MCP to opencode.json, conservative permissions), 3-adapter integration test passes with 0 failures across Codex/Gemini/OpenCode, 18 verification tests passed (2 tasks, 25min)
-- **2026-02-13:** Completed Plan 03-01 (Gemini adapter) - GeminiAdapter with all 6 sync methods, inline content (no symlinks), YAML frontmatter stripping, MCP-to-JSON translation, conservative permission mapping (never auto-enable yolo), 17 verification tests passed (2 tasks, 4.1min)
-- **2026-02-13:** Completed Plan 02-03 (Codex integration) - sync_mcp with MCP-to-TOML translation and env var preservation, sync_settings with conservative permission mapping, Python 3.10 TOML parser, 15 verification tests passed (2 tasks, 5.5min)
-- **2026-02-13:** Completed Plan 02-02 (Codex adapter) - CodexAdapter with rules→AGENTS.md (marker-based), skills→symlinks, agents/commands→SKILL.md conversion, regex frontmatter parsing (2 tasks, 2.6min)
-- **2026-02-13:** Completed Plan 02-01 (Adapter framework) - AdapterBase ABC with 6 sync methods, AdapterRegistry decorator-based, SyncResult dataclass, manual TOML writer with proper escaping (2 tasks, 3min)
+- **2026-02-14:** Completed Plan 05-02 (ConflictDetector + SecretDetector) - ConflictDetector with hmac.compare_digest() hash comparison, detects modifications/deletions, SecretDetector with keyword+regex approach (15-20% FP), whitelist filtering, 16+ char complexity check, never exposes secret values, 11 verification tests passed (5 sanity + 6 proxy)
+- **2026-02-14:** Completed Plan 04-03 (PostToolUse hook + plugin config) - PostToolUse hook with 7 config patterns, deferred imports, always exits 0, hooks.json with Edit|Write|MultiEdit matcher, plugin.json updated with file references, 8 verification tests passed
+- **2026-02-14:** Completed Plan 04-02 (/sync + /sync-status commands) - /sync with --scope/--dry-run, debounce/lock integration, formatted summary table, /sync-status with per-target display and drift detection, 9 verification tests passed
+- **2026-02-14:** Completed Plan 04-01 (Core orchestrator) - SyncOrchestrator coordinating SourceReader→AdapterRegistry→StateManager, sync_lock with fcntl.flock, should_debounce with 3s window, DiffFormatter for dry-run preview, 11 verification tests passed
+- **2026-02-13:** Completed Plan 03-02 (OpenCode adapter & 3-adapter integration)
+- **2026-02-13:** Completed Plan 03-01 (Gemini adapter)
 
 ---
 
 ## Session Continuity
 
 ### What Just Happened
-Completed Phase 3 execution. Both plans (03-01 Gemini adapter, 03-02 OpenCode adapter) executed successfully. Evaluation (9/9 sanity, 8/8 proxy) and verification (all must-haves confirmed) both passed. 12 requirements delivered (GMN-01 through GMN-06, OC-01 through OC-06). 35 total verification tests passed across both plans. 3-adapter integration test confirmed all adapters sync with 0 failures.
+Completed Plan 05-02 (ConflictDetector + SecretDetector). Implemented pre-sync validation modules: ConflictDetector for hash-based drift detection using hmac.compare_digest(), SecretDetector for environment variable scanning with keyword+regex approach. All 11 verification tests passed (5 sanity + 6 proxy). 2 new requirements delivered (SAF-02, SAF-03). 2 new files created (src/conflict_detector.py, src/secret_detector.py).
 
 ### What's Next
-Begin Phase 4: Plugin Interface (Commands, Hooks, Skills). Plan the /sync command, PostToolUse hooks, /sync-status, and dry-run mode.
+Continue Phase 5: Testing & Validation. Next plan likely covers additional validation or integration testing.
 
 ### Context for Next Session
-Phase 3 complete. All 3 adapters (Codex, Gemini, OpenCode) proven working with 32/44 requirements delivered (73% v1 coverage). Adapter pattern scales to 3 distinct architectures. Ready for user-facing plugin interface that ties SourceReader -> AdapterRegistry -> StateManager into CLI commands and reactive hooks.
+Phase 5 in progress (1/3 plans complete, 33%). Pre-sync validation modules operational: ConflictDetector (hash comparison with timing attack protection), SecretDetector (keyword+regex with whitelist filtering, 15-20% FP rate). 40/44 requirements delivered (91% v1 coverage). 11 deferred validations across Phase 3-4-5 pending live testing.
 
 ---
 
-*Last updated: 2026-02-13*
-*Session: Phase 3 execution*
-*Stopped at: Phase 3 complete*
+*Last updated: 2026-02-14*
+*Session: Phase 5 Plan 02 execution*
+*Stopped at: Completed 05-02-PLAN.md*
