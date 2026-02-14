@@ -15,7 +15,7 @@
 **Status:** In Progress
 
 **Progress:**
-```
+[██████████] 100%
 Phase 5: Safety Validation
 ██████████ 100% (3/3 plans complete)
 
