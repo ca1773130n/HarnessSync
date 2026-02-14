@@ -174,6 +174,13 @@ Plans:
 
 **Requirements:** PKG-01, PKG-02, PKG-03
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 07-01-PLAN.md — Plugin structure: move plugin.json to .claude-plugin/, create marketplace.json
+- [ ] 07-02-PLAN.md — Install.sh and shell-integration.sh overhaul (HarnessSync branding, --dry-run, platform detection)
+- [ ] 07-03-PLAN.md — GitHub Actions CI workflow and comprehensive local verification
+
 **Success Criteria:**
 1. Plugin passes `claude plugin validate` with no errors (correct directory structure, valid plugin.json, hooks config)
 2. Plugin published to Claude Code marketplace with marketplace.json containing absolute URLs and proper metadata
@@ -195,7 +202,7 @@ Plans:
 | 4 - Plugin Interface | Complete | 3/3 | proxy | ██████████ 100% |
 | 5 - Safety & Validation | Complete | 3/3 | proxy | ██████████ 100% |
 | 6 - MCP Server Integration | Planned | 0/2 | proxy | ░░░░░░░░░░ 0% |
-| 7 - Packaging & Distribution | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
+| 7 - Packaging & Distribution | Planned | 0/3 | proxy | ░░░░░░░░░░ 0% |
 
 ---
 
@@ -209,4 +216,6 @@ Plans:
 *Phase 4 complete: 2026-02-14*
 *Phase 5 planned: 2026-02-14*
 *Phase 5 complete: 2026-02-14*
-*Next: `/grd:plan-phase 6`*
+*Phase 6 complete: 2026-02-15*
+*Phase 7 planned: 2026-02-15*
+*Next: `/grd:execute-phase 7`*
