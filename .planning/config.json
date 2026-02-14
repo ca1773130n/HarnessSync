@@ -11,8 +11,26 @@
     "verifier": true
   },
   "research_gates": {
+    "survey_approval": false,
+    "deep_dive_approval": false,
+    "comparison_approval": false,
+    "feasibility_approval": false,
+    "verification_design": false,
+    "product_plan_approval": false,
+    "phase_plan_approval": false,
+    "execution_approval": false
+  },
+  "confirmation_gates": {
+    "commit_confirmation": false,
+    "file_deletion": false,
+    "phase_completion": false,
+    "target_adjustment": false,
+    "approach_change": false
+  },
+  "_saved_research_gates": {
     "verification_design": false,
     "method_selection": false,
     "baseline_review": false
-  }
+  },
+  "_saved_confirmation_gates": {}
 }

@@ -4,22 +4,22 @@
 
 **Core Value:** One harness to rule them all — configure Claude Code once, sync everywhere (Codex, Gemini CLI, OpenCode) without manual duplication or format translation.
 
-**Current Focus:** Phase 4 - Plugin Interface (Complete)
+**Current Focus:** Phase 8 - Multi-Account Support (Complete)
 
 ---
 
 ## Current Position
 
-**Phase:** 5
-**Plan:** 03 (completed)
-**Status:** In Progress
+**Phase:** 8
+**Plan:** 04 (completed)
+**Status:** Complete
 
 **Progress:**
 [██████████] 100%
-Phase 5: Safety Validation
-██████████ 100% (3/3 plans complete)
+Phase 8: Multi-Account Support
+██████████ 100% (4/4 plans complete)
 
-Overall Project: 4/7 phases complete (Phase 5 in progress)
+Overall Project: 8/8 phases complete — v1.0 + Multi-Account DONE
 ```
 
 ---
@@ -27,19 +27,20 @@ Overall Project: 4/7 phases complete (Phase 5 in progress)
 ## Performance Metrics
 
 ### Velocity
-- **Phases completed:** 4/7 (Phase 5 in progress)
-- **Plans completed:** 14 (01-01, 01-02, 01-03, 01-04, 02-01, 02-02, 02-03, 03-01, 03-02, 04-01, 04-02, 04-03, 05-01, 05-02, 05-03)
-- **Average plan duration:** ~3.5 min
-- **Estimated completion:** TBD
+- **Phases completed:** 8/8
+- **Plans completed:** 24 (01-01, 01-02, 01-03, 01-04, 02-01, 02-02, 02-03, 03-01, 03-02, 04-01, 04-02, 04-03, 05-01, 05-02, 05-03, 06-01, 06-02, 07-01, 07-02, 07-03, 08-01, 08-02, 08-03, 08-04)
+- **Average plan duration:** ~3 min
+- **Project complete:** 2026-02-15
 
 ### Quality
-- **Verification passes:** 41 (31 prior + 10 from 05-03: 5 sanity + 5 proxy)
+- **Verification passes:** 101 (82 prior + 14 sanity + 5 proxy)
 - **Verification failures:** 0
 - **Pass rate:** 100%
 
 ### Scope
-- **Requirements delivered:** 42/44 (CORE-01 through CORE-05, SRC-01 through SRC-06, ADP-01 through ADP-03, CDX-01 through CDX-06, GMN-01 through GMN-06, OC-01 through OC-06, PLG-01 through PLG-06, SAF-01 through SAF-04)
-- **v1 coverage:** 95%
+- **Requirements delivered:** 47/47 + Phase 8 multi-account extensions (MULTI-01 through MULTI-08)
+- **v1 coverage:** 100%
+- **v1.1 coverage:** 100% (multi-account support)
 - **Deferred to v2:** 0
 
 ---
@@ -47,7 +48,7 @@ Overall Project: 4/7 phases complete (Phase 5 in progress)
 ## Experiment Metrics
 
 ### Research Context
-- **Landscape analysis:** Complete (SUMMARY.md exists with 6-phase suggestions)
+- **Landscape analysis:** Complete (SUMMARY.md exists with 7-phase suggestions)
 - **Baseline established:** Not applicable (new plugin, no existing metrics)
 - **Competing approaches:** skillshare (skills-only), dotfile managers (no AI semantics)
 
@@ -69,7 +70,27 @@ Phase 5 deferred validations (DEFER-05-03 through DEFER-05-04):
 - Secret detection on production .env files (requires sanitized test data)
 - Entropy-based detection (deferred per research - start with keyword+regex)
 
-**Integration Phase:** May need for Level 3 deferred validations from Phase 3/4/5
+Phase 6 deferred validations (DEFER-06-01 through DEFER-06-03):
+- Claude Code MCP client integration (requires plugin installed)
+- External agent cross-CLI invocation (requires MCP client library)
+- Production load testing (requires sustained testing environment)
+
+Phase 7 deferred validations (DEFER-07-01 through DEFER-07-06):
+- `claude plugin validate .` passes (requires Claude Code CLI)
+- GitHub installation via `/plugin install github:username/HarnessSync` (requires published repo)
+- Marketplace URL installation (requires hosted marketplace.json)
+- Linux cross-platform install.sh (requires GitHub Actions run)
+- Windows cross-platform install.sh (requires Windows environment)
+- Live plugin integration (hooks/commands/MCP in live session)
+
+Phase 8 deferred validations (DEFER-08-01 through DEFER-08-05):
+- Interactive wizard UX with TTY (requires manual testing)
+- Production home directory discovery (1M+ files) (requires beta testing)
+- Windows multi-account path handling (requires Windows environment)
+- Concurrent multi-account sync (requires live usage)
+- Live /sync --account in Claude Code session (requires integration testing)
+
+**Total deferred validations:** 27 across Phase 3-8
 
 ---
 
@@ -123,6 +144,27 @@ Phase 5 deferred validations (DEFER-05-03 through DEFER-05-04):
 45. **Secret detection blocks by default** - Sync blocked when secrets detected, explicit --allow-secrets override required for opt-in (05-03, 2026-02-14)
 46. **Conflict detection non-blocking** - Conflict warnings displayed but sync proceeds (user may intentionally overwrite manual edits) (05-03, 2026-02-14)
 47. **Compatibility report on issues only** - Report generated and displayed only when adapted or failed items need user attention (05-03, 2026-02-14)
+48. **Logging to stderr only** - stdout is JSON-RPC protocol channel, never write anything else to it (06-01, 2026-02-15)
+49. **Manual validators over jsonschema** - stdlib constraint, simple type+range checks sufficient for 3 tools (06-01, 2026-02-15)
+50. **tools/call marker dict** - Protocol handler returns marker for server to intercept and dispatch to worker thread (06-01, 2026-02-15)
+51. **Daemon worker thread** - Auto-exits when main thread ends, no shutdown complexity (06-02, 2026-02-15)
+52. **Queue maxsize=1** - Prevents unbounded memory, second sync gets immediate "busy" response (06-02, 2026-02-15)
+53. **Early validation before queueing** - Reject invalid args immediately without worker thread overhead (06-02, 2026-02-15)
+54. **get_status in main thread** - Status queries should never wait for sync lock or queue (06-02, 2026-02-15)
+55. **marketplace.json uses GitHub source** - `"source": "github"` with `"repo": "username/HarnessSync"` placeholder, user updates before publishing (07-01, 2026-02-15)
+56. **Version pinned to ref: main** - Stable branch distribution via marketplace (07-01, 2026-02-15)
+57. **Shell-integration invokes SyncOrchestrator via Python one-liner** - No standalone CLI script needed, import directly (07-02, 2026-02-15)
+58. **HARNESSSYNC_HOME defaults to script directory** - Portable across install locations, not hardcoded path (07-02, 2026-02-15)
+59. **Stamp file at $HOME/.harnesssync/.last-sync** - Separate from plugin directory, survives plugin updates (07-02, 2026-02-15)
+60. **Account name must start with alphanumeric** - Prevents `.` or `-` prefixed names that could cause filesystem issues (08-01, 2026-02-15)
+61. **Discovery excludes 20+ directory patterns** - Including Downloads, Documents, Desktop to avoid scanning user data directories (08-01, 2026-02-15)
+62. **Global MCP not scoped per account** - `~/.mcp.json` stays global, only `cc_home`-relative paths change per account (08-02, 2026-02-15)
+63. **v1 migration wraps targets in "default" account** - Preserves all data including file_hashes and timestamps (08-02, 2026-02-15)
+64. **Fresh state starts at version 2** - With empty accounts dict (08-02, 2026-02-15)
+65. **Default target paths: ~/.{cli}-{account_name}** - Plain ~/.{cli} only for "default" account (08-03, 2026-02-15)
+66. **Config-file import skips invalid accounts** - Warning instead of failing entire import (08-03, 2026-02-15)
+67. **sync_all_accounts() falls back to v1** - Catches exceptions and falls back to single sync_all() (08-04, 2026-02-15)
+68. **Auto-detect multi-account in status** - If accounts exist, show all; otherwise v1 status (08-04, 2026-02-15)
 
 ### Active Todos
 - [x] Complete Plan 01-01: Foundation utilities (Logger, hashing, paths)
@@ -140,34 +182,59 @@ Phase 5 deferred validations (DEFER-05-03 through DEFER-05-04):
 - [x] Complete Plan 05-01: BackupManager and SymlinkCleaner
 - [x] Complete Plan 05-02: ConflictDetector and SecretDetector
 - [x] Complete Plan 05-03: CompatibilityReporter and safety integration
-- [ ] Continue Phase 5: Testing & Validation (evaluation plan)
+- [x] Complete Plan 06-01: MCP Protocol Foundation (transport, protocol, schemas)
+- [x] Complete Plan 06-02: MCP Server & Tool Handlers (tools, server)
+- [x] Complete Plan 07-01: Plugin directory structure + marketplace.json
+- [x] Complete Plan 07-02: install.sh + shell-integration.sh rewrite
+- [x] Complete Plan 07-03: CI workflow + final verification
+- [x] Complete Plan 08-01: AccountManager + AccountDiscovery
+- [x] Complete Plan 08-02: SourceReader cc_home + StateManager v2
+- [x] Complete Plan 08-03: SetupWizard + /sync-setup command
+- [x] Complete Plan 08-04: Account-aware orchestrator + commands
+
+### Roadmap Evolution
+- Phase 8 added: Multi-Account Support — setup process for multiple harness accounts with sync across all backends (2026-02-15)
+- Phase 8 completed: 4 plans executed, 19 verification checks passed (2026-02-15)
 
 ### Blockers
-None currently.
+None. v1.0 + Phase 8 complete. All 8 phases delivered.
 
 ### Recent Changes
-- **2026-02-14:** Completed Plan 05-03 (CompatibilityReporter + safety integration) - CompatibilityReporter generates per-target breakdown of synced/adapted/skipped/failed items with explanations, full safety pipeline integrated into orchestrator (secrets -> conflicts -> backup -> sync -> cleanup -> report -> retention), /sync command with --allow-secrets flag, 10 verification tests passed (5 sanity + 5 proxy)
-- **2026-02-14:** Completed Plan 05-02 (ConflictDetector + SecretDetector) - ConflictDetector with hmac.compare_digest() hash comparison, detects modifications/deletions, SecretDetector with keyword+regex approach (15-20% FP), whitelist filtering, 16+ char complexity check, never exposes secret values, 11 verification tests passed (5 sanity + 6 proxy)
-- **2026-02-14:** Completed Plan 05-01 (BackupManager + SymlinkCleaner) - BackupManager with timestamped backup and LIFO rollback, SymlinkCleaner for broken symlink removal, 10 verification tests passed
-- **2026-02-14:** Completed Plan 04-03 (PostToolUse hook + plugin config) - PostToolUse hook with 7 config patterns, deferred imports, always exits 0, hooks.json with Edit|Write|MultiEdit matcher, plugin.json updated with file references, 8 verification tests passed
-- **2026-02-14:** Completed Plan 04-02 (/sync + /sync-status commands) - /sync with --scope/--dry-run, debounce/lock integration, formatted summary table, /sync-status with per-target display and drift detection, 9 verification tests passed
-- **2026-02-14:** Completed Plan 04-01 (Core orchestrator) - SyncOrchestrator coordinating SourceReader→AdapterRegistry→StateManager, sync_lock with fcntl.flock, should_debounce with 3s window, DiffFormatter for dry-run preview, 11 verification tests passed
+- **2026-02-15:** Completed Phase 8 (Multi-Account Support) - 4 plans executed. AccountManager + AccountDiscovery (290 lines), SourceReader cc_home parameterization, StateManager v2 schema with auto-migration, SetupWizard + /sync-setup command, account-aware orchestrator + /sync --account + /sync-status --list-accounts. 19/19 verification checks passed (14 sanity + 5 proxy), 5 deferred validations tracked.
+- **2026-02-15:** Completed Phase 7 (Packaging & Distribution) - 3 plans executed. .claude-plugin/ directory with plugin.json and marketplace.json (GitHub source), install.sh rewritten with HarnessSync branding, --dry-run, platform detection (macOS/Linux/Windows/WSL), shell-integration.sh rewritten with HARNESSSYNC_* naming, GitHub Actions CI workflow with 3-platform x 2-Python matrix, 27/27 verification checks passed (19 sanity + 8 proxy), 6 deferred validations tracked.
+- **2026-02-15:** Completed Phase 6 (MCP Server Integration) - 6 new files in src/mcp/ (658 lines total), 14 verification tests passed
+- **2026-02-14:** Completed Phase 5 (Safety & Reliability) - BackupManager, ConflictDetector, SecretDetector, CompatibilityReporter, full safety pipeline
+- **2026-02-14:** Completed Phase 4 (Plugin Interface) - SyncOrchestrator, /sync + /sync-status commands, PostToolUse hook
+- **2026-02-13:** Completed Phase 3 (Target Adapters: Gemini + OpenCode)
+- **2026-02-13:** Completed Phase 2 (Target Adapters: Codex)
+- **2026-02-13:** Completed Phase 1 (Foundation & State Management)
 
 ---
 
 ## Session Continuity
 
 ### What Just Happened
-Completed Plan 05-03 (CompatibilityReporter + safety integration). Implemented CompatibilityReporter for per-target sync analysis with synced/adapted/skipped/failed categorization and explanations. Integrated all Phase 5 safety features into orchestrator (full safety pipeline: secrets -> conflicts -> backup -> sync -> cleanup -> report -> retention). Updated /sync command with --allow-secrets flag. All 10 verification tests passed (5 sanity + 5 proxy). 2 new requirements delivered (SAF-04, integration of SAF-01 through SAF-05). 1 new file created (src/compatibility_reporter.py), 2 files modified (src/orchestrator.py, src/commands/sync.py).
+Completed Phase 8 (Multi-Account Support). All 4 plans executed successfully:
+- **08-01:** Created AccountManager (CRUD, atomic writes, collision detection) + AccountDiscovery (depth-limited scanning, validation)
+- **08-02:** Parameterized SourceReader with cc_home, upgraded StateManager to v2 schema with auto v1 migration
+- **08-03:** Created SetupWizard (interactive 4-step flow) + /sync-setup command (list/remove/show/config-file)
+- **08-04:** Extended SyncOrchestrator, /sync, /sync-status with --account and --list-accounts flags
 
 ### What's Next
-Phase 5 complete (3/3 plans, 100%). Ready for phase evaluation or move to Phase 6: Integration Testing.
+**Project v1.0 + Multi-Account is complete.** All 8 phases delivered, 24 plans executed, 101 verification checks passed with 0 failures. 27 deferred validations pending live testing.
+
+**Before publishing:**
+1. Update `username` placeholder in marketplace.json with actual GitHub username
+2. Push to GitHub and verify CI workflow passes
+3. Run `claude plugin validate .` when CLI is available
+4. Test installation via `/plugin install github:YOUR_USERNAME/HarnessSync`
+5. Test `/sync-setup` interactive wizard with real TTY
 
 ### Context for Next Session
-Phase 5 complete (100%). All safety features operational: BackupManager (timestamped backup + rollback), ConflictDetector (hash-based drift), SecretDetector (keyword+regex scanning), SymlinkCleaner (broken symlink removal), CompatibilityReporter (sync analysis). Full safety pipeline integrated with orchestrator. 42/44 requirements delivered (95% v1 coverage). 13 deferred validations across Phase 3-4-5 pending live testing.
+All 8 phases complete. 24 plans executed across 8 phases. 68 key decisions documented. 47/47 v1 requirements + 8 multi-account extensions delivered. 101 verification checks passed (100% pass rate). 27 deferred validations tracked across Phase 3-8. 5 new files created in Phase 8 (~650 lines), 7 existing files modified (~435 lines). Project ready for GitHub publish.
 
 ---
 
-*Last updated: 2026-02-14*
-*Session: Phase 5 Plan 03 execution*
-*Stopped at: Completed 05-03-PLAN.md*
+*Last updated: 2026-02-15*
+*Session: Phase 8 execution*
+*Stopped at: Phase 8 complete (all 8 phases delivered)*

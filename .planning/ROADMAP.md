@@ -4,9 +4,9 @@
 
 Transform the proven cc2all sync script into a production-ready Claude Code plugin with hooks, slash commands, and MCP server integration. The roadmap prioritizes foundation-first (state management, symlink handling) then proves the adapter pattern with Codex (most complex), extends to Gemini/OpenCode, adds user-facing interfaces, validates security, and packages for distribution.
 
-**Phases:** 8 (7 complete + 1 planned)
+**Phases:** 8 (8 complete)
 **Depth:** Standard (5-8 phases)
-**Coverage:** 47/47 v1 requirements mapped, Phase 8 requirements TBD
+**Coverage:** 47/47 v1 requirements mapped + Phase 8 multi-account complete
 
 ---
 
@@ -248,4 +248,4 @@ Plans:
 *Phase 7 complete: 2026-02-15*
 *Phase 8 added: 2026-02-15*
 *Phase 8 planned: 2026-02-15*
-*Next: `/grd:execute-phase 8`*
+*Phase 8 complete: 2026-02-15*
