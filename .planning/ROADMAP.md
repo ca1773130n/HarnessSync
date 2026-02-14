@@ -4,9 +4,9 @@
 
 Transform the proven cc2all sync script into a production-ready Claude Code plugin with hooks, slash commands, and MCP server integration. The roadmap prioritizes foundation-first (state management, symlink handling) then proves the adapter pattern with Codex (most complex), extends to Gemini/OpenCode, adds user-facing interfaces, validates security, and packages for distribution.
 
-**Phases:** 7
+**Phases:** 8 (7 complete + 1 planned)
 **Depth:** Standard (5-8 phases)
-**Coverage:** 44/44 v1 requirements mapped
+**Coverage:** 47/47 v1 requirements mapped, Phase 8 requirements TBD
 
 ---
 
@@ -201,8 +201,36 @@ Plans:
 | 3 - Gemini & OpenCode Adapters | Complete | 2/2 | proxy | ██████████ 100% |
 | 4 - Plugin Interface | Complete | 3/3 | proxy | ██████████ 100% |
 | 5 - Safety & Validation | Complete | 3/3 | proxy | ██████████ 100% |
-| 6 - MCP Server Integration | Planned | 0/2 | proxy | ░░░░░░░░░░ 0% |
-| 7 - Packaging & Distribution | Planned | 0/3 | proxy | ░░░░░░░░░░ 0% |
+| 6 - MCP Server Integration | Complete | 2/2 | proxy | ██████████ 100% |
+| 7 - Packaging & Distribution | Complete | 3/3 | proxy | ██████████ 100% |
+| 8 - Multi-Account Support | Planned | 0/4 | proxy | ░░░░░░░░░░ 0% |
+
+---
+
+## Phase 8: Multi-Account Support
+
+**Goal:** Enable sync across multiple harness accounts. Users may have multiple Claude Code config directories (e.g. `~/.claude-personal1`, `~/.claude-personal2`) and multiple accounts for Codex, Gemini, and OpenCode. HarnessSync should provide a setup process to discover, configure, and sync across all account/config pairs.
+
+**Dependencies:** Phase 7 (needs complete v1.0 plugin)
+
+**Requirements:** MULTI-01 (AccountManager CRUD), MULTI-02 (AccountDiscovery), MULTI-03 (SetupWizard), MULTI-04 (SourceReader cc_home), MULTI-05 (StateManager v2 migration), MULTI-06 (StateManager account-scoped ops), MULTI-07 (Orchestrator account-aware), MULTI-08 (/sync --account), MULTI-09 (/sync-status --account), MULTI-10 (/sync-setup command)
+
+**Plans:** 4 plans
+
+Plans:
+- [ ] 08-01-PLAN.md — AccountManager CRUD + AccountDiscovery filesystem scanning
+- [ ] 08-02-PLAN.md — SourceReader cc_home parameterization + StateManager v2 migration
+- [ ] 08-03-PLAN.md — SetupWizard interactive setup + /sync-setup command
+- [ ] 08-04-PLAN.md — Orchestrator account-aware sync + /sync, /sync-status extensions
+
+**Success Criteria:**
+1. Setup command (`/sync-setup`) discovers and registers multiple Claude Code config directories
+2. Each source account can be mapped to specific target accounts (e.g. personal Claude -> personal Codex, work Claude -> work Codex)
+3. Sync operates independently per account pair without cross-contamination
+4. Status command shows per-account sync state and drift detection
+5. Configuration stored in `~/.harnesssync/accounts.json` with account name, source path, and target mappings
+
+**Verification Level:** proxy
 
 ---
 
@@ -217,5 +245,7 @@ Plans:
 *Phase 5 planned: 2026-02-14*
 *Phase 5 complete: 2026-02-14*
 *Phase 6 complete: 2026-02-15*
-*Phase 7 planned: 2026-02-15*
-*Next: `/grd:execute-phase 7`*
+*Phase 7 complete: 2026-02-15*
+*Phase 8 added: 2026-02-15*
+*Phase 8 planned: 2026-02-15*
+*Next: `/grd:execute-phase 8`*
