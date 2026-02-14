@@ -150,6 +150,12 @@ Plans:
 
 **Requirements:** MCP-01, MCP-02
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — MCP protocol foundation: stdio transport, JSON-RPC 2.0 handler, tool schemas with manual validation
+- [ ] 06-02-PLAN.md — Tool handlers bridging MCP to SyncOrchestrator, server entry point with worker thread concurrency
+
 **Success Criteria:**
 1. MCP server exposes sync_all, sync_target, get_status tools with JSON schema validation
 2. MCP server returns structured sync results (targets synced, items per target, errors with file paths and reasons)
@@ -188,7 +194,7 @@ Plans:
 | 3 - Gemini & OpenCode Adapters | Complete | 2/2 | proxy | ██████████ 100% |
 | 4 - Plugin Interface | Complete | 3/3 | proxy | ██████████ 100% |
 | 5 - Safety & Validation | Complete | 3/3 | proxy | ██████████ 100% |
-| 6 - MCP Server Integration | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
+| 6 - MCP Server Integration | Planned | 0/2 | proxy | ░░░░░░░░░░ 0% |
 | 7 - Packaging & Distribution | Pending | 0/TBD | proxy | ░░░░░░░░░░ 0% |
 
 ---
