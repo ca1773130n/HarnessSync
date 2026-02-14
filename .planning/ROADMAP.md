@@ -124,6 +124,13 @@ Plans:
 
 **Requirements:** SAF-01, SAF-02, SAF-03, SAF-04, SAF-05
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 05-01-PLAN.md — Backup manager with timestamped backup/rollback and symlink cleaner for broken link removal
+- [ ] 05-02-PLAN.md — Conflict detector (hash-based drift) and secret detector (keyword+regex env var scanning)
+- [ ] 05-03-PLAN.md — Compatibility reporter and orchestrator/command integration of all safety features
+
 **Success Criteria:**
 1. Pre-sync backup creates timestamped copies of target configs in ~/.harnesssync/backups/ and enables rollback on failure
 2. Conflict detection warns when target configs have SHA256 hash mismatch from last recorded sync (manual edits detected)
