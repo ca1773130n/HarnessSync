@@ -24,27 +24,32 @@ class SourceReader:
     - "user": Only read from ~/.claude/
     - "project": Only read from project directory
     - "all": Read from both user and project (merged)
+
+    Multi-account support: Pass cc_home to read from a custom Claude Code
+    config directory instead of the default ~/.claude/.
     """
 
-    def __init__(self, scope: str = "all", project_dir: Path = None):
+    def __init__(self, scope: str = "all", project_dir: Path = None, cc_home: Path = None):
         """
         Initialize SourceReader.
 
         Args:
             scope: "user" | "project" | "all"
             project_dir: Path to project root (required for "project" or "all")
+            cc_home: Custom Claude Code config directory (default: ~/.claude/)
+                     Used for multi-account support to read from account-specific paths.
         """
         self.scope = scope
         self.project_dir = project_dir
 
         # Claude Code base paths (user scope)
-        self.cc_home = Path.home() / ".claude"
+        self.cc_home = cc_home if cc_home is not None else Path.home() / ".claude"
         self.cc_settings = self.cc_home / "settings.json"
         self.cc_plugins_registry = self.cc_home / "plugins" / "installed_plugins.json"
         self.cc_skills = self.cc_home / "skills"
         self.cc_agents = self.cc_home / "agents"
         self.cc_commands = self.cc_home / "commands"
-        self.cc_mcp_global = Path.home() / ".mcp.json"
+        self.cc_mcp_global = Path.home() / ".mcp.json"  # Global MCP is always at ~
         self.cc_mcp_claude = self.cc_home / ".mcp.json"
 
     def get_rules(self) -> str:

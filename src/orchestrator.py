@@ -2,8 +2,8 @@
 
 SyncOrchestrator is the central coordination layer invoked by both
 /sync command and PostToolUse hook. It reads source config, syncs to
-all registered adapters, and updates state. Supports scope filtering
-and dry-run preview mode.
+all registered adapters, and updates state. Supports scope filtering,
+dry-run preview mode, and per-account sync operations.
 """
 
 from pathlib import Path
@@ -29,7 +29,8 @@ class SyncOrchestrator:
     Callers (commands, hooks) handle concurrency control.
     """
 
-    def __init__(self, project_dir: Path, scope: str = "all", dry_run: bool = False, allow_secrets: bool = False):
+    def __init__(self, project_dir: Path, scope: str = "all", dry_run: bool = False,
+                 allow_secrets: bool = False, account: str = None, cc_home: Path = None):
         """Initialize orchestrator.
 
         Args:
@@ -37,13 +38,32 @@ class SyncOrchestrator:
             scope: "user" | "project" | "all"
             dry_run: If True, preview changes without writing
             allow_secrets: If True, allow sync even when secrets detected in env vars
+            account: Account name for per-account sync (None = v1 behavior)
+            cc_home: Custom Claude Code config directory (derived from account if provided)
         """
         self.project_dir = project_dir
         self.scope = scope
         self.dry_run = dry_run
         self.allow_secrets = allow_secrets
+        self.account = account
+        self.cc_home = cc_home
         self.logger = Logger()
         self.state_manager = StateManager()
+        self.account_config = None
+
+        # Resolve account config if account specified
+        if account and not cc_home:
+            try:
+                from src.account_manager import AccountManager
+                am = AccountManager()
+                acc = am.get_account(account)
+                if acc:
+                    self.cc_home = Path(acc["source"]["path"])
+                    self.account_config = acc
+                else:
+                    self.logger.warn(f"Account '{account}' not found, using defaults")
+            except Exception as e:
+                self.logger.warn(f"Could not load account '{account}': {e}")
 
     def sync_all(self) -> dict:
         """Sync all configuration to all registered adapters.
@@ -61,7 +81,9 @@ class SyncOrchestrator:
             Dict mapping target_name -> {config_type: SyncResult} or preview dict
             Special keys: '_blocked', '_reason', '_warnings', '_conflicts', '_compatibility_report'
         """
-        reader = SourceReader(scope=self.scope, project_dir=self.project_dir)
+        # Create SourceReader with account-specific cc_home if provided
+        reader = SourceReader(scope=self.scope, project_dir=self.project_dir,
+                              cc_home=self.cc_home)
         source_data = reader.discover_all()
 
         # Translate key: SourceReader uses 'mcp_servers', adapters expect 'mcp'
@@ -172,6 +194,46 @@ class SyncOrchestrator:
 
         return results
 
+    def sync_all_accounts(self) -> dict:
+        """Sync all configured accounts sequentially.
+
+        If no accounts configured, falls back to sync_all() (v1 behavior).
+
+        Returns:
+            Dict mapping account_name -> results dict,
+            or direct results dict if no accounts configured
+        """
+        try:
+            from src.account_manager import AccountManager
+            am = AccountManager()
+
+            if not am.has_accounts():
+                # No accounts configured — v1 behavior
+                return self.sync_all()
+
+            all_results = {}
+            for account_name in am.list_accounts():
+                acc = am.get_account(account_name)
+                if not acc:
+                    continue
+
+                cc_home = Path(acc["source"]["path"])
+                orch = SyncOrchestrator(
+                    project_dir=self.project_dir,
+                    scope=self.scope,
+                    dry_run=self.dry_run,
+                    allow_secrets=self.allow_secrets,
+                    account=account_name,
+                    cc_home=cc_home
+                )
+                all_results[account_name] = orch.sync_all()
+
+            return all_results
+
+        except Exception as e:
+            self.logger.warn(f"Multi-account sync failed, falling back to v1: {e}")
+            return self.sync_all()
+
     def _preview_sync(self, adapter, source_data: dict) -> dict:
         """Generate diff preview without writing files.
 
@@ -259,6 +321,10 @@ class SyncOrchestrator:
                         file_hashes[str(p)] = h
 
         for target, target_results in results.items():
+            # Skip special keys
+            if target.startswith('_'):
+                continue
+
             # Aggregate counts across config types
             synced = 0
             skipped = 0
@@ -279,7 +345,8 @@ class SyncOrchestrator:
                 sync_methods=sync_methods,
                 synced=synced,
                 skipped=skipped,
-                failed=failed
+                failed=failed,
+                account=self.account
             )
 
     def get_status(self) -> dict:
@@ -291,7 +358,8 @@ class SyncOrchestrator:
         state = self.state_manager.get_all_status()
 
         # Add drift detection for each target
-        reader = SourceReader(scope=self.scope, project_dir=self.project_dir)
+        reader = SourceReader(scope=self.scope, project_dir=self.project_dir,
+                              cc_home=self.cc_home)
         source_paths = reader.get_source_paths()
 
         current_hashes = {}
@@ -304,7 +372,8 @@ class SyncOrchestrator:
 
         targets = state.get("targets", {})
         for target in targets:
-            drifted = self.state_manager.detect_drift(target, current_hashes)
+            drifted = self.state_manager.detect_drift(target, current_hashes,
+                                                       account=self.account)
             targets[target]["drift"] = drifted
 
         return state

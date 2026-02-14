@@ -4,10 +4,14 @@ State management with atomic writes and drift detection.
 Tracks per-target sync status with SHA256 file hashes, sync timestamps, and
 drift detection. Uses atomic JSON writes (tempfile + os.replace) to prevent
 corruption on interrupted writes.
+
+v2 schema adds per-account state nesting for multi-account support.
+Auto-migrates v1 state (flat targets) to v2 (accounts.default.targets).
 """
 
 import json
 import os
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -23,23 +27,30 @@ class StateManager:
     (codex, gemini, opencode). Each target maintains file hashes, sync
     methods, status, and timestamps.
 
-    State schema:
+    v2 schema (multi-account):
+    {
+        "version": 2,
+        "last_sync": "2024-01-01T12:00:00",
+        "accounts": {
+            "default": {
+                "last_sync": "...",
+                "targets": { "codex": { ... } }
+            }
+        },
+        "targets": { ... }  # Kept for backward compatibility
+    }
+
+    v1 schema (single account, backward compatible):
     {
         "version": 1,
         "last_sync": "2024-01-01T12:00:00",
         "targets": {
             "codex": {
                 "last_sync": "2024-01-01T12:00:00",
-                "status": "success",  # "success" | "partial" | "failed"
+                "status": "success",
                 "scope": "all",
-                "file_hashes": {
-                    "/path/to/AGENTS.md": "abc123...",
-                    "/path/to/config.toml": "def456..."
-                },
-                "sync_method": {
-                    "/path/to/skills/foo": "symlink",
-                    "/path/to/skills/bar": "copy"
-                },
+                "file_hashes": { ... },
+                "sync_method": { ... },
                 "items_synced": 5,
                 "items_skipped": 2,
                 "items_failed": 0
@@ -61,7 +72,7 @@ class StateManager:
 
     def _load(self) -> dict:
         """
-        Load state from JSON file.
+        Load state from JSON file with v1-to-v2 migration.
 
         Returns:
             State dict with version and targets, or default empty state
@@ -70,9 +81,10 @@ class StateManager:
         - Missing state file -> return default state
         - Corrupted JSON -> backup and return fresh state
         - Legacy cc2all state -> migrate to versioned schema
+        - v1 state -> auto-migrate to v2 with 'default' account
         """
         if not self._state_file_path.exists():
-            return {"version": 1, "targets": {}}
+            return {"version": 2, "targets": {}, "accounts": {}}
 
         # Read with error handling
         state = read_json_safe(self._state_file_path, default={})
@@ -87,19 +99,44 @@ class StateManager:
             except OSError:
                 pass  # Backup failed, continue with fresh state
 
-            return {"version": 1, "targets": {}}
+            return {"version": 2, "targets": {}, "accounts": {}}
 
         # Check for version key (missing = legacy cc2all state)
         if "version" not in state or not isinstance(state.get("version"), int):
             # Legacy state - migrate by wrapping old data
             migrated = {
-                "version": 1,
+                "version": 2,
                 "targets": {},
+                "accounts": {},
                 "migrated_from": state  # Preserve old data for reference
             }
             return migrated
 
-        # Valid versioned state
+        # v1 -> v2 migration: wrap flat targets in 'default' account
+        if state.get("version") == 1 and "accounts" not in state:
+            v1_targets = state.get("targets", {})
+            if v1_targets:
+                state["accounts"] = {
+                    "default": {
+                        "last_sync": state.get("last_sync"),
+                        "targets": dict(v1_targets)  # Copy targets into default account
+                    }
+                }
+                print("[HarnessSync] Migrated v1 state to v2 (multi-account) schema. "
+                      "Existing targets wrapped in 'default' account.", file=sys.stderr)
+            else:
+                state["accounts"] = {}
+
+            state["version"] = 2
+            # Keep "targets" key for backward compatibility
+            # Auto-save migrated state
+            self._state = state
+            ensure_dir(self.state_dir)
+            self._save()
+
+        # Ensure accounts key exists for v2
+        state.setdefault("accounts", {})
+
         return state
 
     def _save(self) -> None:
@@ -156,7 +193,8 @@ class StateManager:
         sync_methods: dict[str, str],
         synced: int,
         skipped: int,
-        failed: int
+        failed: int,
+        account: str = None
     ) -> None:
         """
         Record sync operation for target.
@@ -169,6 +207,7 @@ class StateManager:
             synced: Count of successfully synced items
             skipped: Count of skipped items
             failed: Count of failed items
+            account: Account name for per-account tracking (None = v1 flat targets)
         """
         # Determine status based on counts
         if failed == 0:
@@ -178,11 +217,7 @@ class StateManager:
         else:  # synced == 0 and failed > 0
             status = "failed"
 
-        # Update target state
-        if "targets" not in self._state:
-            self._state["targets"] = {}
-
-        self._state["targets"][target] = {
+        target_data = {
             "last_sync": datetime.now().isoformat(),
             "status": status,
             "scope": scope,
@@ -193,25 +228,52 @@ class StateManager:
             "items_failed": failed
         }
 
+        if account is not None:
+            # Account-scoped: write to accounts.{account}.targets.{target}
+            if "accounts" not in self._state:
+                self._state["accounts"] = {}
+            if account not in self._state["accounts"]:
+                self._state["accounts"][account] = {"targets": {}}
+            if "targets" not in self._state["accounts"][account]:
+                self._state["accounts"][account]["targets"] = {}
+
+            self._state["accounts"][account]["targets"][target] = target_data
+            self._state["accounts"][account]["last_sync"] = datetime.now().isoformat()
+        else:
+            # v1 backward compatible: write to flat targets
+            if "targets" not in self._state:
+                self._state["targets"] = {}
+            self._state["targets"][target] = target_data
+
         # Update global last_sync
         self._state["last_sync"] = datetime.now().isoformat()
 
         # Persist to disk
         self._save()
 
-    def detect_drift(self, target: str, current_hashes: dict[str, str]) -> list[str]:
+    def detect_drift(self, target: str, current_hashes: dict[str, str],
+                     account: str = None) -> list[str]:
         """
         Detect drifted files by comparing current vs stored hashes.
 
         Args:
             target: Target name to check
             current_hashes: Dict of current file path -> hash
+            account: Account name for per-account drift (None = v1 flat targets)
 
         Returns:
             List of file paths that changed, were added, or removed
         """
-        # Get stored hashes for target
-        target_state = self._state.get("targets", {}).get(target)
+        if account is not None:
+            # Account-scoped drift detection
+            account_state = self._state.get("accounts", {}).get(account)
+            if not account_state:
+                return list(current_hashes.keys())
+            target_state = account_state.get("targets", {}).get(target)
+        else:
+            # v1 backward compatible
+            target_state = self._state.get("targets", {}).get(target)
+
         if not target_state:
             # No previous sync - all files are "new"
             return list(current_hashes.keys())
@@ -234,7 +296,7 @@ class StateManager:
 
     def get_target_status(self, target: str) -> dict | None:
         """
-        Get sync status for specific target.
+        Get sync status for specific target (v1 flat targets).
 
         Args:
             target: Target name
@@ -244,12 +306,44 @@ class StateManager:
         """
         return self._state.get("targets", {}).get(target)
 
+    def get_account_target_status(self, account: str, target: str) -> dict | None:
+        """
+        Get sync status for specific account and target.
+
+        Args:
+            account: Account name
+            target: Target name
+
+        Returns:
+            Target state dict, or None if not tracked
+        """
+        account_state = self._state.get("accounts", {}).get(account)
+        if not account_state:
+            return None
+        return account_state.get("targets", {}).get(target)
+
+    def get_account_status(self, account: str) -> dict | None:
+        """
+        Get full status for an account (last_sync + all targets).
+
+        Args:
+            account: Account name
+
+        Returns:
+            Account state dict, or None if not found
+        """
+        return self._state.get("accounts", {}).get(account)
+
+    def list_state_accounts(self) -> list[str]:
+        """List all account names in state."""
+        return sorted(self._state.get("accounts", {}).keys())
+
     def get_all_status(self) -> dict:
         """
         Get full state dict.
 
         Returns:
-            Complete state including version and all targets
+            Complete state including version, targets, and accounts
         """
         return self._state
 
