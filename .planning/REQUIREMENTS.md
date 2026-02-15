@@ -121,85 +121,105 @@
 
 ## Traceability
 
-| Requirement | Phase | Status |
-|-------------|-------|--------|
-| CORE-01 | Phase 1 | Pending |
-| CORE-02 | Phase 1 | Pending |
-| CORE-03 | Phase 1 | Pending |
-| CORE-04 | Phase 1 | Pending |
-| CORE-05 | Phase 1 | Pending |
-| SRC-01 | Phase 1 | Pending |
-| SRC-02 | Phase 1 | Pending |
-| SRC-03 | Phase 1 | Pending |
-| SRC-04 | Phase 1 | Pending |
-| SRC-05 | Phase 1 | Pending |
-| SRC-06 | Phase 1 | Pending |
-| ADP-01 | Phase 2 | Pending |
-| ADP-02 | Phase 2 | Pending |
-| ADP-03 | Phase 2 | Pending |
-| CDX-01 | Phase 2 | Pending |
-| CDX-02 | Phase 2 | Pending |
-| CDX-03 | Phase 2 | Pending |
-| CDX-04 | Phase 2 | Pending |
-| CDX-05 | Phase 2 | Pending |
-| CDX-06 | Phase 2 | Pending |
-| GMN-01 | Phase 3 | Pending |
-| GMN-02 | Phase 3 | Pending |
-| GMN-03 | Phase 3 | Pending |
-| GMN-04 | Phase 3 | Pending |
-| GMN-05 | Phase 3 | Pending |
-| GMN-06 | Phase 3 | Pending |
-| OC-01 | Phase 3 | Pending |
-| OC-02 | Phase 3 | Pending |
-| OC-03 | Phase 3 | Pending |
-| OC-04 | Phase 3 | Pending |
-| OC-05 | Phase 3 | Pending |
-| OC-06 | Phase 3 | Pending |
-| PLG-01 | Phase 4 | Pending |
-| PLG-02 | Phase 4 | Pending |
-| PLG-03 | Phase 4 | Pending |
-| PLG-04 | Phase 4 | Pending |
-| PLG-05 | Phase 4 | Pending |
-| SAF-01 | Phase 5 | Pending |
-| SAF-02 | Phase 5 | Pending |
-| SAF-03 | Phase 5 | Pending |
-| SAF-04 | Phase 5 | Pending |
-| SAF-05 | Phase 5 | Pending |
-| MCP-01 | Phase 6 | Pending |
-| MCP-02 | Phase 6 | Pending |
-| PKG-01 | Phase 7 | Pending |
-| PKG-02 | Phase 7 | Pending |
-| PKG-03 | Phase 7 | Pending |
-
-**v1 Coverage:** 44/44 requirements mapped (100%) — delivered in Phases 1-7
-**v1.1 Coverage:** 10/10 multi-account requirements — delivered in Phase 8
-**v2.0 Coverage:** 15/15 requirements defined — pending phase mapping
-
-## v2.0 Traceability
+### v1.0 (Phases 1-7) — Complete
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PLGD-01 | TBD | Pending |
-| PLGD-02 | TBD | Pending |
-| PLGD-03 | TBD | Pending |
-| PLGD-04 | TBD | Pending |
-| SCOPE-01 | TBD | Pending |
-| SCOPE-02 | TBD | Pending |
-| SCOPE-03 | TBD | Pending |
-| SCOPE-04 | TBD | Pending |
-| SCOPE-05 | TBD | Pending |
-| SYNC-01 | TBD | Pending |
-| SYNC-02 | TBD | Pending |
-| SYNC-03 | TBD | Pending |
-| SYNC-04 | TBD | Pending |
-| ENV-01 | TBD | Pending |
-| ENV-02 | TBD | Pending |
-| ENV-03 | TBD | Pending |
-| STATE-01 | TBD | Pending |
-| STATE-02 | TBD | Pending |
-| STATE-03 | TBD | Pending |
+| CORE-01 | Phase 1 | Complete |
+| CORE-02 | Phase 1 | Complete |
+| CORE-03 | Phase 1 | Complete |
+| CORE-04 | Phase 1 | Complete |
+| CORE-05 | Phase 1 | Complete |
+| SRC-01 | Phase 1 | Complete |
+| SRC-02 | Phase 1 | Complete |
+| SRC-03 | Phase 1 | Complete |
+| SRC-04 | Phase 1 | Complete |
+| SRC-05 | Phase 1 | Complete |
+| SRC-06 | Phase 1 | Complete |
+| ADP-01 | Phase 2 | Complete |
+| ADP-02 | Phase 2 | Complete |
+| ADP-03 | Phase 2 | Complete |
+| CDX-01 | Phase 2 | Complete |
+| CDX-02 | Phase 2 | Complete |
+| CDX-03 | Phase 2 | Complete |
+| CDX-04 | Phase 2 | Complete |
+| CDX-05 | Phase 2 | Complete |
+| CDX-06 | Phase 2 | Complete |
+| GMN-01 | Phase 3 | Complete |
+| GMN-02 | Phase 3 | Complete |
+| GMN-03 | Phase 3 | Complete |
+| GMN-04 | Phase 3 | Complete |
+| GMN-05 | Phase 3 | Complete |
+| GMN-06 | Phase 3 | Complete |
+| OC-01 | Phase 3 | Complete |
+| OC-02 | Phase 3 | Complete |
+| OC-03 | Phase 3 | Complete |
+| OC-04 | Phase 3 | Complete |
+| OC-05 | Phase 3 | Complete |
+| OC-06 | Phase 3 | Complete |
+| PLG-01 | Phase 4 | Complete |
+| PLG-02 | Phase 4 | Complete |
+| PLG-03 | Phase 4 | Complete |
+| PLG-04 | Phase 4 | Complete |
+| PLG-05 | Phase 4 | Complete |
+| SAF-01 | Phase 5 | Complete |
+| SAF-02 | Phase 5 | Complete |
+| SAF-03 | Phase 5 | Complete |
+| SAF-04 | Phase 5 | Complete |
+| SAF-05 | Phase 5 | Complete |
+| MCP-01 | Phase 6 | Complete |
+| MCP-02 | Phase 6 | Complete |
+| PKG-01 | Phase 7 | Complete |
+| PKG-02 | Phase 7 | Complete |
+| PKG-03 | Phase 7 | Complete |
+
+**v1.0 Coverage:** 44/44 requirements mapped (100%) — delivered 2026-02-15
+
+### v1.1 (Phase 8) — Complete
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| MULTI-01 | Phase 8 | Complete |
+| MULTI-02 | Phase 8 | Complete |
+| MULTI-03 | Phase 8 | Complete |
+| MULTI-04 | Phase 8 | Complete |
+| MULTI-05 | Phase 8 | Complete |
+| MULTI-06 | Phase 8 | Complete |
+| MULTI-07 | Phase 8 | Complete |
+| MULTI-08 | Phase 8 | Complete |
+| MULTI-09 | Phase 8 | Complete |
+| MULTI-10 | Phase 8 | Complete |
+
+**v1.1 Coverage:** 10/10 multi-account requirements — delivered 2026-02-15
+
+### v2.0 (Phases 9-11) — In Progress
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| PLGD-01 | Phase 9 | Pending |
+| PLGD-02 | Phase 9 | Pending |
+| PLGD-03 | Phase 9 | Pending |
+| PLGD-04 | Phase 9 | Pending |
+| SCOPE-01 | Phase 9 | Pending |
+| SCOPE-02 | Phase 9 | Pending |
+| SCOPE-03 | Phase 9 | Pending |
+| SCOPE-04 | Phase 9 | Pending |
+| SCOPE-05 | Phase 9 | Pending |
+| SYNC-01 | Phase 10 | Pending |
+| SYNC-02 | Phase 10 | Pending |
+| SYNC-03 | Phase 10 | Pending |
+| SYNC-04 | Phase 10 | Pending |
+| ENV-01 | Phase 10 | Pending |
+| ENV-02 | Phase 10 | Pending |
+| ENV-03 | Phase 10 | Pending |
+| STATE-01 | Phase 11 | Pending |
+| STATE-02 | Phase 11 | Pending |
+| STATE-03 | Phase 11 | Pending |
+
+**v2.0 Coverage:** 19/19 requirements mapped (100%)
 
 ---
-*Requirements defined: 2026-02-13 (v1), 2026-02-15 (v2.0)*
+
+*Requirements defined: 2026-02-13 (v1), 2026-02-15 (v1.1, v2.0)*
 *Source: Research v2-SUMMARY.md, v2-gemini-extensions.md, v2-codex-mcp.md, v2-claude-plugins.md*
 *Traceability updated: 2026-02-15*

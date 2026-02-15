@@ -2,191 +2,165 @@
 
 ## Overview
 
-Transform the proven cc2all sync script into a production-ready Claude Code plugin with hooks, slash commands, and MCP server integration. The roadmap prioritizes foundation-first (state management, symlink handling) then proves the adapter pattern with Codex (most complex), extends to Gemini/OpenCode, adds user-facing interfaces, validates security, and packages for distribution.
+HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. v1.0 delivered the core plugin with hooks, slash commands, MCP server, and multi-account support. **v2.0** extends MCP discovery to include Claude Code plugins with proper scope-aware syncing (user/project/local scopes to target-native scopes).
 
-**Phases:** 8 (8 complete)
-**Depth:** Standard (5-8 phases)
-**Coverage:** 47/47 v1 requirements mapped + Phase 8 multi-account complete
+**Phases:** 11 (8 complete, 3 in v2.0)
+**Depth:** Standard (3-4 phases for v2.0)
+**Coverage:** 47/47 v1 requirements + 19/19 v2.0 requirements mapped
 
 ---
 
-## Phase 1: Foundation & State Management
+## v1.0 Phases (Complete)
+
+### Phase 1: Foundation & State Management ✓
 
 **Goal:** Establish core infrastructure with hash-based drift detection, OS-aware symlink creation, and Claude Code config discovery.
 
-**Dependencies:** None (starting point)
-
+**Status:** Complete (2026-02-13)
 **Requirements:** CORE-01, CORE-02, CORE-03, CORE-04, CORE-05, SRC-01, SRC-02, SRC-03, SRC-04, SRC-05, SRC-06
-
-**Plans:** 4 plans
-
-Plans:
-- [ ] 01-01-PLAN.md — Core utilities: Logger, SHA256 hashing, OS-aware symlink with fallback chain
-- [ ] 01-02-PLAN.md — State manager with atomic writes, per-target tracking, drift detection
-- [ ] 01-03-PLAN.md — Source reader discovering all 6 Claude Code config types
-- [ ] 01-04-PLAN.md — Plugin manifest, cc2all rename, integration smoke test
-
-**Success Criteria:**
-1. State manager tracks sync timestamps and file hashes (SHA256) for all target configs in JSON format
-2. OS-aware symlink creation succeeds on macOS/Linux (native) and Windows (junction fallback, copy with marker as last resort)
-3. Source reader discovers all Claude Code configs (CLAUDE.md, skills, agents, commands, MCP servers, settings) from both user scope (~/.claude/) and project scope (.claude/)
-4. Logger produces colored output with summary statistics (synced/skipped/error/cleaned counts) and audit trail
-5. All references to cc2all renamed to HarnessSync across codebase
-
-**Verification Level:** sanity
+**Plans:** 4/4 complete
+**Verification:** sanity (passed)
 
 ---
 
-## Phase 2: Adapter Framework & Codex Sync
+### Phase 2: Adapter Framework & Codex Sync ✓
 
 **Goal:** Create extensible adapter pattern and implement Codex adapter with full JSON→TOML translation, agent→skill conversion, and MCP server format mapping.
 
-**Dependencies:** Phase 1 (needs source reader, state manager, path utilities)
-
+**Status:** Complete (2026-02-13)
 **Requirements:** ADP-01, ADP-02, ADP-03, CDX-01, CDX-02, CDX-03, CDX-04, CDX-05, CDX-06
-
-**Plans:** 3 plans
-
-Plans:
-- [ ] 02-01-PLAN.md — Adapter framework: ABC base class, decorator registry, SyncResult dataclass, TOML writer utility
-- [ ] 02-02-PLAN.md — Codex adapter: rules to AGENTS.md, skills symlinks, agent-to-skill and command-to-skill conversion
-- [ ] 02-03-PLAN.md — Codex adapter: MCP server JSON-to-TOML translation, permission mapping, integration verification
-
-**Success Criteria:**
-1. Abstract adapter base class defines sync_rules(), sync_skills(), sync_agents(), sync_commands(), sync_mcp(), sync_settings() interface
-2. Adapter registry discovers and routes to target-specific adapters without modifying core engine
-3. Codex adapter translates MCP servers from JSON to TOML [mcp_servers."name"] format with env var preservation
-4. Codex adapter converts Claude Code agents to SKILL.md format in .codex/skills/agent-{name}/ with extracted descriptions
-5. Codex adapter maps Claude Code permission settings to Codex sandbox levels (read-only/workspace-write/danger-full-access) with conservative defaults
-6. Each adapter returns structured sync results (synced/skipped/failed/adapted counts with specific file paths)
-
-**Verification Level:** proxy
+**Plans:** 3/3 complete
+**Verification:** proxy (passed)
 
 ---
 
-## Phase 3: Gemini & OpenCode Adapters
+### Phase 3: Gemini & OpenCode Adapters ✓
 
 **Goal:** Implement remaining target adapters (Gemini with inline skills, OpenCode with native agent/command support) to validate adapter pattern extensibility.
 
-**Dependencies:** Phase 2 (needs adapter base class, registry pattern proven)
-
+**Status:** Complete (2026-02-13)
 **Requirements:** GMN-01, GMN-02, GMN-03, GMN-04, GMN-05, GMN-06, OC-01, OC-02, OC-03, OC-04, OC-05, OC-06
-
-**Plans:** 2 plans
-
-Plans:
-- [ ] 03-01-PLAN.md — Gemini adapter: GEMINI.md inline content (rules, skills, agents, commands), settings.json MCP translation, permission mapping, write_json_atomic utility
-- [ ] 03-02-PLAN.md — OpenCode adapter: symlink-based sync (skills, agents, commands), opencode.json MCP translation, permission mapping, 3-adapter integration verification
-
-**Success Criteria:**
-1. Gemini adapter inlines skills content into GEMINI.md (strips YAML frontmatter, adds section headers) since Gemini cannot use symlinks
-2. Gemini adapter translates MCP servers to settings.json mcpServers format with npx mcp-remote wrapper for URL types
-3. OpenCode adapter creates symlinks for skills/agents/commands to .opencode/ directories with stale symlink cleanup
-4. OpenCode adapter translates MCP servers to opencode.json format with type: "remote" for URL servers
-5. All three adapters (Codex, Gemini, OpenCode) successfully sync a test project with rules, 3 skills, 2 agents, 1 command, 2 MCP servers, and permission settings
-6. Permission mapping for all adapters uses conservative translation (Claude "deny" → skip tool in target, warn on permission downgrades)
-
-**Verification Level:** proxy
+**Plans:** 2/2 complete
+**Verification:** proxy (passed)
 
 ---
 
-## Phase 4: Plugin Interface (Commands, Hooks, Skills)
+### Phase 4: Plugin Interface (Commands, Hooks, Skills) ✓
 
 **Goal:** Deliver user-facing components for manual control (/sync), reactive auto-sync (PostToolUse hooks), and status visibility (/sync-status).
 
-**Dependencies:** Phase 3 (needs working sync engine with all adapters)
-
+**Status:** Complete (2026-02-14)
 **Requirements:** PLG-01, PLG-02, PLG-03, PLG-04, PLG-05
-
-**Plans:** 3 plans
-
-Plans:
-- [ ] 04-01-PLAN.md — Orchestrator, file locking, debouncing, and diff formatter (foundation for commands/hooks)
-- [ ] 04-02-PLAN.md — /sync and /sync-status slash commands with argument parsing, dry-run mode
-- [ ] 04-03-PLAN.md — PostToolUse hook for auto-sync, hooks.json configuration, plugin.json update
-
-**Success Criteria:**
-1. /sync slash command syncs all targets with optional scope argument (user/project/all) and returns summary statistics
-2. /sync-status slash command shows last sync time per target, drift detection (config modified outside HarnessSync), and file hash comparison
-3. PostToolUse hook triggers auto-sync when Claude Code writes to config files (CLAUDE.md, .mcp.json, skills/, agents/, commands/, settings.json)
-4. Hook implements 3-second debounce (skip if last sync <3s ago) and file-based locking (~/.harnesssync/sync.lock) to prevent concurrent syncs
-5. Dry run mode (--dry-run flag) previews changes without writing, showing diff-like output for rules/skills/MCP changes
-
-**Verification Level:** proxy
+**Plans:** 3/3 complete
+**Verification:** proxy (passed)
 
 ---
 
-## Phase 5: Safety & Validation
+### Phase 5: Safety & Validation ✓
 
 **Goal:** Implement security validations (permission audits, secret detection, conflict warnings) and rollback capabilities before MVP release.
 
-**Dependencies:** Phase 4 (needs full plugin interface to test validation flows)
-
+**Status:** Complete (2026-02-14)
 **Requirements:** SAF-01, SAF-02, SAF-03, SAF-04, SAF-05
-
-**Plans:** 3 plans
-
-Plans:
-- [ ] 05-01-PLAN.md — Backup manager with timestamped backup/rollback and symlink cleaner for broken link removal
-- [ ] 05-02-PLAN.md — Conflict detector (hash-based drift) and secret detector (keyword+regex env var scanning)
-- [ ] 05-03-PLAN.md — Compatibility reporter and orchestrator/command integration of all safety features
-
-**Success Criteria:**
-1. Pre-sync backup creates timestamped copies of target configs in ~/.harnesssync/backups/ and enables rollback on failure
-2. Conflict detection warns when target configs have SHA256 hash mismatch from last recorded sync (manual edits detected)
-3. Secret detection scans env vars for patterns (API_KEY, SECRET, PASSWORD, TOKEN) and blocks sync with warning unless --allow-secrets flag used
-4. Sync compatibility report shows what mapped cleanly, what was adapted (with explanation), and what couldn't be synced per target
-5. Stale symlink cleanup removes broken symlinks in .codex/skills/, .opencode/skills/, .opencode/agents/, .opencode/commands/ after every sync
-
-**Verification Level:** proxy
+**Plans:** 3/3 complete
+**Verification:** proxy (passed)
 
 ---
 
-## Phase 6: MCP Server Integration
+### Phase 6: MCP Server Integration ✓
 
 **Goal:** Expose sync capabilities as MCP tools for programmatic access by other agents and cross-CLI orchestration.
 
-**Dependencies:** Phase 5 (needs complete, validated sync engine)
-
+**Status:** Complete (2026-02-15)
 **Requirements:** MCP-01, MCP-02
+**Plans:** 2/2 complete
+**Verification:** proxy (passed)
 
-**Plans:** 2 plans
+---
 
-Plans:
-- [ ] 06-01-PLAN.md — MCP protocol foundation: stdio transport, JSON-RPC 2.0 handler, tool schemas with manual validation
-- [ ] 06-02-PLAN.md — Tool handlers bridging MCP to SyncOrchestrator, server entry point with worker thread concurrency
+### Phase 7: Packaging & Distribution ✓
+
+**Goal:** Prepare plugin for marketplace distribution with proper structure validation, installation testing, and documentation.
+
+**Status:** Complete (2026-02-15)
+**Requirements:** PKG-01, PKG-02, PKG-03
+**Plans:** 3/3 complete
+**Verification:** proxy (passed)
+
+---
+
+### Phase 8: Multi-Account Support ✓
+
+**Goal:** Enable sync across multiple harness accounts with discovery, configuration, and account-scoped sync operations.
+
+**Status:** Complete (2026-02-15)
+**Requirements:** MULTI-01 through MULTI-10 (10 requirements)
+**Plans:** 4/4 complete
+**Verification:** proxy (passed)
+
+---
+
+## v2.0 Phases (Milestone: Plugin & MCP Scope Sync)
+
+### Phase 9: Plugin Discovery & Scope-Aware Source Reading
+
+**Goal:** Extend SourceReader to discover MCP servers from installed Claude Code plugins and implement 3-tier scope awareness (user/project/local) with proper precedence handling.
+
+**Dependencies:** Phase 1 (SourceReader exists), Phase 8 (account-aware infrastructure)
+
+**Requirements:** PLGD-01, PLGD-02, PLGD-03, PLGD-04, SCOPE-01, SCOPE-02, SCOPE-03, SCOPE-04, SCOPE-05
 
 **Success Criteria:**
-1. MCP server exposes sync_all, sync_target, get_status tools with JSON schema validation
-2. MCP server returns structured sync results (targets synced, items per target, errors with file paths and reasons)
-3. External agent can invoke sync_target("codex") and receive confirmation within 5 seconds for typical project
-4. MCP server handles concurrent requests gracefully (queues syncs, returns status for in-progress operations)
+1. SourceReader discovers installed Claude Code plugins from `~/.claude/plugins/installed_plugins.json` with proper version tracking
+2. SourceReader extracts MCP server configs from plugin cache directories (both `.mcp.json` and inline `plugin.json` formats)
+3. SourceReader resolves `${CLAUDE_PLUGIN_ROOT}` variable to absolute plugin cache paths during discovery
+4. SourceReader reads user-scope MCPs from `~/.claude.json` top-level `mcpServers`, project-scope from `.mcp.json`, and local-scope from `~/.claude.json projects[path].mcpServers`
+5. Each discovered MCP server tagged with origin scope (user/project/local/plugin) and plugin metadata (name, version) if applicable
+6. MCP deduplication respects precedence (local > project > user), with plugin MCPs treated as user-scope
+7. Test discovery with 3 plugins providing total 5 MCP servers across 3 scopes, verifying 100% discovery and correct precedence resolution
 
 **Verification Level:** proxy
 
 ---
 
-## Phase 7: Packaging & Distribution
+### Phase 10: Scope-Aware Target Sync & Environment Translation
 
-**Goal:** Prepare plugin for marketplace distribution with proper structure validation, installation testing, and documentation.
+**Goal:** Implement scope-to-target mapping for Gemini and Codex adapters, translate environment variable syntax between Claude/Codex/Gemini formats, and detect unsupported transport types.
 
-**Dependencies:** Phase 6 (needs complete feature set)
+**Dependencies:** Phase 9 (scope-tagged MCPs available), Phase 2 (Codex adapter), Phase 3 (Gemini adapter)
 
-**Requirements:** PKG-01, PKG-02, PKG-03
-
-**Plans:** 3 plans
-
-Plans:
-- [ ] 07-01-PLAN.md — Plugin structure: move plugin.json to .claude-plugin/, create marketplace.json
-- [ ] 07-02-PLAN.md — Install.sh and shell-integration.sh overhaul (HarnessSync branding, --dry-run, platform detection)
-- [ ] 07-03-PLAN.md — GitHub Actions CI workflow and comprehensive local verification
+**Requirements:** SYNC-01, SYNC-02, SYNC-03, SYNC-04, ENV-01, ENV-02, ENV-03
 
 **Success Criteria:**
-1. Plugin passes `claude plugin validate` with no errors (correct directory structure, valid plugin.json, hooks config)
-2. Plugin published to Claude Code marketplace with marketplace.json containing absolute URLs and proper metadata
-3. Plugin installable from GitHub repository via `/plugin install github:username/HarnessSync`
-4. install.sh creates target directories (~/.codex/, ~/.gemini/, ~/.opencode/), detects shell (bash/zsh), and configures shell integration
-5. Installation testing succeeds on macOS (native), Linux (native), and Windows (WSL2, native with junction fallback)
+1. Gemini adapter writes user-scope MCPs to `~/.gemini/settings.json` and project-scope MCPs to `.gemini/settings.json` (workspace-scoped file)
+2. Codex adapter writes user-scope MCPs to `~/.codex/config.toml` and project-scope MCPs to `.codex/config.toml` (project-scoped file)
+3. Plugin-discovered MCPs sync to user-scope target configs (plugin MCPs are always user-level, never project)
+4. Environment variable translation converts Claude's `${VAR}` interpolation syntax to Codex literal `env` map format with key-value pairs
+5. Environment variable translation handles `${VAR:-default}` default value syntax by expanding to `env` map with warning if VAR is undefined
+6. Environment variable references preserved in Gemini settings.json format (Gemini supports `${VAR}` natively)
+7. Adapters detect unsupported transport types per target (SSE on Codex, custom protocols) and log warnings with transport name instead of silently skipping
+8. Integration test with 2 user-scope MCPs (1 with `${API_KEY}`, 1 with `${PORT:-3000}`), 1 project-scope MCP, and 1 plugin MCP verifies all targets receive correct scoped configs
+
+**Verification Level:** proxy
+
+---
+
+### Phase 11: State Enhancements & Integration
+
+**Goal:** Extend StateManager to track plugin versions for update-triggered re-sync, enhance /sync-status to display plugin-discovered MCPs with scope labels, and implement drift detection for plugin MCP changes.
+
+**Dependencies:** Phase 9 (plugin discovery), Phase 10 (scope-aware sync working)
+
+**Requirements:** STATE-01, STATE-02, STATE-03
+
+**Success Criteria:**
+1. StateManager tracks plugin versions and MCP server counts per plugin in state.json schema (plugin_name → {version, mcp_count, last_sync})
+2. StateManager detects plugin version changes on next sync and triggers re-sync of plugin-provided MCPs automatically
+3. /sync-status command displays plugin-discovered MCPs separately from user-configured MCPs with scope labels (user/project/local/plugin)
+4. /sync-status groups MCPs by source: "User-configured", "Project-configured", "Plugin-provided (plugin-name@version)"
+5. Drift detection extends to plugin MCP changes by comparing stored plugin version/mcp_count with current values
+6. Integration test with plugin update simulation (version 1.0.0 → 1.1.0 adding new MCP server) verifies re-sync trigger and status display
+7. Full pipeline validation with all v2.0 requirements: 3 plugins, 2 user MCPs, 1 project MCP, 1 local MCP verifies 100% discovery, correct scoping, env var translation, and drift detection
 
 **Verification Level:** proxy
 
@@ -203,49 +177,48 @@ Plans:
 | 5 - Safety & Validation | Complete | 3/3 | proxy | ██████████ 100% |
 | 6 - MCP Server Integration | Complete | 2/2 | proxy | ██████████ 100% |
 | 7 - Packaging & Distribution | Complete | 3/3 | proxy | ██████████ 100% |
-| 8 - Multi-Account Support | Planned | 0/4 | proxy | ░░░░░░░░░░ 0% |
+| 8 - Multi-Account Support | Complete | 4/4 | proxy | ██████████ 100% |
+| **9 - Plugin Discovery & Scope-Aware Reading** | **Pending** | **0/0** | **proxy** | **░░░░░░░░░░ 0%** |
+| **10 - Scope-Aware Sync & Env Translation** | **Pending** | **0/0** | **proxy** | **░░░░░░░░░░ 0%** |
+| **11 - State Enhancements & Integration** | **Pending** | **0/0** | **proxy** | **░░░░░░░░░░ 0%** |
 
 ---
 
-## Phase 8: Multi-Account Support
+## v2.0 Coverage
 
-**Goal:** Enable sync across multiple harness accounts. Users may have multiple Claude Code config directories (e.g. `~/.claude-personal1`, `~/.claude-personal2`) and multiple accounts for Codex, Gemini, and OpenCode. HarnessSync should provide a setup process to discover, configure, and sync across all account/config pairs.
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| PLGD-01 | Phase 9 | Pending |
+| PLGD-02 | Phase 9 | Pending |
+| PLGD-03 | Phase 9 | Pending |
+| PLGD-04 | Phase 9 | Pending |
+| SCOPE-01 | Phase 9 | Pending |
+| SCOPE-02 | Phase 9 | Pending |
+| SCOPE-03 | Phase 9 | Pending |
+| SCOPE-04 | Phase 9 | Pending |
+| SCOPE-05 | Phase 9 | Pending |
+| SYNC-01 | Phase 10 | Pending |
+| SYNC-02 | Phase 10 | Pending |
+| SYNC-03 | Phase 10 | Pending |
+| SYNC-04 | Phase 10 | Pending |
+| ENV-01 | Phase 10 | Pending |
+| ENV-02 | Phase 10 | Pending |
+| ENV-03 | Phase 10 | Pending |
+| STATE-01 | Phase 11 | Pending |
+| STATE-02 | Phase 11 | Pending |
+| STATE-03 | Phase 11 | Pending |
 
-**Dependencies:** Phase 7 (needs complete v1.0 plugin)
-
-**Requirements:** MULTI-01 (AccountManager CRUD), MULTI-02 (AccountDiscovery), MULTI-03 (SetupWizard), MULTI-04 (SourceReader cc_home), MULTI-05 (StateManager v2 migration), MULTI-06 (StateManager account-scoped ops), MULTI-07 (Orchestrator account-aware), MULTI-08 (/sync --account), MULTI-09 (/sync-status --account), MULTI-10 (/sync-setup command)
-
-**Plans:** 4 plans
-
-Plans:
-- [ ] 08-01-PLAN.md — AccountManager CRUD + AccountDiscovery filesystem scanning
-- [ ] 08-02-PLAN.md — SourceReader cc_home parameterization + StateManager v2 migration
-- [ ] 08-03-PLAN.md — SetupWizard interactive setup + /sync-setup command
-- [ ] 08-04-PLAN.md — Orchestrator account-aware sync + /sync, /sync-status extensions
-
-**Success Criteria:**
-1. Setup command (`/sync-setup`) discovers and registers multiple Claude Code config directories
-2. Each source account can be mapped to specific target accounts (e.g. personal Claude -> personal Codex, work Claude -> work Codex)
-3. Sync operates independently per account pair without cross-contamination
-4. Status command shows per-account sync state and drift detection
-5. Configuration stored in `~/.harnesssync/accounts.json` with account name, source path, and target mappings
-
-**Verification Level:** proxy
+**Coverage:** 19/19 v2.0 requirements mapped (100%)
 
 ---
 
-*Roadmap created: 2026-02-13*
-*Phase 1 planned: 2026-02-13*
-*Phase 2 planned: 2026-02-13*
-*Phase 2 complete: 2026-02-13*
-*Phase 3 planned: 2026-02-13*
-*Phase 3 complete: 2026-02-13*
-*Phase 4 planned: 2026-02-14*
-*Phase 4 complete: 2026-02-14*
-*Phase 5 planned: 2026-02-14*
-*Phase 5 complete: 2026-02-14*
-*Phase 6 complete: 2026-02-15*
-*Phase 7 complete: 2026-02-15*
-*Phase 8 added: 2026-02-15*
-*Phase 8 planned: 2026-02-15*
-*Phase 8 complete: 2026-02-15*
+## Integration Phase
+
+Not required for v2.0. All phases use proxy verification with no deferred validations.
+
+---
+
+*v1.0 roadmap created: 2026-02-13*
+*v1.0 complete: 2026-02-15 (8 phases, 24 plans)*
+*v2.0 roadmap created: 2026-02-15*
+*Next: `/grd:plan-phase 9`*
