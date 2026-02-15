@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 import sys
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent))
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.adapters import AdapterRegistry
 from src.utils.toml_writer import read_toml_safe

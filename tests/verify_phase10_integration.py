@@ -17,6 +17,9 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 # Set test env vars BEFORE imports
 os.environ["TEST_API_KEY"] = "sk-test-integration-key"
 os.environ.pop("UNDEFINED_PORT", None)
