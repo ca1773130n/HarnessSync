@@ -253,7 +253,9 @@ class CodexAdapter(AdapterBase):
                 skill_content = self._format_skill_md(name, description, instructions)
 
                 # Write to .agents/skills/cmd-{name}/SKILL.md
-                skill_dir = self.skills_dir / f"cmd-{cmd_name}"
+                # Sanitize colons from namespaced commands (e.g. harness:setup -> harness-setup)
+                safe_name = cmd_name.replace(':', '-')
+                skill_dir = self.skills_dir / f"cmd-{safe_name}"
                 ensure_dir(skill_dir)
                 skill_md = skill_dir / "SKILL.md"
                 skill_md.write_text(skill_content, encoding='utf-8')
