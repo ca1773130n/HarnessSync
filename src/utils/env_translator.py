@@ -7,7 +7,7 @@ and target CLI formats:
 - ENV-02: ${VAR:-default} syntax must be expanded at sync time for Codex
 - ENV-03: Gemini supports ${VAR} natively, no translation needed
 
-Updates Decision #13: v1.0 preserved ${VAR} in TOML; v2.0 translates for Codex
+Updates Decision #13: v0.0.1 preserved ${VAR} in TOML; v0.0.2 translates for Codex
 since Codex doesn't support runtime variable interpolation.
 
 Transport detection validates MCP server compatibility per target CLI:

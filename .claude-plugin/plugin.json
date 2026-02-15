@@ -1,6 +1,6 @@
 {
   "name": "HarnessSync",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Sync Claude Code configuration to Codex, Gemini CLI, and OpenCode. Configure once, sync everywhere.",
   "author": "HarnessSync Contributors",
   "license": "MIT",
