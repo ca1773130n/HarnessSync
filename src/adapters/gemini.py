@@ -19,6 +19,7 @@ from .base import AdapterBase
 from .registry import AdapterRegistry
 from .result import SyncResult
 from src.utils.paths import ensure_dir, read_json_safe, write_json_atomic
+from src.utils.env_translator import check_transport_support
 
 
 # Gemini CLI constants
@@ -312,11 +313,86 @@ class GeminiAdapter(AdapterBase):
         if not mcp_servers:
             return SyncResult()
 
+        return self._write_mcp_to_settings(mcp_servers, self.settings_path)
+
+    def sync_mcp_scoped(self, mcp_servers_scoped: dict[str, dict]) -> SyncResult:
+        """Translate MCP server configs with scope routing for Gemini.
+
+        Routes servers by scope:
+        - user/local/plugin -> user-scope config (~/.gemini/settings.json)
+        - project -> project-scope config (.gemini/settings.json)
+
+        Preserves ${VAR} syntax as-is (Gemini supports native interpolation).
+        Skips unsupported transports with warning.
+
+        Args:
+            mcp_servers_scoped: Dict mapping server name to scoped server data
+
+        Returns:
+            SyncResult with combined counts from both scope writes
+        """
+        if not mcp_servers_scoped:
+            return SyncResult()
+
+        result = SyncResult()
+        user_servers = {}
+        project_servers = {}
+
+        for server_name, server_data in mcp_servers_scoped.items():
+            config = server_data.get("config", server_data)
+            metadata = server_data.get("metadata", {})
+            scope = metadata.get("scope", "user")
+
+            # Plugin MCPs always route to user scope (Decision #34)
+            if metadata.get("source") == "plugin" or scope == "local":
+                scope = "user"
+
+            # Transport validation
+            ok, msg = check_transport_support(server_name, config, "gemini")
+            if not ok:
+                result.skipped += 1
+                result.skipped_files.append(msg)
+                continue
+
+            # No env var translation for Gemini (ENV-03: preserves ${VAR} natively)
+
+            # Route to correct scope bucket
+            if scope == "project":
+                project_servers[server_name] = config
+            else:
+                user_servers[server_name] = config
+
+        # Write user-scope servers
+        if user_servers:
+            user_path = Path.home() / ".gemini" / SETTINGS_JSON
+            user_result = self._write_mcp_to_settings(user_servers, user_path)
+            result = result.merge(user_result)
+
+        # Write project-scope servers
+        if project_servers:
+            project_path = self.project_dir / ".gemini" / SETTINGS_JSON
+            project_result = self._write_mcp_to_settings(project_servers, project_path)
+            result = result.merge(project_result)
+
+        return result
+
+    def _write_mcp_to_settings(self, mcp_servers: dict[str, dict], settings_path: Path) -> SyncResult:
+        """Write MCP servers to a specific settings.json path.
+
+        Reads existing settings, merges mcpServers, writes atomically.
+
+        Args:
+            mcp_servers: Dict mapping server name to server config dict
+            settings_path: Target settings.json path
+
+        Returns:
+            SyncResult with synced count and path
+        """
         result = SyncResult()
 
         try:
             # Read existing settings.json
-            existing_settings = read_json_safe(self.settings_path)
+            existing_settings = read_json_safe(settings_path)
 
             # Initialize mcpServers section
             existing_settings.setdefault('mcpServers', {})
@@ -358,9 +434,10 @@ class GeminiAdapter(AdapterBase):
                 result.synced += 1
 
             # Write atomically
-            write_json_atomic(self.settings_path, existing_settings)
+            ensure_dir(settings_path.parent)
+            write_json_atomic(settings_path, existing_settings)
 
-            result.synced_files.append(str(self.settings_path))
+            result.synced_files.append(str(settings_path))
 
         except Exception as e:
             result.failed = len(mcp_servers)

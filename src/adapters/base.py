@@ -112,6 +112,24 @@ class AdapterBase(ABC):
         """
         pass
 
+    def sync_mcp_scoped(self, mcp_servers_scoped: dict[str, dict]) -> SyncResult:
+        """Translate MCP server configs with scope metadata to target format.
+
+        Receives Phase 9 scoped format:
+            {server_name: {"config": {...}, "metadata": {"scope": "user|project|local", "source": "file|plugin", ...}}}
+
+        Default implementation falls back to sync_mcp() with flat config for
+        backward compatibility. Adapters override this for scope-aware routing.
+
+        Args:
+            mcp_servers_scoped: Dict mapping server name to scoped server data
+
+        Returns:
+            SyncResult tracking synced/skipped/failed MCP servers
+        """
+        flat = {name: entry.get("config", entry) for name, entry in mcp_servers_scoped.items()}
+        return self.sync_mcp(flat)
+
     @abstractmethod
     def sync_settings(self, settings: dict) -> SyncResult:
         """Map settings to target configuration.
@@ -175,9 +193,13 @@ class AdapterBase(ABC):
                 failed_files=[f'commands: {str(e)}']
             )
 
-        # Sync MCP servers
+        # Sync MCP servers (use scoped data if available, fall back to flat)
         try:
-            results['mcp'] = self.sync_mcp(source_data.get('mcp', {}))
+            mcp_scoped = source_data.get('mcp_scoped', {})
+            if mcp_scoped:
+                results['mcp'] = self.sync_mcp_scoped(mcp_scoped)
+            else:
+                results['mcp'] = self.sync_mcp(source_data.get('mcp', {}))
         except Exception as e:
             results['mcp'] = SyncResult(
                 failed=1,

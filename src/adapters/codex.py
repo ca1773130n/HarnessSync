@@ -26,6 +26,7 @@ from src.utils.toml_writer import (
     escape_toml_string,
     read_toml_safe,
 )
+from src.utils.env_translator import translate_env_vars_for_codex, check_transport_support
 
 
 # Codex CLI constants
@@ -283,14 +284,89 @@ class CodexAdapter(AdapterBase):
         if not mcp_servers:
             return SyncResult()
 
+        config_path = self.project_dir / ".codex" / CONFIG_TOML
+        return self._write_mcp_to_path(mcp_servers, config_path)
+
+    def sync_mcp_scoped(self, mcp_servers_scoped: dict[str, dict]) -> SyncResult:
+        """Translate MCP server configs with scope routing and env var translation.
+
+        Routes servers by scope:
+        - user/local/plugin -> user-scope config (~/.codex/codex.toml)
+        - project -> project-scope config (.codex/codex.toml)
+
+        Translates ${VAR} to resolved values for Codex (no native interpolation).
+        Skips unsupported transports (SSE) with warning.
+
+        Args:
+            mcp_servers_scoped: Dict mapping server name to scoped server data
+
+        Returns:
+            SyncResult with combined counts from both scope writes
+        """
+        if not mcp_servers_scoped:
+            return SyncResult()
+
+        result = SyncResult()
+        user_servers = {}
+        project_servers = {}
+
+        for server_name, server_data in mcp_servers_scoped.items():
+            config = server_data.get("config", server_data)
+            metadata = server_data.get("metadata", {})
+            scope = metadata.get("scope", "user")
+
+            # Plugin MCPs always route to user scope (Decision #34)
+            if metadata.get("source") == "plugin" or scope == "local":
+                scope = "user"
+
+            # Transport validation
+            ok, msg = check_transport_support(server_name, config, "codex")
+            if not ok:
+                result.skipped += 1
+                result.skipped_files.append(msg)
+                continue
+
+            # Env var translation for Codex
+            translated_config, warnings = translate_env_vars_for_codex(config)
+            result.skipped_files.extend(warnings)
+
+            # Route to correct scope bucket
+            if scope == "project":
+                project_servers[server_name] = translated_config
+            else:
+                user_servers[server_name] = translated_config
+
+        # Write user-scope servers
+        if user_servers:
+            user_path = Path.home() / ".codex" / CONFIG_TOML
+            user_result = self._write_mcp_to_path(user_servers, user_path)
+            result = result.merge(user_result)
+
+        # Write project-scope servers
+        if project_servers:
+            project_path = self.project_dir / ".codex" / CONFIG_TOML
+            project_result = self._write_mcp_to_path(project_servers, project_path)
+            result = result.merge(project_result)
+
+        return result
+
+    def _write_mcp_to_path(self, mcp_servers: dict[str, dict], config_path: Path) -> SyncResult:
+        """Write MCP servers to a specific config.toml path.
+
+        Reads existing config, merges servers, writes atomically.
+
+        Args:
+            mcp_servers: Dict mapping server name to server config dict
+            config_path: Target config.toml path
+
+        Returns:
+            SyncResult with synced count and path
+        """
         result = SyncResult()
 
         try:
-            # Config target path
-            config_path = self.project_dir / ".codex" / CONFIG_TOML
-
             # Read existing config to preserve settings and merge MCP servers
-            existing_config = self._read_existing_config()
+            existing_config = read_toml_safe(config_path)
 
             # Merge MCP servers (new servers override existing with same name)
             merged_mcp_servers = existing_config.get('mcp_servers', {}).copy()

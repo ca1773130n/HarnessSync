@@ -25,6 +25,7 @@ from src.utils.paths import (
     read_json_safe,
     write_json_atomic,
 )
+from src.utils.env_translator import check_transport_support
 
 
 # OpenCode CLI constants
@@ -249,8 +250,8 @@ class OpenCodeAdapter(AdapterBase):
         """Translate MCP server configs to opencode.json with type discrimination.
 
         Converts Claude Code MCP server configs to OpenCode format:
-        - Stdio transport (has "command") → type: "local" with command array and environment
-        - URL transport (has "url") → type: "remote" with url and headers
+        - Stdio transport (has "command") -> type: "local" with command array and environment
+        - URL transport (has "url") -> type: "remote" with url and headers
 
         Preserves environment variable references (${VAR}) as literal strings.
         Merges with existing opencode.json preserving other config.
@@ -277,7 +278,7 @@ class OpenCodeAdapter(AdapterBase):
             for server_name, config in mcp_servers.items():
                 server_config = {}
 
-                # Stdio transport (has "command" key) → type: "local"
+                # Stdio transport (has "command" key) -> type: "local"
                 if 'command' in config:
                     server_config['type'] = 'local'
                     # Build command array: [command, arg1, arg2, ...]
@@ -292,7 +293,7 @@ class OpenCodeAdapter(AdapterBase):
 
                     server_config['enabled'] = True
 
-                # URL transport (has "url" key) → type: "remote"
+                # URL transport (has "url" key) -> type: "remote"
                 elif 'url' in config:
                     server_config['type'] = 'remote'
                     server_config['url'] = config['url']
@@ -325,6 +326,44 @@ class OpenCodeAdapter(AdapterBase):
         except Exception as e:
             result.failed = len(mcp_servers)
             result.failed_files.append(f"MCP servers: {str(e)}")
+
+        return result
+
+    def sync_mcp_scoped(self, mcp_servers_scoped: dict[str, dict]) -> SyncResult:
+        """Translate MCP server configs with transport validation for OpenCode.
+
+        OpenCode only has project-level config (opencode.json), so all servers
+        go to the same file regardless of scope. Transport validation filters
+        unsupported types (SSE).
+
+        Args:
+            mcp_servers_scoped: Dict mapping server name to scoped server data
+
+        Returns:
+            SyncResult with synced/skipped counts
+        """
+        if not mcp_servers_scoped:
+            return SyncResult()
+
+        result = SyncResult()
+        valid_servers = {}
+
+        for server_name, server_data in mcp_servers_scoped.items():
+            config = server_data.get("config", server_data)
+
+            # Transport validation
+            ok, msg = check_transport_support(server_name, config, "opencode")
+            if not ok:
+                result.skipped += 1
+                result.skipped_files.append(msg)
+                continue
+
+            valid_servers[server_name] = config
+
+        # Write all valid servers to project-level opencode.json
+        if valid_servers:
+            mcp_result = self.sync_mcp(valid_servers)
+            result = result.merge(mcp_result)
 
         return result
 
