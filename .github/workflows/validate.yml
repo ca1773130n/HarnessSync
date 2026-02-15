@@ -1,0 +1,137 @@
+name: Validate Plugin
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.10', '3.12']
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Verify directory structure
+        shell: bash
+        run: |
+          echo "Checking plugin directory structure..."
+          test -d .claude-plugin || { echo "FAIL: Missing .claude-plugin/"; exit 1; }
+          test -f .claude-plugin/plugin.json || { echo "FAIL: Missing .claude-plugin/plugin.json"; exit 1; }
+          test -f .claude-plugin/marketplace.json || { echo "FAIL: Missing .claude-plugin/marketplace.json"; exit 1; }
+          test -d commands || { echo "FAIL: Missing commands/ at root"; exit 1; }
+          test -d hooks || { echo "FAIL: Missing hooks/ at root"; exit 1; }
+          test -d src || { echo "FAIL: Missing src/ at root"; exit 1; }
+          test -f install.sh || { echo "FAIL: Missing install.sh"; exit 1; }
+          test -x install.sh || { echo "FAIL: install.sh not executable"; exit 1; }
+          echo "Directory structure: OK"
+
+      - name: Validate JSON files
+        shell: bash
+        run: |
+          python3 -c "import json; json.load(open('.claude-plugin/plugin.json')); print('plugin.json: OK')"
+          python3 -c "import json; json.load(open('.claude-plugin/marketplace.json')); print('marketplace.json: OK')"
+          python3 -c "import json; json.load(open('hooks/hooks.json')); print('hooks.json: OK')"
+
+      - name: Validate plugin.json required fields
+        shell: bash
+        run: |
+          python3 -c "
+          import json, sys
+          p = json.load(open('.claude-plugin/plugin.json'))
+          required = ['name', 'version', 'description', 'hooks', 'commands']
+          missing = [f for f in required if f not in p]
+          if missing:
+              print(f'FAIL: Missing fields: {missing}')
+              sys.exit(1)
+          assert p['name'] == 'HarnessSync', f'Wrong name: {p[\"name\"]}'
+          print(f'plugin.json fields: OK (v{p[\"version\"]})')
+          "
+
+      - name: Validate version consistency
+        shell: bash
+        run: |
+          python3 -c "
+          import json, sys
+          p = json.load(open('.claude-plugin/plugin.json'))
+          m = json.load(open('.claude-plugin/marketplace.json'))
+          v1 = p['version']
+          v2 = m['metadata']['version']
+          v3 = m['plugins'][0]['version']
+          if not (v1 == v2 == v3):
+              print(f'FAIL: Version mismatch: plugin={v1}, meta={v2}, plugins[0]={v3}')
+              sys.exit(1)
+          print(f'Version consistency: OK ({v1})')
+          "
+
+      - name: Validate marketplace GitHub source
+        shell: bash
+        run: |
+          python3 -c "
+          import json, sys
+          m = json.load(open('.claude-plugin/marketplace.json'))
+          src = m['plugins'][0]['source']
+          assert src['source'] == 'github', f'Expected github source, got {src[\"source\"]}'
+          assert 'repo' in src, 'Missing repo field'
+          print(f'GitHub source: OK ({src[\"repo\"]})')
+          "
+
+      - name: Validate file references
+        shell: bash
+        run: |
+          python3 -c "
+          import json, os, sys
+          p = json.load(open('.claude-plugin/plugin.json'))
+          refs = list(p.get('commands', {}).values())
+          if isinstance(p.get('hooks'), str):
+              refs.append(p['hooks'])
+          if 'mcp' in p and 'server' in p['mcp']:
+              refs.append(p['mcp']['server'])
+          missing = [f for f in refs if not os.path.isfile(f)]
+          if missing:
+              print(f'FAIL: Missing referenced files: {missing}')
+              sys.exit(1)
+          print(f'File references: OK ({len(refs)} files)')
+          "
+
+      - name: Test install.sh --dry-run
+        shell: bash
+        run: |
+          bash install.sh --dry-run
+
+      - name: Check shell script syntax
+        shell: bash
+        run: |
+          bash -n install.sh && echo "install.sh syntax: OK"
+          bash -n shell-integration.sh && echo "shell-integration.sh syntax: OK"
+
+      - name: Lint shell scripts
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          if command -v shellcheck >/dev/null 2>&1; then
+            shellcheck install.sh shell-integration.sh || echo "Shellcheck: warnings found (non-blocking)"
+          else
+            echo "Shellcheck: not available (skipped)"
+          fi
+        continue-on-error: true
+
+      - name: Validate Python syntax
+        shell: bash
+        run: |
+          python3 -m py_compile src/orchestrator.py
+          python3 -m py_compile src/mcp/server.py
+          echo "Python entry points: OK"

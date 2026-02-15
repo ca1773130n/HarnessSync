@@ -1,0 +1,18 @@
+{
+  "name": "HarnessSync",
+  "version": "1.0.0",
+  "description": "Sync Claude Code configuration to Codex, Gemini CLI, and OpenCode. Configure once, sync everywhere.",
+  "author": "HarnessSync Contributors",
+  "license": "MIT",
+  "main": "src/",
+  "hooks": "hooks/hooks.json",
+  "skills": [],
+  "commands": {
+    "sync": "commands/sync.md",
+    "sync-status": "commands/sync-status.md"
+  },
+  "mcp": {
+    "server": "src/mcp/server.py",
+    "tools": ["sync_all", "sync_target", "get_status"]
+  }
+}

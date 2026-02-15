@@ -1,0 +1,30 @@
+{
+  "name": "harness-sync",
+  "owner": {
+    "name": "HarnessSync Contributors"
+  },
+  "metadata": {
+    "description": "Sync Claude Code configuration to Codex, Gemini CLI, and OpenCode. Configure once, sync everywhere.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "HarnessSync",
+      "source": {
+        "source": "github",
+        "repo": "username/HarnessSync",
+        "ref": "main"
+      },
+      "description": "Automatic config synchronization across AI coding harnesses. Configure Claude Code once, sync everywhere.",
+      "version": "1.0.0",
+      "author": {
+        "name": "HarnessSync Contributors"
+      },
+      "homepage": "https://github.com/username/HarnessSync",
+      "repository": "https://github.com/username/HarnessSync",
+      "license": "MIT",
+      "keywords": ["sync", "codex", "gemini", "opencode", "configuration", "automation"],
+      "category": "productivity"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+# Codex configuration managed by HarnessSync
+# Do not edit MCP servers section manually
+
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"

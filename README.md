@@ -1,19 +1,17 @@
-# HarnessSync — Claude Code → All Harnesses Total Sync
+# HarnessSync
 
-**Claude Code를 쓰면, 나머지는 알아서 따라온다.**
+**Configure Claude Code once, sync everywhere.**
 
-Claude Code의 설정(rules, skills, agents, commands, MCP, settings)을 OpenAI Codex, Gemini CLI, OpenCode에 **자동으로** 동기화하는 도구.
-
-## 아키텍처
+HarnessSync automatically synchronizes your Claude Code configuration — rules, skills, agents, commands, MCP servers, and settings — to OpenAI Codex CLI, Gemini CLI, and OpenCode. No manual duplication. No format translation. Just use Claude Code normally.
 
 ```
          ┌──────────────────┐
-         │   Claude Code    │  ← Single Source of Truth
+         │   Claude Code    │  ← Single source of truth
          │   ~/.claude/     │
          └────────┬─────────┘
                   │
          ┌────────┴─────────┐
-         │   HarnessSync    │  ← Auto-triggered
+         │   HarnessSync    │  ← Automatic
          └──┬─────┬─────┬───┘
             │     │     │
      ┌──────┘     │     └──────┐
@@ -25,116 +23,181 @@ Claude Code의 설정(rules, skills, agents, commands, MCP, settings)을 OpenAI 
 └─────────┘ └─────────┘ └──────────┘
 ```
 
-## 동기화 매핑
+## Quickstart
 
-| Claude Code | → Codex | → Gemini CLI | → OpenCode |
-|---|---|---|---|
-| `CLAUDE.md` (rules) | `AGENTS.md` | `GEMINI.md` | `AGENTS.md` |
-| `.claude/skills/` | `.codex/skills/` (symlink) | `GEMINI.md`에 인라인 | `.opencode/skills/` (symlink) |
-| `.claude/agents/` | `skills/agent-{name}/` (변환) | `GEMINI.md`에 인라인 | `.opencode/agents/` (symlink) |
-| `.claude/commands/` | `skills/cmd-{name}/` (변환) | `GEMINI.md`에 요약 | `.opencode/commands/` (symlink) |
-| `.mcp.json` | `config.toml [mcp_servers]` | `settings.json` | `opencode.json` |
-| `settings.json` (env) | `config.toml [env]` | `.gemini/.env` | `opencode.json [env]` |
-
-### 스코프 지원
-
-| 스코프 | Claude Code | → Codex | → Gemini | → OpenCode |
-|---|---|---|---|---|
-| **User** (전역) | `~/.claude/` | `~/.codex/` | `~/.gemini/` | `~/.config/opencode/` |
-| **Project** (프로젝트) | `.claude/`, `CLAUDE.md` | `.codex/`, `AGENTS.md` | `GEMINI.md` | `.opencode/`, `AGENTS.md` |
-
-## 자동 동기화 트리거 (3중)
-
-1. **Shell wrapper** — `codex`, `gemini`, `opencode` 실행 시 자동 sync (5분 cooldown)
-2. **Claude Code hook** — Claude Code가 설정 파일 수정 시 `PostToolUse` 훅으로 즉시 sync
-3. **Watch mode** — `harnesssync watch`로 실시간 파일 감시 (fswatch/inotify)
-
-→ 당신은 **Claude Code만 신경쓰면** 됩니다.
-
-## 설치
+### Install as Claude Code Plugin (Recommended)
 
 ```bash
-# 1. 다운로드 (또는 직접 복사)
-cp -r HarnessSync ~/.harnesssync
+/plugin install github:YOUR_USERNAME/HarnessSync
+```
 
-# 2. 설치
-bash ~/.harnesssync/install.sh
+That's it. HarnessSync will automatically sync your config whenever Claude Code edits a configuration file.
 
-# 3. 쉘 재시작
+### Install from Source
+
+```bash
+git clone https://github.com/YOUR_USERNAME/HarnessSync.git
+cd HarnessSync
+bash install.sh
+```
+
+Then restart your shell:
+
+```bash
 source ~/.zshrc   # or ~/.bashrc
 ```
 
-## 사용법
+### Verify Installation
+
+Inside Claude Code, run:
+
+```
+/sync-status
+```
+
+Or from the terminal:
 
 ```bash
-# 기본: 아무것도 안 해도 됨
-# codex, gemini, opencode 실행하면 자동 sync
-
-# 수동 sync
-harnesssync                    # 기본 (user + project)
-harnesssync sync user          # 전역만
-harnesssync sync project       # 현재 프로젝트만
-
-# 실시간 감시 모드
-harnesssync watch              # fswatch/inotify 기반
-
-# 상태 확인
 harnesssync status
-
-# 강제 sync (cooldown 무시)
-harnesssync force
-
-# Dry run (변경 없이 미리보기)
-python3 ~/.harnesssync/harnesssync-sync.py --dry-run --verbose
 ```
 
-## macOS 백그라운드 데몬 (선택)
+### Run Your First Sync
 
-```bash
-# launchd로 항상 watch 모드 실행
-cp com.harnesssync.sync.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.harnesssync.sync.plist
-
-# 상태 확인
-launchctl list | grep harnesssync
-
-# 중지
-launchctl unload ~/Library/LaunchAgents/com.harnesssync.sync.plist
+```
+/sync
 ```
 
-## 주요 설계 결정
+From this point forward, syncing happens automatically. Every time Claude Code edits your `CLAUDE.md`, `settings.json`, `.mcp.json`, or any file in `.claude/`, HarnessSync detects the change and syncs to all targets.
 
-### Skills → Symlink (Codex, OpenCode)
-플러그인 캐시를 직접 가리키는 symlink을 사용. `/plugin update` 하면 **re-sync 없이 즉시 반영**.
+## What Gets Synced
 
-### Skills → Inline (Gemini)
-Gemini CLI는 skills 시스템이 없으므로 GEMINI.md에 직접 삽입. `@import` 문법도 지원하지만, 단일 파일이 더 안정적.
+| Claude Code | Codex | Gemini CLI | OpenCode |
+|---|---|---|---|
+| `CLAUDE.md` (rules) | `AGENTS.md` | `GEMINI.md` | `AGENTS.md` |
+| `.claude/skills/` | `.codex/skills/` (symlink) | Inlined in `GEMINI.md` | `.opencode/skills/` (symlink) |
+| `.claude/agents/` | `skills/agent-{name}/` | Inlined in `GEMINI.md` | `.opencode/agents/` (symlink) |
+| `.claude/commands/` | `skills/cmd-{name}/` | Summarized in `GEMINI.md` | `.opencode/commands/` (symlink) |
+| `.mcp.json` | `config.toml [mcp_servers]` | `settings.json` | `opencode.json` |
+| `settings.json` (env) | `config.toml [env]` | `.gemini/.env` | `opencode.json [env]` |
 
-### Agents → Conversion (Codex)
-Codex에는 subagent 시스템이 없으므로, agent 정의를 `SKILL.md` 포맷으로 변환하여 skill로 등록.
+Both **user scope** (`~/.claude/`) and **project scope** (`.claude/`, `CLAUDE.md`) are supported.
 
-### OpenCode 호환성
-OpenCode는 이미 `~/.claude/CLAUDE.md`와 `~/.claude/skills/`를 폴백으로 읽지만, 명시적으로 `.opencode/` 경로에 symlink을 만들어 우선순위를 확보.
+## How It Works
 
-## 환경변수
+HarnessSync triggers automatically via three mechanisms:
 
-| 변수 | 기본값 | 설명 |
+1. **PostToolUse Hook** — When Claude Code edits a config file (CLAUDE.md, settings.json, .mcp.json, skills/, agents/, commands/), the hook fires and syncs immediately.
+
+2. **Shell Wrappers** — Running `codex`, `gemini`, or `opencode` in your terminal auto-syncs before launch (with a 5-minute cooldown to avoid redundant work).
+
+3. **Manual Commands** — `/sync` inside Claude Code, or `harnesssync` in your terminal.
+
+You just use Claude Code normally. Everything else follows.
+
+## Commands
+
+### Inside Claude Code
+
+| Command | Description |
+|---|---|
+| `/sync` | Sync all config to all targets |
+| `/sync --scope user` | Sync only user-level config |
+| `/sync --scope project` | Sync only project-level config |
+| `/sync --dry-run` | Preview changes without writing |
+| `/sync-status` | Show sync status and drift detection |
+
+### Terminal
+
+| Command | Description |
+|---|---|
+| `harnesssync` | Sync now |
+| `harnesssync status` | Show sync status per target |
+| `harnesssync force` | Force sync (skip cooldown) |
+| `harnesssync help` | Show help |
+
+### MCP Tools
+
+HarnessSync exposes an MCP server with three tools for programmatic access:
+
+| Tool | Description |
+|---|---|
+| `sync_all` | Sync all config to all targets |
+| `sync_target` | Sync to a specific target (codex/gemini/opencode) |
+| `get_status` | Get sync status as structured JSON |
+
+## Safety Features
+
+- **Secret Detection** — Scans environment variables for API keys, tokens, and passwords. Blocks sync when secrets are found (override with `--allow-secrets`).
+- **Conflict Detection** — Warns when target files were manually edited since last sync.
+- **Backup & Rollback** — Backs up target files before overwriting. Automatic rollback on failure.
+- **Broken Symlink Cleanup** — Removes stale symlinks from previous syncs.
+- **Compatibility Reports** — Shows per-target breakdown when config items are adapted or skipped.
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Default | Description |
 |---|---|---|
-| `HARNESSSYNC_HOME` | `~/.harnesssync` | HarnessSync 설치 경로 |
-| `HARNESSSYNC_COOLDOWN` | `300` | 자동 sync 간격 (초) |
-| `HARNESSSYNC_VERBOSE` | `0` | 자동 sync 시 출력 표시 |
-| `CODEX_HOME` | `~/.codex` | Codex 홈 디렉토리 |
+| `HARNESSSYNC_COOLDOWN` | `300` | Seconds between auto-syncs |
+| `HARNESSSYNC_VERBOSE` | `0` | Show output during auto-sync |
+| `CODEX_HOME` | `~/.codex` | Codex home directory |
 
-## 문제 해결
+### Permissions
 
-### "No paths to watch" 에러
-→ `~/.claude/` 디렉토리가 존재하는지 확인. Claude Code를 한번이라도 실행해야 생성됨.
+HarnessSync follows conservative security defaults:
 
-### Gemini에서 skills가 안 보임
-→ Gemini CLI는 skills 시스템이 없으므로 GEMINI.md에 인라인됨. `/memory show`로 확인.
+- Claude Code `"deny"` permissions are **never** downgraded in targets
+- Denied tools are skipped entirely rather than mapped to a lower permission
+- Gemini `yolo` mode is **never** auto-enabled, even if Claude Code has auto-approval
 
-### OpenCode에서 이미 Claude Code 호환 모드가 있는데?
-→ 맞음. 하지만 명시적 `.opencode/` 경로가 fallback보다 우선순위가 높고, MCP/settings는 별도 변환이 필요.
+## Requirements
 
-### Codex에서 symlink이 안 읽힘
-→ Codex는 symlink을 공식 지원함. `.codex/skills/`와 `.agents/skills/` 모두에 symlink 생성.
+- Python 3.10+
+- No external dependencies (stdlib only)
+- macOS, Linux, or Windows (WSL2/Git Bash)
+
+## Project Structure
+
+```
+HarnessSync/
+├── .claude-plugin/
+│   ├── plugin.json          # Plugin manifest
+│   └── marketplace.json     # Marketplace distribution
+├── commands/                # Slash commands
+│   ├── sync.md
+│   └── sync-status.md
+├── hooks/                   # PostToolUse hook
+│   └── hooks.json
+├── src/                     # Python sync engine (~4,200 lines)
+│   ├── orchestrator.py      # Central coordinator
+│   ├── source_reader.py     # Claude Code config discovery
+│   ├── state_manager.py     # Drift detection & state tracking
+│   ├── adapters/            # Target adapters
+│   │   ├── codex.py
+│   │   ├── gemini.py
+│   │   └── opencode.py
+│   ├── mcp/                 # MCP server (JSON-RPC over stdio)
+│   │   └── server.py
+│   └── utils/               # Logging, hashing, paths
+├── install.sh               # Cross-platform installer
+├── shell-integration.sh     # Shell wrappers (codex/gemini/opencode)
+└── .github/workflows/
+    └── validate.yml         # CI validation (3 platforms x 2 Python versions)
+```
+
+## Troubleshooting
+
+**"No config found"** — Make sure `~/.claude/` exists. Run Claude Code at least once to create it.
+
+**Gemini doesn't show my skills** — Gemini CLI has no skill system. Skills are inlined into `GEMINI.md`. Check with `cat ~/.gemini/GEMINI.md`.
+
+**Sync not triggering automatically** — Verify the plugin is installed: `/sync-status`. For shell wrappers, check your shell RC file for the `HarnessSync` source line.
+
+**Secrets blocking sync** — HarnessSync detects API keys in env vars by default. Use `/sync --allow-secrets` to override, or remove secrets from `settings.json`.
+
+**Windows symlink errors** — HarnessSync uses junction points on Windows (no admin required). Ensure you're running from Git Bash or WSL2.
+
+## License
+
+MIT

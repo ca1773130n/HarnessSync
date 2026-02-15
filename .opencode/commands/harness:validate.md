@@ -1,0 +1,1 @@
+/Users/edward.seo/.claude/commands/harness:validate.md
