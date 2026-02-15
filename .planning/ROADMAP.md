@@ -168,6 +168,12 @@ Plans:
 
 **Verification Level:** proxy
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 11-01-PLAN.md -- StateManager plugin tracking + orchestrator metadata persistence
+- [ ] 11-02-PLAN.md -- /sync-status MCP source grouping + integration tests
+
 ---
 
 ## Progress
@@ -184,7 +190,7 @@ Plans:
 | 8 - Multi-Account Support | Complete | 4/4 | proxy | ██████████ 100% |
 | 9 - Plugin Discovery & Scope-Aware Reading | Complete | 2/2 | proxy | ██████████ 100% |
 | **10 - Scope-Aware Sync & Env Translation** | **Planned** | **0/3** | **proxy** | **░░░░░░░░░░ 0%** |
-| **11 - State Enhancements & Integration** | **Pending** | **0/0** | **proxy** | **░░░░░░░░░░ 0%** |
+| **11 - State Enhancements & Integration** | **Planned** | **0/2** | **proxy** | **░░░░░░░░░░ 0%** |
 
 ---
 
