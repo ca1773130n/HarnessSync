@@ -21,7 +21,7 @@ depends_on: ["11-01"]
 
 ## What Was Built
 
-Enhanced /sync-status command to display MCP servers grouped by source with scope labels and plugin drift warnings. Created comprehensive integration tests covering all Phase 11 success criteria and full v2.0 pipeline validation.
+Enhanced /sync-status command to display MCP servers grouped by source with scope labels and plugin drift warnings. Created comprehensive integration tests covering all Phase 11 success criteria and full v0.0.2 pipeline validation.
 
 ### Key Components
 
@@ -34,7 +34,7 @@ Enhanced /sync-status command to display MCP servers grouped by source with scop
 
 2. **Integration Test Suite** (`verify_phase11_integration.py`)
    - Section 1 (8 checks): Plugin update simulation (1.0.0 -> 1.1.0) with MCP count change
-   - Section 2 (8 checks): Full v2.0 pipeline with 3 plugins + 2 user + 1 project + 1 local MCPs
+   - Section 2 (8 checks): Full v0.0.2 pipeline with 3 plugins + 2 user + 1 project + 1 local MCPs
    - Section 3 (5 checks): MCP source grouping display formatting
    - Section 4 (3 checks): Account-scoped plugin tracking
    - All 24 checks pass with exit code 0
@@ -104,7 +104,7 @@ Enhanced /sync-status command to display MCP servers grouped by source with scop
 - ✅ Detect plugin removal
 - ✅ Detect new plugin addition
 
-**Section 2: Full v2.0 Pipeline (8 checks)**
+**Section 2: Full v0.0.2 Pipeline (8 checks)**
 - ✅ Discover all 8 MCPs (100% discovery)
 - ✅ Correct scope labels (user/project/local)
 - ✅ Correct source labels (file/plugin)
@@ -236,7 +236,7 @@ Target: gemini
 
 Phase 11 Plan 03 will:
 - Create end-to-end pipeline validation test with real file system paths
-- Verify complete v2.0 feature set integration
+- Verify complete v0.0.2 feature set integration
 - Test edge cases: disabled plugins, missing metadata, concurrent syncs
 - Validate deferred Level 3 verification scenarios
 

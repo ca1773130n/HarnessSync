@@ -11,7 +11,7 @@ Phase 10 implements scope-aware MCP synchronization by mapping Claude Code's 3-t
 **Key findings:**
 1. Codex and Gemini both support user/project scope separation via distinct config file locations
 2. Environment variable syntax is fundamentally incompatible: Claude Code uses bash-style `${VAR}` interpolation, Codex requires literal `env` maps
-3. Plugin MCPs must always sync to user-scope targets (never project-scope) per v2.0 design decision
+3. Plugin MCPs must always sync to user-scope targets (never project-scope) per v0.0.2 design decision
 4. Transport type detection is critical: Codex doesn't support SSE natively, requires warning
 5. Existing adapters already handle MCP translation but lack scope awareness and env var translation
 
@@ -27,7 +27,7 @@ No CONTEXT.md exists for this phase. All implementation choices are at Claude's 
 - Decision #32: Gemini extensions not the target - Plugin MCPs sync to settings.json, NOT extensions
 - Decision #33: 3-tier scope precedence - local > project > user
 - Decision #34: Plugin MCPs are user-scope - Always sync to user-level target configs
-- Decision #36: User-scope MCPs from ~/.claude.json - v2.0 reads from ~/.claude.json
+- Decision #36: User-scope MCPs from ~/.claude.json - v0.0.2 reads from ~/.claude.json
 
 ## Paper-Backed Recommendations
 
@@ -43,15 +43,15 @@ No CONTEXT.md exists for this phase. All implementation choices are at Claude's 
 
 **Confidence:** HIGH — Multiple sources confirm need
 **Expected improvement:** Clear separation of user/project configs, no path inference bugs
-**Caveats:** Requires adapter interface change (backward incompatible but v2.0 allows breaking changes)
+**Caveats:** Requires adapter interface change (backward incompatible but v0.0.2 allows breaking changes)
 
 ### Recommendation 2: Translate Claude Code ${VAR} to Codex Literal env Map
 
 **Recommendation:** Parse Claude Code MCP configs for `${VAR}` syntax and extract to Codex `env` field with literal values from shell environment
 
 **Evidence:**
-- Codex does NOT support variable interpolation in config.toml (v2-codex-mcp.md lines 90-116)
-- Codex requires literal `env = { "KEY" = "value" }` format (v2-codex-mcp.md lines 94-99)
+- Codex does NOT support variable interpolation in config.toml (v0.0.2-codex-mcp.md lines 90-116)
+- Codex requires literal `env = { "KEY" = "value" }` format (v0.0.2-codex-mcp.md lines 94-99)
 - Claude Code uses bash-style `${VAR}` interpolation (Phase 9 research, official docs)
 - Bash parameter expansion documented: `${VAR:-default}` provides default values ([Bash Reference Manual](https://www.gnu.org/software/bash/manual/html_node/Shell-Parameter-Expansion.html))
 - Docker Compose uses same pattern for env var interpolation ([Docker Docs](https://docs.docker.com/reference/compose-file/interpolation/))
@@ -103,7 +103,7 @@ def translate_env_vars_for_codex(config: dict) -> dict:
 **Recommendation:** Pass Claude Code MCP configs to Gemini without env var translation — Gemini supports `${VAR}` natively
 
 **Evidence:**
-- Gemini settings.json format documented to support variable interpolation (v2-gemini-extensions.md)
+- Gemini settings.json format documented to support variable interpolation (v0.0.2-gemini-extensions.md)
 - Existing GeminiAdapter preserves env field as-is (src/adapters/gemini.py lines 333-334)
 - No evidence of translation needed in Gemini adapter code
 - Requirement ENV-03 explicitly states "Preserve env var references in Gemini settings.json format" (.planning/REQUIREMENTS.md line 96)
@@ -117,7 +117,7 @@ def translate_env_vars_for_codex(config: dict) -> dict:
 **Recommendation:** Check MCP server config for transport type, warn if target doesn't support it (e.g., SSE on Codex)
 
 **Evidence:**
-- Codex does NOT support SSE transport natively (v2-codex-mcp.md lines 232-235, GitHub issue #2129)
+- Codex does NOT support SSE transport natively (v0.0.2-codex-mcp.md lines 232-235, GitHub issue #2129)
 - Claude Code supports STDIO, HTTP, SSE transports (Phase 9 research)
 - Requirement SYNC-04 specifies "Adapters detect unsupported transport types per target" (.planning/REQUIREMENTS.md line 91)
 - Silent failures harm usability — explicit warnings better UX
@@ -815,7 +815,7 @@ def translate_env_vars_for_codex(config: dict) -> dict:
 ```python
 # Source: src/adapters/codex.py lines 288-330
 def sync_mcp(self, mcp_servers: dict[str, dict]) -> SyncResult:
-    """Current v1.0 implementation (NO scope awareness yet)."""
+    """Current v0.0.1 implementation (NO scope awareness yet)."""
     if not mcp_servers:
         return SyncResult()
 
@@ -871,12 +871,12 @@ def sync_mcp(self, mcp_servers: dict[str, dict]) -> SyncResult:
 | Old Approach | Current Approach | When Changed | Impact | Reference |
 |--------------|------------------|--------------|--------|-----------|
 | Single MCP config file | 3-tier scope (user/project/local) | Claude Code 2025 | Per-project overrides, plugin isolation | Phase 9 research |
-| Scope-unaware sync | Scope-aware target routing | v2.0 milestone (2026) | Correct config file writes | This phase |
-| Preserve ${VAR} in TOML | Translate to env map | v2.0 milestone (2026) | Codex compatibility (no native interpolation) | Requirement ENV-01 |
-| Silent transport failures | Explicit warnings | v2.0 milestone (2026) | Better UX, user knows why MCP missing | Requirement SYNC-04 |
+| Scope-unaware sync | Scope-aware target routing | v0.0.2 milestone (2026) | Correct config file writes | This phase |
+| Preserve ${VAR} in TOML | Translate to env map | v0.0.2 milestone (2026) | Codex compatibility (no native interpolation) | Requirement ENV-01 |
+| Silent transport failures | Explicit warnings | v0.0.2 milestone (2026) | Better UX, user knows why MCP missing | Requirement SYNC-04 |
 
 **Deprecated/outdated:**
-- **Single-scope MCP sync:** v1.0 wrote all MCPs to project-level config — v2.0 separates by scope
+- **Single-scope MCP sync:** v0.0.1 wrote all MCPs to project-level config — v0.0.2 separates by scope
 - **${VAR} in Codex TOML:** Decision #13 originally preserved syntax, but Codex doesn't support it — must translate
 
 ## Open Questions
@@ -889,7 +889,7 @@ def sync_mcp(self, mcp_servers: dict[str, dict]) -> SyncResult:
 - Should expansion happen at sync time (bakes current values into config)?
 - Or preserve `${VAR}` and expand at Codex runtime?
 
-**Recommendation:** Expand at sync time for Codex (Codex doesn't support runtime interpolation per v2-codex-mcp.md). Document that synced configs are environment-specific.
+**Recommendation:** Expand at sync time for Codex (Codex doesn't support runtime interpolation per v0.0.2-codex-mcp.md). Document that synced configs are environment-specific.
 
 ### 2. Project-Scope Trust Warning
 
@@ -909,7 +909,7 @@ def sync_mcp(self, mcp_servers: dict[str, dict]) -> SyncResult:
 - Should we support both `:-` and `-` variants?
 - Or only `:-` (more common)?
 
-**Recommendation:** Support only `:-` for v2.0 (simpler, covers 95% of use cases). Add `-` variant if users request it.
+**Recommendation:** Support only `:-` for v0.0.2 (simpler, covers 95% of use cases). Add `-` variant if users request it.
 
 ### 4. Env Var Case Sensitivity
 
@@ -919,7 +919,7 @@ def sync_mcp(self, mcp_servers: dict[str, dict]) -> SyncResult:
 - Should we support lowercase env var names (non-standard but possible)?
 - Or enforce uppercase convention?
 
-**Recommendation:** Support uppercase only for v2.0 (matches shell convention). Lowercase support can be added if needed.
+**Recommendation:** Support uppercase only for v0.0.2 (matches shell convention). Lowercase support can be added if needed.
 
 ## Sources
 
@@ -930,7 +930,7 @@ def sync_mcp(self, mcp_servers: dict[str, dict]) -> SyncResult:
   - Layered discovery pattern (lines 175-191)
   - Plugin metadata structure (lines 81-89)
 
-- **v2-codex-mcp.md** — .planning/research/v2-codex-mcp.md
+- **v0.0.2-codex-mcp.md** — .planning/research/v0.0.2-codex-mcp.md
   - Codex TOML format (lines 32-58)
   - Environment variable handling (lines 90-116)
   - Transport support matrix (lines 219-266)

@@ -52,7 +52,7 @@ No CONTEXT.md exists for this phase. All implementation choices are at Claude's 
 
 **Evidence:**
 - Claude Code plugin.json docs specify `${CLAUDE_PLUGIN_ROOT}` expands to plugin cache path
-- Research shows real-world examples: `"command": "${CLAUDE_PLUGIN_ROOT}/bin/server"` (v2-claude-plugins.md lines 517-519)
+- Research shows real-world examples: `"command": "${CLAUDE_PLUGIN_ROOT}/bin/server"` (v0.0.2-claude-plugins.md lines 517-519)
 - Target CLIs (Codex TOML, Gemini settings.json) do NOT support this variable
 - Expansion must happen during HarnessSync processing to produce portable target configs
 
@@ -66,8 +66,8 @@ No CONTEXT.md exists for this phase. All implementation choices are at Claude's 
 
 **Evidence:**
 - Claude Code uses 3-tier scope system (user/project/local) with precedence rules
-- Research shows plugin MCPs treated as user-scope (v2-SUMMARY.md line 7)
-- Precedence order: local > project > user (v2-claude-plugins.md lines 511-517)
+- Research shows plugin MCPs treated as user-scope (v0.0.2-SUMMARY.md line 7)
+- Precedence order: local > project > user (v0.0.2-claude-plugins.md lines 511-517)
 - Adapter implementations need origin info to write to correct target location
 
 **Confidence:** HIGH — Documented in official Claude Code MCP scoping
@@ -94,7 +94,7 @@ No CONTEXT.md exists for this phase. All implementation choices are at Claude's 
 **Recommendation:** Check both standalone `.mcp.json` at plugin root AND inline `plugin.json.mcpServers` field
 
 **Evidence:**
-- Research shows two plugin MCP registration methods (v2-codex-mcp.md lines 499-524)
+- Research shows two plugin MCP registration methods (v0.0.2-codex-mcp.md lines 499-524)
 - Method 1: Standalone `.mcp.json` file at plugin root
 - Method 2: Inline `mcpServers` field in `plugin.json`
 - Real-world examples use both patterns (Context7 uses .mcp.json, GRD uses plugin.json inline)
@@ -337,7 +337,7 @@ def _get_local_scope_mcp_servers(self) -> dict[str, dict]:
 
 **Warning signs:** Reading from wrong file, local-scope MCPs not discovered
 
-**Reference:** v2-claude-plugins.md lines 419-431, v2-codex-mcp.md lines 406-420
+**Reference:** v0.0.2-claude-plugins.md lines 419-431, v0.0.2-codex-mcp.md lines 406-420
 
 ### Pitfall 2: Plugin.json Location Ambiguity
 
@@ -349,7 +349,7 @@ def _get_local_scope_mcp_servers(self) -> dict[str, dict]:
 
 **Warning signs:** Plugin MCPs not discovered even though plugin is installed
 
-**Reference:** v2-claude-plugins.md lines 163-169, examples show both patterns
+**Reference:** v0.0.2-claude-plugins.md lines 163-169, examples show both patterns
 
 ### Pitfall 3: Plugin Scope Filtering
 
@@ -361,7 +361,7 @@ def _get_local_scope_mcp_servers(self) -> dict[str, dict]:
 
 **Warning signs:** Project-scoped plugin MCPs appearing in user-level sync
 
-**Reference:** v2-claude-plugins.md lines 134-142, scope field usage
+**Reference:** v0.0.2-claude-plugins.md lines 134-142, scope field usage
 
 ### Pitfall 4: Precedence Collapse
 
@@ -373,7 +373,7 @@ def _get_local_scope_mcp_servers(self) -> dict[str, dict]:
 
 **Warning signs:** Local-scope overrides not working, unexpected server configs active
 
-**Reference:** v2-SUMMARY.md line 39 (scope precedence collapse identified as critical pitfall)
+**Reference:** v0.0.2-SUMMARY.md line 39 (scope precedence collapse identified as critical pitfall)
 
 ### Pitfall 5: ${CLAUDE_PLUGIN_ROOT} in Nested Structures
 
@@ -381,7 +381,7 @@ def _get_local_scope_mcp_servers(self) -> dict[str, dict]:
 
 **Why it happens:** String replacement on serialized JSON can miss complex structures
 
-**Evidence:** v2-claude-plugins.md lines 736-761 show variable usage in command, args, env fields
+**Evidence:** v0.0.2-claude-plugins.md lines 736-761 show variable usage in command, args, env fields
 
 **How to avoid:**
 - Serialize entire config to JSON string
@@ -571,7 +571,7 @@ if self.cc_plugins_registry.exists():
 ### Expanding Plugin Variables (New Pattern)
 
 ```python
-# Source: v2-claude-plugins.md lines 551-569 (documented pattern)
+# Source: v0.0.2-claude-plugins.md lines 551-569 (documented pattern)
 def _expand_plugin_root(config: dict, plugin_path: Path) -> dict:
     """Expand ${CLAUDE_PLUGIN_ROOT} in MCP server config.
 
@@ -590,7 +590,7 @@ def _expand_plugin_root(config: dict, plugin_path: Path) -> dict:
 ### Local Scope MCP Discovery (New Pattern)
 
 ```python
-# Source: v2-claude-plugins.md lines 481-510 (documented format)
+# Source: v0.0.2-claude-plugins.md lines 481-510 (documented format)
 def _get_local_scope_mcp_servers(project_dir: Path) -> dict[str, dict]:
     """Read local-scope MCPs from ~/.claude.json projects map."""
     claude_json = Path.home() / ".claude.json"
@@ -621,9 +621,9 @@ def _get_local_scope_mcp_servers(project_dir: Path) -> dict[str, dict]:
 
 | Old Approach | Current Approach | When Changed | Impact | Reference |
 |--------------|------------------|--------------|--------|-----------|
-| Flat MCP discovery | Scope-aware MCP discovery | v2.0 milestone (2026) | Proper precedence handling, plugin support | v2-SUMMARY.md |
-| Skip plugin MCPs | Discover plugin MCPs | v2.0 milestone (2026) | Sync plugin-bundled servers to targets | v2-claude-plugins.md |
-| 2-tier scoping (user/project) | 3-tier scoping (user/project/local) | Claude Code (2025) | Private per-project overrides | v2-claude-plugins.md lines 419-431 |
+| Flat MCP discovery | Scope-aware MCP discovery | v0.0.2 milestone (2026) | Proper precedence handling, plugin support | v0.0.2-SUMMARY.md |
+| Skip plugin MCPs | Discover plugin MCPs | v0.0.2 milestone (2026) | Sync plugin-bundled servers to targets | v0.0.2-claude-plugins.md |
+| 2-tier scoping (user/project) | 3-tier scoping (user/project/local) | Claude Code (2025) | Private per-project overrides | v0.0.2-claude-plugins.md lines 419-431 |
 
 **Deprecated/outdated:**
 - **installed_plugins.json version 1:** Replaced by version 2 with enhanced metadata (installPath, version, scope, projectPath fields)
@@ -665,19 +665,19 @@ def _get_local_scope_mcp_servers(project_dir: Path) -> dict[str, dict]:
 
 ### Primary (HIGH confidence)
 
-- **v2-claude-plugins.md** — Comprehensive Claude Code plugin discovery research with verified examples
+- **v0.0.2-claude-plugins.md** — Comprehensive Claude Code plugin discovery research with verified examples
   - Plugin registry format (lines 16-55)
   - Plugin cache structure (lines 74-98)
   - Plugin metadata format (lines 115-221)
   - MCP 3-tier scoping (lines 419-517)
   - ${CLAUDE_PLUGIN_ROOT} expansion (lines 718-740)
 
-- **v2-SUMMARY.md** — Executive summary of v2.0 findings
+- **v0.0.2-SUMMARY.md** — Executive summary of v0.0.2 findings
   - Scope precedence (lines 40-41)
   - Plugin MCP treatment (line 7)
   - Critical pitfalls (line 39)
 
-- **v2-codex-mcp.md** — Codex target translation requirements
+- **v0.0.2-codex-mcp.md** — Codex target translation requirements
   - Plugin MCP registration methods (lines 499-524)
   - Environment variable handling differences (lines 90-115)
 
@@ -687,7 +687,7 @@ def _get_local_scope_mcp_servers(project_dir: Path) -> dict[str, dict]:
 
 ### Secondary (MEDIUM confidence)
 
-- **Claude Code official docs** — Referenced in v2-claude-plugins.md sources
+- **Claude Code official docs** — Referenced in v0.0.2-claude-plugins.md sources
   - Plugin reference: code.claude.com/docs/en/plugins-reference
   - MCP documentation: code.claude.com/docs/en/mcp
 

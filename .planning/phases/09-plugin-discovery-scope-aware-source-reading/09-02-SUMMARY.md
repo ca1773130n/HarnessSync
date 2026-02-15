@@ -7,7 +7,7 @@
 
 Implemented 3-tier scope-aware MCP discovery with precedence-based deduplication and origin tagging:
 
-1. **`_get_user_scope_mcps()`** — Reads user-scope MCPs from `~/.claude.json` top-level `mcpServers` field (NOT `~/.mcp.json` or `~/.claude/.mcp.json` which were v1.0 incorrect sources).
+1. **`_get_user_scope_mcps()`** — Reads user-scope MCPs from `~/.claude.json` top-level `mcpServers` field (NOT `~/.mcp.json` or `~/.claude/.mcp.json` which were v0.0.1 incorrect sources).
 
 2. **`_get_project_scope_mcps()`** — Reads project-scope MCPs from `.mcp.json` in project root (mcpServers wrapper).
 
@@ -24,7 +24,7 @@ Implemented 3-tier scope-aware MCP discovery with precedence-based deduplication
 
 6. **`discover_all()`** — Updated to include both `mcp_servers` (flat) and `mcp_servers_scoped` (with metadata).
 
-7. **`get_source_paths()`** — Updated MCP sources: `~/.claude.json` replaces v1.0 `~/.mcp.json` and `~/.claude/.mcp.json`.
+7. **`get_source_paths()`** — Updated MCP sources: `~/.claude.json` replaces v0.0.1 `~/.mcp.json` and `~/.claude/.mcp.json`.
 
 ## Verification Results
 
@@ -37,6 +37,6 @@ Implemented 3-tier scope-aware MCP discovery with precedence-based deduplication
 
 ## Design Decisions
 
-- **User-scope MCPs from ~/.claude.json:** v2.0 reads from `~/.claude.json` top-level mcpServers, replacing v1.0's `~/.mcp.json` and `~/.claude/.mcp.json` which were incorrect sources for user-scope MCPs.
+- **User-scope MCPs from ~/.claude.json:** v0.0.2 reads from `~/.claude.json` top-level mcpServers, replacing v0.0.1's `~/.mcp.json` and `~/.claude/.mcp.json` which were incorrect sources for user-scope MCPs.
 - **Plugin MCPs cleaned before metadata:** Underscore-prefixed keys (`_plugin_name`, etc.) stripped from config dict and moved to metadata dict in `get_mcp_servers_with_scope()`.
 - **File-based user MCPs win over plugins:** When same server name exists in both user files and plugins, the file-based config takes priority.

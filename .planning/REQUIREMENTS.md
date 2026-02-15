@@ -69,7 +69,7 @@
 - [ ] **PKG-02**: Plugin installable from GitHub repository via /plugin command
 - [ ] **PKG-03**: install.sh creates target directories and configures shell integration
 
-## v2.0 Requirements — Plugin & MCP Scope Sync
+## v0.0.2 Requirements — Plugin & MCP Scope Sync
 
 ### Plugin MCP Discovery
 - [ ] **PLGD-01**: SourceReader discovers installed Claude Code plugins from `~/.claude/plugins/installed_plugins.json` registry
@@ -121,7 +121,7 @@
 
 ## Traceability
 
-### v1.0 (Phases 1-7) — Complete
+### v0.0.1 (Phases 1-7) — Complete
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
@@ -173,9 +173,9 @@
 | PKG-02 | Phase 7 | Complete |
 | PKG-03 | Phase 7 | Complete |
 
-**v1.0 Coverage:** 44/44 requirements mapped (100%) — delivered 2026-02-15
+**v0.0.1 Coverage:** 44/44 requirements mapped (100%) — delivered 2026-02-15
 
-### v1.1 (Phase 8) — Complete
+### v0.0.1 (Phase 8) — Complete
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
@@ -190,9 +190,9 @@
 | MULTI-09 | Phase 8 | Complete |
 | MULTI-10 | Phase 8 | Complete |
 
-**v1.1 Coverage:** 10/10 multi-account requirements — delivered 2026-02-15
+**v0.0.1 Coverage:** 10/10 multi-account requirements — delivered 2026-02-15
 
-### v2.0 (Phases 9-11) — In Progress
+### v0.0.2 (Phases 9-11) — In Progress
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
@@ -216,10 +216,10 @@
 | STATE-02 | Phase 11 | Pending |
 | STATE-03 | Phase 11 | Pending |
 
-**v2.0 Coverage:** 19/19 requirements mapped (100%)
+**v0.0.2 Coverage:** 19/19 requirements mapped (100%)
 
 ---
 
-*Requirements defined: 2026-02-13 (v1), 2026-02-15 (v1.1, v2.0)*
-*Source: Research v2-SUMMARY.md, v2-gemini-extensions.md, v2-codex-mcp.md, v2-claude-plugins.md*
+*Requirements defined: 2026-02-13 (v1), 2026-02-15 (v0.0.1, v0.0.2)*
+*Source: Research v0.0.2-SUMMARY.md, v0.0.2-gemini-extensions.md, v0.0.2-codex-mcp.md, v0.0.2-claude-plugins.md*
 *Traceability updated: 2026-02-15*

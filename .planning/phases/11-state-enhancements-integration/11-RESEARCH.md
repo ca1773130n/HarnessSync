@@ -6,7 +6,7 @@
 
 ## Summary
 
-Phase 11 is the final v2.0 phase, extending StateManager to track plugin metadata for update-triggered re-sync and enhancing /sync-status to display plugin-discovered MCPs with scope labels. This phase integrates all v2.0 components (Phases 9-10) into a cohesive system with plugin-aware drift detection.
+Phase 11 is the final v0.0.2 phase, extending StateManager to track plugin metadata for update-triggered re-sync and enhancing /sync-status to display plugin-discovered MCPs with scope labels. This phase integrates all v0.0.2 components (Phases 9-10) into a cohesive system with plugin-aware drift detection.
 
 **Key findings:**
 1. Current StateManager tracks file hashes but lacks plugin-specific metadata (version, MCP count)
@@ -490,7 +490,7 @@ Not applicable — This phase extends existing state management and display. No 
 | /sync-status display format | Level 2 (Proxy) | Run command, inspect output grouping |
 | Plugin version change detection | Level 2 (Proxy) | Simulate plugin update (change version in fixture) |
 | Plugin update re-sync trigger | Level 2 (Proxy) | Verify warning displayed, no auto-sync |
-| Full v2.0 pipeline integration | Level 2 (Proxy) | 3 plugins, 2 user MCPs, 1 project MCP, 1 local MCP |
+| Full v0.0.2 pipeline integration | Level 2 (Proxy) | 3 plugins, 2 user MCPs, 1 project MCP, 1 local MCP |
 | Real plugin update in Claude Code | Level 3 (Deferred) | Requires live Claude Code plugin update |
 
 ### Level 1 Checks (Sanity)
@@ -611,7 +611,7 @@ def test_group_mcps_by_source():
 - Verify output groups MCPs into 4 sections (User-configured, Project-configured, Local-configured, Plugin-provided)
 - Verify Plugin-provided section shows plugin@version grouping
 
-**Full v2.0 pipeline (Success Criteria #7):**
+**Full v0.0.2 pipeline (Success Criteria #7):**
 - Install 3 real Claude Code plugins with MCPs
 - Configure 2 user MCPs in ~/.claude.json
 - Configure 1 project MCP in .mcp.json
@@ -956,14 +956,14 @@ def _extract_plugin_metadata(self, mcp_scoped: dict[str, dict]) -> dict[str, dic
 
 | Old Approach | Current Approach | When Changed | Impact | Reference |
 |--------------|------------------|--------------|--------|-----------|
-| File hash-only drift | File hash + plugin version drift | v2.0 milestone (2026) | Detect plugin updates that don't change MCP files | Requirement STATE-03 |
-| Flat MCP display | Grouped by source (user/project/plugin) | v2.0 milestone (2026) | Clear source attribution | Requirement STATE-02 |
-| No plugin tracking | Plugin version + MCP count tracking | v2.0 milestone (2026) | Update-triggered re-sync detection | Requirement STATE-01 |
-| State schema v1 | State schema v2 with accounts + plugins | v2.0 milestone (2026) | Multi-account + plugin support | StateManager evolution |
+| File hash-only drift | File hash + plugin version drift | v0.0.2 milestone (2026) | Detect plugin updates that don't change MCP files | Requirement STATE-03 |
+| Flat MCP display | Grouped by source (user/project/plugin) | v0.0.2 milestone (2026) | Clear source attribution | Requirement STATE-02 |
+| No plugin tracking | Plugin version + MCP count tracking | v0.0.2 milestone (2026) | Update-triggered re-sync detection | Requirement STATE-01 |
+| State schema v1 | State schema v2 with accounts + plugins | v0.0.2 milestone (2026) | Multi-account + plugin support | StateManager evolution |
 
 **Deprecated/outdated:**
-- **Single drift detection method:** v1.0 only tracked file hashes — v2.0 adds plugin drift dimension
-- **Ungrouped /sync-status output:** v1.0 showed flat MCP list — v2.0 groups by source
+- **Single drift detection method:** v0.0.1 only tracked file hashes — v0.0.2 adds plugin drift dimension
+- **Ungrouped /sync-status output:** v0.0.1 showed flat MCP list — v0.0.2 groups by source
 
 ## Open Questions
 

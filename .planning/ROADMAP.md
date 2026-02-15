@@ -2,15 +2,15 @@
 
 ## Overview
 
-HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. v1.0 delivered the core plugin with hooks, slash commands, MCP server, and multi-account support. **v2.0** extends MCP discovery to include Claude Code plugins with proper scope-aware syncing (user/project/local scopes to target-native scopes).
+HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. v0.0.1 delivered the core plugin with hooks, slash commands, MCP server, and multi-account support. **v0.0.2** extends MCP discovery to include Claude Code plugins with proper scope-aware syncing (user/project/local scopes to target-native scopes).
 
-**Phases:** 11 (8 complete, 3 in v2.0)
-**Depth:** Standard (3-4 phases for v2.0)
-**Coverage:** 47/47 v1 requirements + 19/19 v2.0 requirements mapped
+**Phases:** 11 (8 complete, 3 in v0.0.2)
+**Depth:** Standard (3-4 phases for v0.0.2)
+**Coverage:** 47/47 v1 requirements + 19/19 v0.0.2 requirements mapped
 
 ---
 
-## v1.0 Phases (Complete)
+## v0.0.1 Phases (Complete)
 
 ### Phase 1: Foundation & State Management ✓
 
@@ -100,7 +100,7 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 
 ---
 
-## v2.0 Phases (Milestone: Plugin & MCP Scope Sync)
+## v0.0.2 Phases (Milestone: Plugin & MCP Scope Sync)
 
 ### Phase 9: Plugin Discovery & Scope-Aware Source Reading ✓
 
@@ -175,7 +175,7 @@ Plans:
 
 ---
 
-## v2.0 Coverage
+## v0.0.2 Coverage
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
@@ -199,20 +199,20 @@ Plans:
 | STATE-02 | Phase 11 | Complete |
 | STATE-03 | Phase 11 | Complete |
 
-**Coverage:** 19/19 v2.0 requirements mapped (100%)
+**Coverage:** 19/19 v0.0.2 requirements mapped (100%)
 
 ---
 
 ## Integration Phase
 
-Not required for v2.0. All phases use proxy verification with no deferred validations.
+Not required for v0.0.2. All phases use proxy verification with no deferred validations.
 
 ---
 
-*v1.0 roadmap created: 2026-02-13*
-*v1.0 complete: 2026-02-15 (8 phases, 24 plans)*
-*v2.0 roadmap created: 2026-02-15*
+*v0.0.1 roadmap created: 2026-02-13*
+*v0.0.1 complete: 2026-02-15 (8 phases, 24 plans)*
+*v0.0.2 roadmap created: 2026-02-15*
 *Phase 9 complete: 2026-02-15 (2 plans)*
 *Phase 10 complete: 2026-02-15 (3 plans)*
 *Phase 11 complete: 2026-02-15 (2 plans)*
-*v2.0 complete: 2026-02-15 (3 phases, 7 plans, 19 requirements)*
+*v0.0.2 complete: 2026-02-15 (3 phases, 7 plans, 19 requirements)*

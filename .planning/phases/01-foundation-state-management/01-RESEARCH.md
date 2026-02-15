@@ -704,7 +704,7 @@ class StateManager:
 **At production scale (100+ projects, 500+ skills across plugin cache):**
 - JSON state file could reach 1MB+ (500 skills * 2KB state each)
   - Approach: Keep JSON format (human-readable for debugging), consider gzip compression if >5MB
-  - Alternative: SQLite state store (deferred to v2.0, adds complexity)
+  - Alternative: SQLite state store (deferred to v0.0.2, adds complexity)
 - SHA256 hashing for all skills could take 1-2 seconds
   - Approach: Hash only changed files (mtime check first), use file_digest on 3.11+ for speed
   - Alternative: Parallel hashing with ProcessPoolExecutor (deferred, adds complexity)

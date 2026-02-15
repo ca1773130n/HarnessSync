@@ -9,7 +9,7 @@
 
 Phase 9 extends SourceReader with plugin MCP discovery and 3-tier scope awareness (user/project/local). This is a feature addition, not an optimization, so there are no existing benchmarks to compare against. The evaluation focuses on correctness (100% discovery of configured servers) and precedence integrity (local > project > user).
 
-This phase is critical for v2.0 milestone success — adapters in Phase 10 depend on accurate scope tagging to write MCP servers to correct target-level config files. False negatives (missing servers) break user expectations; false positives (duplicate servers) create maintenance burden.
+This phase is critical for v0.0.2 milestone success — adapters in Phase 10 depend on accurate scope tagging to write MCP servers to correct target-level config files. False negatives (missing servers) break user expectations; false positives (duplicate servers) create maintenance burden.
 
 ### Metric Sources
 
@@ -19,7 +19,7 @@ This phase is critical for v2.0 milestone success — adapters in Phase 10 depen
 | Scope precedence | Test fixtures (duplicate server names) | Validates layered resolution correctness |
 | Variable expansion | Research (09-RESEARCH.md Recommendation 2) | ${CLAUDE_PLUGIN_ROOT} must resolve to absolute paths |
 | Metadata preservation | Plan requirements (SCOPE-01 to SCOPE-05) | Adapters need origin info for scope-aware sync |
-| Backward compatibility | Existing codebase (get_mcp_servers API) | v1.0 adapters must continue working |
+| Backward compatibility | Existing codebase (get_mcp_servers API) | v0.0.1 adapters must continue working |
 
 ### Verification Level Summary
 
@@ -209,7 +209,7 @@ This phase is critical for v2.0 milestone success — adapters in Phase 10 depen
 - **Validated:** false — awaiting Phase 10 scope-aware adapter verification
 
 ### P4: Backward Compatibility
-- **What:** get_mcp_servers() returns flat dict (no metadata) for v1.0 adapter compatibility
+- **What:** get_mcp_servers() returns flat dict (no metadata) for v0.0.1 adapter compatibility
 - **How:** Call get_mcp_servers() and verify return type is dict[str, dict] without nested metadata keys
 - **Command:** Test in 09-02-PLAN.md verify block (lines 253-258)
 - **Target:** All servers present, no "metadata" key in server configs, isinstance checks pass
@@ -276,13 +276,13 @@ This phase is critical for v2.0 milestone success — adapters in Phase 10 depen
 
 | Baseline | Description | Expected Score | Source |
 |----------|-------------|----------------|--------|
-| v1.0 SourceReader | Existing get_mcp_servers() | Discovers user/project file-based MCPs only | BASELINE.md lines 245-252 |
-| Zero plugin coverage | v1.0 ignores plugin MCPs | 0 plugin servers discovered | Current behavior |
-| Zero local-scope coverage | v1.0 doesn't read ~/.claude.json projects | 0 local-scope servers discovered | Current behavior |
+| v0.0.1 SourceReader | Existing get_mcp_servers() | Discovers user/project file-based MCPs only | BASELINE.md lines 245-252 |
+| Zero plugin coverage | v0.0.1 ignores plugin MCPs | 0 plugin servers discovered | Current behavior |
+| Zero local-scope coverage | v0.0.1 doesn't read ~/.claude.json projects | 0 local-scope servers discovered | Current behavior |
 
 **Baseline comparison:**
-- v1.0: Discovers ~60% of MCPs (user + project files only, ignores plugins and local scope)
-- v2.0 Phase 9 target: Discovers 100% of MCPs (adds plugins and local scope)
+- v0.0.1: Discovers ~60% of MCPs (user + project files only, ignores plugins and local scope)
+- v0.0.2 Phase 9 target: Discovers 100% of MCPs (adds plugins and local scope)
 
 ## Evaluation Scripts
 

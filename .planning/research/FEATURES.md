@@ -198,7 +198,7 @@
 
 ## MVP Definition
 
-### Launch With (v1.0 - Plugin Rewrite)
+### Launch With (v0.0.1 - Plugin Rewrite)
 
 - [x] **Unidirectional sync (Claude → all)** - Already implemented in Python
 - [ ] **State tracking with change detection** - Upgrade from basic state file to hash-based diffing
@@ -249,7 +249,7 @@
 | Rollback support | HIGH | LOW | **P0** (Safety net) |
 | Permission validation | HIGH | MEDIUM | **P0** (Prevents broken configs) |
 | Slash command interface | HIGH | LOW | **P0** (Plugin UX requirement) |
-| Bidirectional sync | HIGH | HIGH | **P1** (Complex, defer to v1.1) |
+| Bidirectional sync | HIGH | HIGH | **P1** (Complex, defer to v0.0.1) |
 | Semantic translation | MEDIUM | HIGH | **P1** (Differentiator but non-critical) |
 | Merge strategies | MEDIUM | HIGH | **P1** (Needed for bidirectional) |
 | Drift reports | MEDIUM | MEDIUM | **P2** (Nice-to-have) |

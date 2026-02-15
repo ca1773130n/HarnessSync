@@ -4,32 +4,32 @@
 
 **Core Value:** One harness to rule them all — configure Claude Code once, sync everywhere (Codex, Gemini CLI, OpenCode) without manual duplication or format translation.
 
-**Current Focus:** Between milestones. v2.0 complete.
+**Current Focus:** Between milestones. v0.0.2 complete.
 
 ---
 
 ## Current Position
 
-**Milestone:** v2.0 (complete)
+**Milestone:** v0.0.2 (complete)
 **Phase:** All complete
 **Plan:** N/A
 **Status:** Awaiting next milestone
 
 **Progress:**
 [██████████] 100%
-v1.0: Complete (8 phases) | v2.0: Complete (3 phases)
+v0.0.1: Complete (8 phases) | v0.0.2: Complete (3 phases)
 
 ---
 
 ## Performance Metrics
 
 ### Velocity
-- **Milestones completed:** 2 (v1.0, v2.0)
+- **Milestones completed:** 2 (v0.0.1, v0.0.2)
 - **Phases completed:** 11/11
-- **Plans completed:** 31 (24 v1.0 + 7 v2.0)
+- **Plans completed:** 31 (24 v0.0.1 + 7 v0.0.2)
 - **Average plan duration:** ~2.5 min
-- **v1.0 complete:** 2026-02-15
-- **v2.0 complete:** 2026-02-15
+- **v0.0.1 complete:** 2026-02-15
+- **v0.0.2 complete:** 2026-02-15
 
 ### Quality
 - **Verification passes:** 193+
@@ -37,47 +37,47 @@ v1.0: Complete (8 phases) | v2.0: Complete (3 phases)
 - **Pass rate:** 100%
 
 ### Scope
-- **v1.0 coverage:** 100% (47 requirements delivered)
-- **v1.1 coverage:** 100% (10 multi-account requirements)
-- **v2.0 coverage:** 100% (19 requirements delivered)
+- **v0.0.1 coverage:** 100% (47 requirements delivered)
+- **v0.0.1 coverage:** 100% (10 multi-account requirements)
+- **v0.0.2 coverage:** 100% (19 requirements delivered)
 - **Total requirements:** 76 delivered across 2 milestones
 
 ---
 
 ## Deferred Validations
 
-**v1.0 deferred validations (27 total):**
+**v0.0.1 deferred validations (27 total):**
 See MILESTONES.md for full list. Key items:
 - Real CLI loading (Codex, Gemini, OpenCode)
 - Live plugin integration (hooks/commands/MCP)
 - Cross-platform (Windows, Linux)
 - Production scale testing
 
-**v2.0 deferred validations (8 total):**
+**v0.0.2 deferred validations (8 total):**
 - DEFER-09-01/02: Real plugin MCP discovery, scope-aware sync
 - DEFER-10-01/02/03: Real CLI config loading, full pipeline
-- DEFER-11-01/02/03: Real plugin update detection, multi-account isolation, full v2.0 pipeline
+- DEFER-11-01/02/03: Real plugin update detection, multi-account isolation, full v0.0.2 pipeline
 
 ---
 
 ## Accumulated Context
 
 ### Key Decisions
-42 decisions documented across v1.0 (31) and v2.0 (11). See MILESTONES.md archives.
+42 decisions documented across v0.0.1 (31) and v0.0.2 (11). See MILESTONES.md archives.
 
 ### Blockers
 None.
 
 ### Recent Changes
-- **2026-02-15:** v2.0 milestone complete — Plugin & MCP Scope Sync (3 phases, 7 plans, 19 requirements)
-- **2026-02-15:** v1.0 milestone complete — Core Plugin + Multi-Account (8 phases, 24 plans, 57 requirements)
+- **2026-02-15:** v0.0.2 milestone complete — Plugin & MCP Scope Sync (3 phases, 7 plans, 19 requirements)
+- **2026-02-15:** v0.0.1 milestone complete — Core Plugin + Multi-Account (8 phases, 24 plans, 57 requirements)
 
 ---
 
 ## Session Continuity
 
 ### What Just Happened
-Completed v2.0 milestone. All 11 phases executed. Committed Phase 9/10 source code (previously uncommitted). Created MILESTONES.md entry, updated PROJECT.md, archived ROADMAP.md and REQUIREMENTS.md.
+Completed v0.0.2 milestone. All 11 phases executed. Committed Phase 9/10 source code (previously uncommitted). Created MILESTONES.md entry, updated PROJECT.md, archived ROADMAP.md and REQUIREMENTS.md.
 
 ### What's Next
 Start next milestone with `/grd:new-milestone`.
@@ -88,5 +88,5 @@ Both milestones complete. 76 requirements delivered. 35 deferred validations pen
 ---
 
 *Last updated: 2026-02-15*
-*Session: v2.0 milestone completion*
-*Stopped at: v2.0 complete, awaiting next milestone*
+*Session: v0.0.2 milestone completion*
+*Stopped at: v0.0.2 complete, awaiting next milestone*

@@ -37,7 +37,7 @@
 | Section | Checks | Passed | Status |
 |---------|--------|--------|--------|
 | Plugin Update Simulation | 8 | 8 | PASS |
-| Full v2.0 Pipeline | 8 | 8 | PASS |
+| Full v0.0.2 Pipeline | 8 | 8 | PASS |
 | MCP Source Grouping Display | 5 | 5 | PASS |
 | Account-Scoped Plugin Tracking | 3 | 3 | PASS |
 
@@ -49,7 +49,7 @@
 |----|--------|--------|-------------|------|
 | DEFER-11-01 | Real plugin update detection | PENDING | Phase 11 completion | False positives, undetected updates |
 | DEFER-11-02 | Multi-account plugin isolation | PENDING | Phase 11 production | Cross-account contamination |
-| DEFER-11-03 | Full v2.0 pipeline integration | PENDING | Phase 11 integration | Scope collapse, incomplete features |
+| DEFER-11-03 | Full v0.0.2 pipeline integration | PENDING | Phase 11 integration | Scope collapse, incomplete features |
 
 ## Summary
 

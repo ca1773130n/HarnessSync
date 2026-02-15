@@ -33,7 +33,7 @@ Critical success factors include implementing hash-based drift detection from da
 
 ### Expected Features
 
-**Table Stakes (MVP v1.0):**
+**Table Stakes (MVP v0.0.1):**
 - Unidirectional sync (Claude → all targets) with state tracking
 - Conflict detection and warnings (no auto-merge initially)
 - Dry run mode for previewing changes
@@ -273,7 +273,7 @@ Sync Engine (orchestrator)
 
 ### Deferred Features (Post-MVP)
 
-**v1.1 - Bidirectional Sync:**
+**v0.0.1 - Bidirectional Sync:**
 - Requires conflict resolution UX design
 - Needs user testing of merge strategies
 - High complexity, high user value
@@ -285,7 +285,7 @@ Sync Engine (orchestrator)
 - Profile support (work/home profiles)
 - AI-assisted conflict resolution (experimental)
 
-**v2.0 - Ecosystem Integration:**
+**v0.0.2 - Ecosystem Integration:**
 - Plugin marketplace integration (auto-install skills)
 - Config linting (pre-sync validation)
 - Migration wizard (import existing CLI configs)

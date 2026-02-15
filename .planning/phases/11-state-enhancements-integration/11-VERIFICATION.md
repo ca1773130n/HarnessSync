@@ -24,7 +24,7 @@ deferred_validations:
     target: "100% isolation (no cross-account contamination)"
     depends_on: "Multi-account HarnessSync setup with different plugin sets per account"
     tracked_in: "EVAL.md DEFER-11-02"
-  - description: "Full v2.0 pipeline integration test"
+  - description: "Full v0.0.2 pipeline integration test"
     metric: "end_to_end_pipeline"
     target: "100% discovery, routing, tracking, and display accuracy"
     depends_on: "Phase 9-11 complete, real environment with multiple plugins and configs"
@@ -34,7 +34,7 @@ human_verification: []
 
 # Phase 11: State Enhancements & Integration Verification Report
 
-**Phase Goal:** State enhancements for plugin tracking, drift detection, and MCP source grouping in /sync-status. Completes v2.0 milestone.
+**Phase Goal:** State enhancements for plugin tracking, drift detection, and MCP source grouping in /sync-status. Completes v0.0.2 milestone.
 
 **Verified:** 2026-02-15T15:45:00Z
 
@@ -89,7 +89,7 @@ human_verification: []
 |---|-----------|--------|--------|------------|--------|
 | D1 | Real plugin update detection | drift_detection_accuracy | 100% detection, 0% false positives | Live Claude Code with real plugins | DEFERRED |
 | D2 | Multi-account plugin isolation | account_isolation | 100% isolation | Multi-account setup with different plugins | DEFERRED |
-| D3 | Full v2.0 pipeline integration | end_to_end_pipeline | 100% discovery, routing, tracking | Phase 9-11 complete, real environment | DEFERRED |
+| D3 | Full v0.0.2 pipeline integration | end_to_end_pipeline | 100% discovery, routing, tracking | Phase 9-11 complete, real environment | DEFERRED |
 
 **Level 3:** 3 items tracked for integration phase (see EVAL.md)
 
@@ -143,7 +143,7 @@ human_verification: []
 - ✅ Detect plugin removal
 - ✅ Detect new plugin addition
 
-### Section 2: Full v2.0 Pipeline (8 checks)
+### Section 2: Full v0.0.2 Pipeline (8 checks)
 - ✅ Discover all 8 MCPs (100% discovery)
 - ✅ Correct scope labels (user/project/local)
 - ✅ Correct source labels (file/plugin)
@@ -194,7 +194,7 @@ None. All verification automated via sanity checks, proxy metrics, and integrati
 - Level 2 (Proxy): 8/8 metrics met target
 - Level 3 (Deferred): 3 validations tracked for production testing
 
-Phase 11 goal achieved: State enhancements for plugin tracking, drift detection, and MCP source grouping complete. v2.0 milestone feature set implemented.
+Phase 11 goal achieved: State enhancements for plugin tracking, drift detection, and MCP source grouping complete. v0.0.2 milestone feature set implemented.
 
 ## Deferred Validations Detail
 
@@ -212,11 +212,11 @@ Phase 11 goal achieved: State enhancements for plugin tracking, drift detection,
 - **Fallback:** Single-account plugin tracking only
 - **Timeline:** Phase 11 production testing with multi-account users
 
-### DEFER-11-03: Full v2.0 Pipeline Integration
+### DEFER-11-03: Full v0.0.2 Pipeline Integration
 - **What:** End-to-end test with 3 real plugins + 2 user + 1 project + 1 local MCPs
 - **Validates:** Complete Phase 9-11 integration (discovery + routing + tracking + display)
 - **Risk if unmet:** Scope collapse, incomplete features, broken pipeline
-- **Fallback:** Fall back to v1.0 flat MCP sync
+- **Fallback:** Fall back to v0.0.1 flat MCP sync
 - **Timeline:** Phase 11 integration tests (after all Phase 11 plans complete)
 
 ---

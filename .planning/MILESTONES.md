@@ -1,6 +1,6 @@
 # HarnessSync Milestones
 
-## v1.0: Core Plugin + Multi-Account (Complete)
+## v0.0.1: Core Plugin + Multi-Account (Complete)
 
 **Completed:** 2026-02-15
 **Phases:** 8 (24 plans)
@@ -26,7 +26,7 @@
 
 *Archive created: 2026-02-15*
 
-## v2.0: Plugin & MCP Scope Sync (Shipped: 2026-02-15)
+## v0.0.2: Plugin & MCP Scope Sync (Shipped: 2026-02-15)
 
 **Delivered:** Scope-aware MCP sync with Claude Code plugin discovery, env var translation, and plugin drift detection.
 
@@ -44,8 +44,8 @@
 7. **Enhanced /sync-status** — MCP servers grouped by source (User-configured, Project-configured, Local-configured, Plugin-provided with plugin@version). Plugin drift warnings displayed.
 
 ### Key Stats
-- 19 v2.0 requirements delivered (100%)
-- 42 key decisions documented (32 v1.0 + 10 v2.0)
+- 19 v0.0.2 requirements delivered (100%)
+- 42 key decisions documented (32 v0.0.1 + 10 v0.0.2)
 - +910 lines of Python (stdlib only)
 - 7 plans across 3 phases
 - 4 source files modified + 1 created + 1 integration test

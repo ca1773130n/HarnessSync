@@ -976,7 +976,7 @@ fi
 
 **What's unclear:** Review criteria, timeline, acceptance rate. Whether custom marketplace vs official provides better discoverability.
 
-**Recommendation:** Start with custom marketplace (username/HarnessSync). Submit to official marketplace after v1.0 release and community validation. Provides flexibility during early development.
+**Recommendation:** Start with custom marketplace (username/HarnessSync). Submit to official marketplace after v0.0.1 release and community validation. Provides flexibility during early development.
 
 **Trade-off:** Official marketplace = better discoverability, custom marketplace = faster iteration.
 

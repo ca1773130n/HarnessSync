@@ -7,7 +7,7 @@
 
 ## Evaluation Overview
 
-Phase 8 extends HarnessSync v1.0 (single-account) to support users with multiple Claude Code configurations (e.g., personal and work accounts) and multiple target CLI accounts. The core challenge is discovering, configuring, and syncing across account pairs without cross-contamination while maintaining the zero-dependency Python 3 stdlib constraint.
+Phase 8 extends HarnessSync v0.0.1 (single-account) to support users with multiple Claude Code configurations (e.g., personal and work accounts) and multiple target CLI accounts. The core challenge is discovering, configuring, and syncing across account pairs without cross-contamination while maintaining the zero-dependency Python 3 stdlib constraint.
 
 **What we're evaluating:**
 - AccountManager: CRUD operations for ~/.harnesssync/accounts.json with atomic writes, name validation, target path collision detection
@@ -34,7 +34,7 @@ Phase 8 extends HarnessSync v1.0 (single-account) to support users with multiple
 |--------|--------|----------------|
 | Setup completion time | time.time() delta from wizard start to accounts.json write | Research target: 2-3 minutes (vs 30+ minutes manual editing) |
 | Discovery time | time.time() delta during filesystem scan | Research target: <500ms for depth=2 scan |
-| Per-account sync time | time.time() delta per account in sync loop | Research target: ~2s (v1.0 single-account baseline) |
+| Per-account sync time | time.time() delta per account in sync loop | Research target: ~2s (v0.0.1 single-account baseline) |
 | Multi-account sync time | Total time to sync N accounts | Research target: 2 accounts in <5s, 3 accounts in <8s |
 | False positive drift rate | Count of drift warnings after isolated account sync | Research target: 0% (perfect isolation) |
 | State file size | os.path.getsize(state.json) | v1: ~2KB, v2 expected: ~5KB (3 accounts) |
@@ -331,7 +331,7 @@ assert reader.cc_home == Path.home() / '.claude', 'Default cc_home preserved'
 print('PASS: SourceReader backward compatible')
 "
 ```
-- **Expected:** Default behavior unchanged from v1.0
+- **Expected:** Default behavior unchanged from v0.0.1
 - **Failure means:** Existing code broken (v1 users affected)
 
 ### S10: StateManager v1 to v2 Migration
@@ -601,12 +601,12 @@ from pathlib import Path
 # Measures baseline sync time for comparison with multi-account scenarios
 
 print('Per-account sync time test (informational)')
-print('Baseline: v1.0 single account ~2s')
+print('Baseline: v0.0.1 single account ~2s')
 print('Target: account sync should not add significant overhead')
 print('Proxy metric: Not directly comparable without adapter mocking')
 "
 ```
-- **Target:** ~2s (v1.0 baseline)
+- **Target:** ~2s (v0.0.1 baseline)
 - **Evidence:** Phase 4 established 2s baseline for single-account sync
 - **Correlation:** LOW — requires full adapter integration
 - **Blind spots:** Adapter availability, network latency for MCP servers
@@ -780,8 +780,8 @@ with tempfile.TemporaryDirectory() as td:
 
 | Baseline | Description | Expected Score | Source |
 |----------|-------------|----------------|--------|
-| v1.0 single-account sync time | Time to sync one account to all 3 targets | ~2s | Phase 4 established baseline |
-| v1.0 state.json size | State file size with single account | ~2KB | Phase 1 baseline |
+| v0.0.1 single-account sync time | Time to sync one account to all 3 targets | ~2s | Phase 4 established baseline |
+| v0.0.1 state.json size | State file size with single account | ~2KB | Phase 1 baseline |
 | Discovery time (bounded scan) | Time to scan ~50 directory home | <500ms | Research: os.scandir() performance |
 | False drift rate | Drift warnings after isolated account sync | 0% | Perfect isolation requirement |
 

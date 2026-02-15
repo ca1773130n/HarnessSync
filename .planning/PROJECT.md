@@ -84,17 +84,17 @@ Claude Code Plugin (HarnessSync)
 - V **State tracking** — SHA256 change detection, sync timestamps — existing
 - V **Stale symlink cleanup** — Removes broken symlinks after sync — existing
 - V **macOS daemon** — launchd plist for background watch mode — existing
-- V **Plugin architecture** — Claude Code plugin with hooks, commands, MCP server — v1.0
-- V **PostToolUse hook** — Auto-sync on config file changes with 3s debounce — v1.0
-- V **Slash commands** — /sync and /sync-status for manual control — v1.0
-- V **MCP server** — JSON-RPC 2.0 sync tools for programmatic access — v1.0
-- V **Settings drift adaptation** — Env vars, permissions, allowed tools mapping per target — v1.0
-- V **Multi-account support** — Account discovery, setup wizard, scoped sync — v1.1
-- V **Plugin MCP discovery** — Discover MCPs from installed Claude Code plugins — v2.0
-- V **Scope-aware sync** — 3-tier scope (user/project/local) with target routing — v2.0
-- V **Env var translation** — ${VAR} and ${VAR:-default} translation per target format — v2.0
-- V **Plugin drift detection** — Version tracking, MCP count changes, add/remove detection — v2.0
-- V **Marketplace packaging** — .claude-plugin structure, marketplace.json, install.sh — v1.0
+- V **Plugin architecture** — Claude Code plugin with hooks, commands, MCP server — v0.0.1
+- V **PostToolUse hook** — Auto-sync on config file changes with 3s debounce — v0.0.1
+- V **Slash commands** — /sync and /sync-status for manual control — v0.0.1
+- V **MCP server** — JSON-RPC 2.0 sync tools for programmatic access — v0.0.1
+- V **Settings drift adaptation** — Env vars, permissions, allowed tools mapping per target — v0.0.1
+- V **Multi-account support** — Account discovery, setup wizard, scoped sync — v0.0.1
+- V **Plugin MCP discovery** — Discover MCPs from installed Claude Code plugins — v0.0.2
+- V **Scope-aware sync** — 3-tier scope (user/project/local) with target routing — v0.0.2
+- V **Env var translation** — ${VAR} and ${VAR:-default} translation per target format — v0.0.2
+- V **Plugin drift detection** — Version tracking, MCP count changes, add/remove detection — v0.0.2
+- V **Marketplace packaging** — .claude-plugin structure, marketplace.json, install.sh — v0.0.1
 
 ### Active
 
@@ -112,10 +112,10 @@ Claude Code Plugin (HarnessSync)
 
 ## Completed Milestones
 
-- **v1.0** — Core Plugin + Multi-Account (2026-02-15): 8 phases, 24 plans, 57 requirements
-- **v2.0** — Plugin & MCP Scope Sync (2026-02-15): 3 phases, 7 plans, 19 requirements
+- **v0.0.1** — Core Plugin + Multi-Account (2026-02-15): 8 phases, 24 plans, 57 requirements
+- **v0.0.2** — Plugin & MCP Scope Sync (2026-02-15): 3 phases, 7 plans, 19 requirements
 
 See `.planning/MILESTONES.md` for full history.
 
 ---
-*Last updated: 2026-02-15 — v2.0 milestone complete*
+*Last updated: 2026-02-15 — v0.0.2 milestone complete*

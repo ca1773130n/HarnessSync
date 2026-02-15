@@ -48,4 +48,4 @@
 |----|--------|--------|-------------|------|
 | DEFER-10-01 | Real Codex CLI integration | PENDING | Post-phase | TOML syntax errors |
 | DEFER-10-02 | Real Gemini CLI integration | PENDING | Post-phase | JSON structure errors |
-| DEFER-10-03 | Full v2.0 pipeline | PENDING | Phase 11 | Scope collapse, env gaps |
+| DEFER-10-03 | Full v0.0.2 pipeline | PENDING | Phase 11 | Scope collapse, env gaps |

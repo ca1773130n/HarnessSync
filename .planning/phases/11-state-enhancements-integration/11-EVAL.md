@@ -7,7 +7,7 @@
 
 ## Evaluation Overview
 
-Phase 11 is the final v2.0 phase, completing the plugin and scope-aware sync system by extending StateManager to track plugin metadata (version, MCP count) for update-triggered re-sync detection, and enhancing /sync-status to display MCP servers grouped by source (user/project/local/plugin) with scope labels. This phase integrates all v2.0 components (Phases 9-11) into a cohesive system with plugin-aware drift detection.
+Phase 11 is the final v0.0.2 phase, completing the plugin and scope-aware sync system by extending StateManager to track plugin metadata (version, MCP count) for update-triggered re-sync detection, and enhancing /sync-status to display MCP servers grouped by source (user/project/local/plugin) with scope labels. This phase integrates all v0.0.2 components (Phases 9-11) into a cohesive system with plugin-aware drift detection.
 
 **Key challenges:**
 1. **Plugin metadata persistence** — Must record plugin version/count after successful sync without corrupting state on partial failures
@@ -37,7 +37,7 @@ This is primarily a **state management and display enhancement** phase with no a
 |-------|-------|---------|
 | Sanity (L1) | 7 | Basic functionality — method existence, format validation, pattern matching |
 | Proxy (L2) | 8 | Comprehensive state tracking, drift detection, display formatting |
-| Deferred (L3) | 3 | Real plugin updates, production multi-account testing, full v2.0 pipeline |
+| Deferred (L3) | 3 | Real plugin updates, production multi-account testing, full v0.0.2 pipeline |
 
 ## Level 1: Sanity Checks
 
@@ -734,7 +734,7 @@ This is primarily a **state management and display enhancement** phase with no a
   11. Run /sync-status for 'personal'
   12. Verify NO drift detected (work plugin update doesn't affect personal account)
 - **Why deferred:** Requires multi-account setup with separate Claude Code installations per account
-- **Validates at:** Phase 11 production testing (manual or automated after v2.0 release)
+- **Validates at:** Phase 11 production testing (manual or automated after v0.0.2 release)
 - **Depends on:**
   - Multi-account HarnessSync configuration (Phase 8 feature)
   - Multiple Claude Code installations with different plugin sets
@@ -750,8 +750,8 @@ This is primarily a **state management and display enhancement** phase with no a
   - /sync-status shows wrong account's plugins — user confusion
 - **Fallback:** Single-account plugin tracking only; multi-account setups must disable plugin drift detection
 
-### D3: Full v2.0 Pipeline Integration Test — DEFER-11-03
-- **What:** End-to-end v2.0 validation: Phase 9 discovery + Phase 10 routing + Phase 11 plugin tracking + full /sync-status display
+### D3: Full v0.0.2 Pipeline Integration Test — DEFER-11-03
+- **What:** End-to-end v0.0.2 validation: Phase 9 discovery + Phase 10 routing + Phase 11 plugin tracking + full /sync-status display
 - **How:**
   1. Setup environment with:
      - 3 real Claude Code plugins with MCPs (Context7, GRD, GitHub plugin)
@@ -796,12 +796,12 @@ This is primarily a **state management and display enhancement** phase with no a
   - 0% false positives: no drift when no changes occurred
   - 0% scope collapse: project MCPs not in user configs, plugin MCPs not in project configs
 - **Risk if unmet:**
-  - v2.0 feature set incomplete — users can't use plugin-aware sync
+  - v0.0.2 feature set incomplete — users can't use plugin-aware sync
   - Scope routing broken — per-project MCP overrides don't work
   - Plugin drift undetected — users don't know when to re-sync after updates
   - Display grouping wrong — users can't distinguish plugin MCPs from user configs
 - **Fallback:**
-  - Fall back to v1.0 flat MCP sync (no scope separation)
+  - Fall back to v0.0.1 flat MCP sync (no scope separation)
   - Skip plugin drift detection (manual version tracking)
   - Basic /sync-status without grouping
 
@@ -815,14 +815,14 @@ This is primarily a **state management and display enhancement** phase with no a
 
 | Baseline | Description | Current Behavior | Phase 11 Target | Source |
 |----------|-------------|------------------|----------------|--------|
-| v1.0 State tracking | Tracks file hashes only | No plugin version tracking | Plugin versions and MCP counts tracked | STATE-01 requirement |
-| v1.0 Drift detection | File hash comparison | Doesn't detect plugin updates | Detects version/count changes | STATE-03 requirement |
-| v1.0 /sync-status | Shows per-target status | All MCPs in flat list | Grouped by source (user/project/plugin) | STATE-02 requirement |
-| v1.0 Plugin awareness | No plugin tracking | Plugin updates invisible | Plugin drift warnings displayed | 11-RESEARCH.md |
+| v0.0.1 State tracking | Tracks file hashes only | No plugin version tracking | Plugin versions and MCP counts tracked | STATE-01 requirement |
+| v0.0.1 Drift detection | File hash comparison | Doesn't detect plugin updates | Detects version/count changes | STATE-03 requirement |
+| v0.0.1 /sync-status | Shows per-target status | All MCPs in flat list | Grouped by source (user/project/plugin) | STATE-02 requirement |
+| v0.0.1 Plugin awareness | No plugin tracking | Plugin updates invisible | Plugin drift warnings displayed | 11-RESEARCH.md |
 
 **Baseline comparison:**
-- v1.0: 0% plugin tracking, 0% plugin drift detection, 0% MCP source grouping
-- v2.0 Phase 11 target: 100% plugin tracking, 100% drift detection, 100% source grouping
+- v0.0.1: 0% plugin tracking, 0% plugin drift detection, 0% MCP source grouping
+- v0.0.2 Phase 11 target: 100% plugin tracking, 100% drift detection, 100% source grouping
 
 ## Evaluation Scripts
 
@@ -890,7 +890,7 @@ N/A — No ablation plan for this phase (single implementation approach)
 |----|--------|--------|-------------|------|
 | DEFER-11-01 | Real plugin update detection | PENDING | Phase 11 completion | False positives, undetected updates |
 | DEFER-11-02 | Multi-account plugin isolation | PENDING | Phase 11 production | Cross-account contamination |
-| DEFER-11-03 | Full v2.0 pipeline integration | PENDING | Phase 11 integration | Scope collapse, incomplete features |
+| DEFER-11-03 | Full v0.0.2 pipeline integration | PENDING | Phase 11 integration | Scope collapse, incomplete features |
 
 ## Evaluation Confidence
 
@@ -900,7 +900,7 @@ N/A — No ablation plan for this phase (single implementation approach)
 
 - **Sanity checks:** ADEQUATE — 7 checks cover all new methods (StateManager, orchestrator, sync-status), schema validation, pattern matching, and drift comparison logic. Complete coverage of implementation surface area.
 - **Proxy metrics:** WELL-EVIDENCED — 8 comprehensive tests trace directly to requirements (STATE-01, STATE-02, STATE-03) and research recommendations (11-RESEARCH.md patterns). Each metric tests a specific success criterion (persistence, drift detection, grouping, formatting).
-- **Deferred coverage:** COMPREHENSIVE — Three critical integration risks: real plugin updates (D1), multi-account isolation (D2), full v2.0 pipeline (D3). All success criteria ultimately validated in deferred tests.
+- **Deferred coverage:** COMPREHENSIVE — Three critical integration risks: real plugin updates (D1), multi-account isolation (D2), full v0.0.2 pipeline (D3). All success criteria ultimately validated in deferred tests.
 
 **What this evaluation CAN tell us:**
 
@@ -916,7 +916,7 @@ N/A — No ablation plan for this phase (single implementation approach)
 
 - Real plugin updates in live Claude Code trigger drift detection — validates at DEFER-11-01
 - Production multi-account setups maintain plugin isolation — validates at DEFER-11-02
-- Full v2.0 pipeline (9+10+11) works end-to-end with real plugins and configs — validates at DEFER-11-03
+- Full v0.0.2 pipeline (9+10+11) works end-to-end with real plugins and configs — validates at DEFER-11-03
 - /sync-status terminal display is readable and user-friendly — assumes formatting tests proxy for UX
 - State file size growth with many plugin install/uninstall cycles — assumes replacement semantics sufficient
 - Performance with 50+ plugins and 250+ MCPs — assumes O(P) drift detection acceptable

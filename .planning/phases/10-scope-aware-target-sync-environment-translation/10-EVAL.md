@@ -27,7 +27,7 @@ This is primarily a **configuration mapping and format translation** phase with 
 | Environment variable preservation (Gemini) | Requirement ENV-03 | Gemini supports `${VAR}` natively |
 | Transport detection accuracy | Requirement SYNC-04 + 10-RESEARCH.md | Validating SSE/HTTP/stdio categorization |
 | Transport validation warnings | Requirement SYNC-04 | Unsupported combos (SSE on Codex) must warn |
-| Backward compatibility | Existing adapter interface | v1.0 adapters must continue working |
+| Backward compatibility | Existing adapter interface | v0.0.1 adapters must continue working |
 
 ### Verification Level Summary
 
@@ -632,7 +632,7 @@ This is primarily a **configuration mapping and format translation** phase with 
 - **Risk if unmet:** JSON structure wrong (mcpServers field missing, scope nesting incorrect) — Phase 10 blocked
 - **Fallback:** Python JSON validation only; skip Gemini CLI testing
 
-### D3: Full v2.0 Pipeline Integration — DEFER-10-03
+### D3: Full v0.0.2 Pipeline Integration — DEFER-10-03
 - **What:** End-to-end validation: Phase 9 scoped discovery → Phase 10 scope-aware routing → correct target configs with proper env translation
 - **How:**
   1. Install real Claude Code plugins (Context7, GitHub plugin with MCPs)
@@ -680,16 +680,16 @@ This is primarily a **configuration mapping and format translation** phase with 
 
 ## Baselines
 
-| Baseline | Description | Current Behavior | v2.0 Target | Source |
+| Baseline | Description | Current Behavior | v0.0.2 Target | Source |
 |----------|-------------|------------------|------------|--------|
-| v1.0 Adapter interface | sync_mcp(flat_dict) | All MCPs write to single project-level config | Route by scope to user/project files | Adapter implementation |
-| v1.0 Env var handling | Passed through verbatim | `${VAR}` in Codex TOML (causes errors) | Codex: expand to env map; Gemini: preserve | 10-RESEARCH.md |
-| v1.0 Transport support | Assumed all supported | No warnings for unsupported combos | Detect SSE/HTTP/stdio, warn on unsupported | SYNC-04 requirement |
-| v1.0 Scope awareness | None | User/project MCPs collapsed to one file | Separate user and project config files | SYNC-01, SYNC-02 |
+| v0.0.1 Adapter interface | sync_mcp(flat_dict) | All MCPs write to single project-level config | Route by scope to user/project files | Adapter implementation |
+| v0.0.1 Env var handling | Passed through verbatim | `${VAR}` in Codex TOML (causes errors) | Codex: expand to env map; Gemini: preserve | 10-RESEARCH.md |
+| v0.0.1 Transport support | Assumed all supported | No warnings for unsupported combos | Detect SSE/HTTP/stdio, warn on unsupported | SYNC-04 requirement |
+| v0.0.1 Scope awareness | None | User/project MCPs collapsed to one file | Separate user and project config files | SYNC-01, SYNC-02 |
 
 **Baseline comparison:**
-- v1.0: 0% scope separation, 0% env translation, 0% transport validation
-- v2.0 Phase 10 target: 100% scope separation, 100% env translation (Codex), 100% transport validation
+- v0.0.1: 0% scope separation, 0% env translation, 0% transport validation
+- v0.0.2 Phase 10 target: 100% scope separation, 100% env translation (Codex), 100% transport validation
 
 ## Evaluation Scripts
 
@@ -765,7 +765,7 @@ N/A — No ablation plan for this phase (single approach, no alternatives)
 |----|--------|--------|-------------|------|
 | DEFER-10-01 | Real Codex CLI integration | PENDING | Phase 10 integration | TOML syntax/parsing errors |
 | DEFER-10-02 | Real Gemini CLI integration | PENDING | Phase 10 integration | JSON structure errors |
-| DEFER-10-03 | Full v2.0 pipeline | PENDING | Phase 10 integration | Scope collapse, env translation gaps |
+| DEFER-10-03 | Full v0.0.2 pipeline | PENDING | Phase 10 integration | Scope collapse, env translation gaps |
 
 ## Evaluation Confidence
 
@@ -775,7 +775,7 @@ N/A — No ablation plan for this phase (single approach, no alternatives)
 
 - **Sanity checks:** ADEQUATE — 6 checks cover all new functions, signatures, pattern matching, transport detection, and backward compatibility. No algorithmic gaps.
 - **Proxy metrics:** WELL-DESIGNED — Test fixture approach validates core logic (scope routing, env translation, transport detection) without requiring real CLIs. Each metric traces to requirement or research recommendation.
-- **Deferred coverage:** COMPREHENSIVE — Three critical integration risks identified: TOML syntax (D1), JSON structure (D2), end-to-end scope/env correctness (D3). Full v2.0 pipeline validation at D3 ensures requirements are actually met in practice.
+- **Deferred coverage:** COMPREHENSIVE — Three critical integration risks identified: TOML syntax (D1), JSON structure (D2), end-to-end scope/env correctness (D3). Full v0.0.2 pipeline validation at D3 ensures requirements are actually met in practice.
 
 **What this evaluation CAN tell us:**
 
@@ -791,7 +791,7 @@ N/A — No ablation plan for this phase (single approach, no alternatives)
 
 - Real Codex CLI can parse generated TOML (syntax, reserved keywords, section nesting) — validates at DEFER-10-01
 - Real Gemini CLI can parse generated JSON and invoke MCPs — validates at DEFER-10-02
-- Full v2.0 end-to-end flow with real plugins, multiple scopes, and actual MCP invocation — validates at DEFER-10-03
+- Full v0.0.2 end-to-end flow with real plugins, multiple scopes, and actual MCP invocation — validates at DEFER-10-03
 - Edge cases: special characters in env values, very large configs, symlinked plugin paths, non-ASCII env vars — assumes not tested, scope for future phases
 - Performance with many MCPs (50+) — assumes acceptable based on Phase 1-3 performance
 

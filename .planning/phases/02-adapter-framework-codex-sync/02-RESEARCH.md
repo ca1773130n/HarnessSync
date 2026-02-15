@@ -1193,7 +1193,7 @@ except TypeError as e:
 
 **Paper leads:** None (too recent, no academic papers yet).
 
-**Recommendation:** Monitor spec repository (if public), add version detection to skill parser, support multiple spec versions if needed. For now, assume v1.0 (Dec 2025) is stable.
+**Recommendation:** Monitor spec repository (if public), add version detection to skill parser, support multiple spec versions if needed. For now, assume v0.0.1 (Dec 2025) is stable.
 
 ## State of the Art
 

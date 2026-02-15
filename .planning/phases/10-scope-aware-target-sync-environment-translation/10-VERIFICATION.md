@@ -43,7 +43,7 @@
 |----|-------------|--------|
 | DEFER-10-01 | Real Codex CLI loads generated config.toml | Requires Codex installation |
 | DEFER-10-02 | Real Gemini CLI loads generated settings.json | Requires Gemini installation |
-| DEFER-10-03 | Full v2.0 pipeline with real plugins | Requires Claude Code + plugins |
+| DEFER-10-03 | Full v0.0.2 pipeline with real plugins | Requires Claude Code + plugins |
 
 ## Phase Goal Achievement
 

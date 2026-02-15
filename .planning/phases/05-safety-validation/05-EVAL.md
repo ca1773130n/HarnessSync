@@ -228,7 +228,7 @@ The critical insight from RESEARCH.md is that safety validations should be **non
 - **Depends on:** Windows test environment, Windows-specific junction creation
 - **Target:** is_symlink() returns True for junctions OR fallback to os.path.islink() implemented
 - **Risk if unmet:** Windows users will have broken junctions accumulate, symlink cleanup ineffective
-- **Fallback:** Document as known limitation for v1.0, add ctypes reparse point detection in v2.0
+- **Fallback:** Document as known limitation for v0.0.1, add ctypes reparse point detection in v0.0.2
 
 ### D2: Large Directory Backup Performance — DEFER-05-02
 - **What:** Backup performance remains acceptable for large directories (>1GB, >1000 files)
@@ -238,7 +238,7 @@ The critical insight from RESEARCH.md is that safety validations should be **non
 - **Depends on:** Performance test harness, large synthetic directory generator
 - **Target:** Backup completes in <5 seconds for 1GB directory, rollback in <10 seconds
 - **Risk if unmet:** Sync becomes slow/unusable for large projects, timeout issues
-- **Fallback:** Add progress indicators, consider incremental backup in v2.0
+- **Fallback:** Add progress indicators, consider incremental backup in v0.0.2
 
 ### D3: Secret Detection on Production Config Files — DEFER-05-03
 - **What:** Secret detection false positive rate on real .env files is <20% (per TruffleHog benchmark)

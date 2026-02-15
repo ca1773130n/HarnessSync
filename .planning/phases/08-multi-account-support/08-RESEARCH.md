@@ -6,7 +6,7 @@
 
 ## Summary
 
-Phase 8 extends HarnessSync v1.0 to support users with multiple Claude Code configurations (e.g., personal and work accounts) and multiple target CLI accounts (Codex, Gemini, OpenCode). The core challenge is discovering, configuring, and syncing across account pairs without cross-contamination while maintaining the zero-dependency Python 3 stdlib constraint.
+Phase 8 extends HarnessSync v0.0.1 to support users with multiple Claude Code configurations (e.g., personal and work accounts) and multiple target CLI accounts (Codex, Gemini, OpenCode). The core challenge is discovering, configuring, and syncing across account pairs without cross-contamination while maintaining the zero-dependency Python 3 stdlib constraint.
 
 Research reveals that successful multi-account CLI tools (AWS CLI, kubectl, GitHub CLI) converge on three architectural patterns: (1) profile-based configuration with explicit account naming, (2) environment variable overrides for temporary context switching, and (3) a central registry file mapping source accounts to target accounts. The critical insight is that account isolation happens at the configuration layer, not the sync engine layer—existing adapters remain unchanged.
 
@@ -72,7 +72,7 @@ No CONTEXT.md exists for Phase 8 — full discretion granted.
 - Git Config Path Override (Git Documentation, 2026) — git config --file /path/to/config reads from custom location instead of ~/.gitconfig. Enables per-repository isolation. [Git - git-config Documentation](https://git-scm.com/docs/git-config)
 - Cross-Tenant Synchronization Isolation (Microsoft Entra Documentation, 2026) — Attribute mappings define how users from source tenant appear in target tenant. Isolation prevents cross-contamination between tenants. [Configure cross-tenant synchronization](https://learn.microsoft.com/en-us/entra/identity/multi-tenant-organizations/cross-tenant-synchronization-configure)
 
-**Confidence:** HIGH — Path parameterization is a standard isolation technique. HarnessSync v1.0 already uses this pattern for project_dir.
+**Confidence:** HIGH — Path parameterization is a standard isolation technique. HarnessSync v0.0.1 already uses this pattern for project_dir.
 
 **Expected improvement:** Complete isolation between accounts. Account A sync cannot accidentally modify Account B configs.
 
@@ -98,7 +98,7 @@ No CONTEXT.md exists for Phase 8 — full discretion granted.
 ### Alternatives Considered
 | Instead of | Could Use | Tradeoff | Paper Evidence |
 |------------|-----------|----------|----------------|
-| JSON registry | TOML/YAML | TOML/YAML more human-readable but require external libs (tomli/PyYAML) | v1.0 decision: stdlib only |
+| JSON registry | TOML/YAML | TOML/YAML more human-readable but require external libs (tomli/PyYAML) | v0.0.1 decision: stdlib only |
 | input() prompts | PyInquirer/rich | Better UX (dropdowns, validation) but adds dependencies | [Building Beautiful CLIs with Python](https://codeburst.io/building-beautiful-command-line-interfaces-with-python-26c7e1bb54df) |
 | Filesystem scanning | Manual path entry | Faster setup but manual discovery misses 30%+ accounts | [os.scandir() 2-20x faster](https://peps.python.org/pep-0471/) |
 
@@ -234,7 +234,7 @@ src/
 
 ### Anti-Patterns to Avoid
 
-- **Global source path assumption:** v1.0 hardcodes ~/.claude/ in SourceReader. Phase 8 must parameterize cc_home to support multiple source paths. Hardcoding prevents multi-account support.
+- **Global source path assumption:** v0.0.1 hardcodes ~/.claude/ in SourceReader. Phase 8 must parameterize cc_home to support multiple source paths. Hardcoding prevents multi-account support.
 - **Adapter-level account logic:** Do NOT embed account selection in adapters. Keep adapters stateless—they receive target paths from orchestrator. Account logic belongs in orchestrator layer.
 - **Unbounded filesystem scanning:** Scanning entire home directory recursively can take 5+ seconds and traverse millions of files (node_modules, .git, caches). Limit depth to 2-3 levels and exclude common large directories.
 - **Synchronous multi-account sync:** Syncing 3 accounts sequentially takes 3x time. Consider async/concurrent sync (Python's concurrent.futures) for 3-5 accounts (defer to future phase if complexity high).
@@ -272,7 +272,7 @@ src/
 
 **What goes wrong:** Syncing Account A accidentally updates state.json entries for Account B, causing drift detection false positives.
 
-**Why it happens:** StateManager in v1.0 uses flat targets dict. Adding accounts without nesting causes target name collisions (both accounts use "codex" target).
+**Why it happens:** StateManager in v0.0.1 uses flat targets dict. Adding accounts without nesting causes target name collisions (both accounts use "codex" target).
 
 **How to avoid:**
 1. Nest state by account: `state["accounts"]["personal"]["targets"]["codex"]`
@@ -337,8 +337,8 @@ src/
 - Same Python version (3.10)
 
 **Baseline comparison:**
-- Method: v1.0 single-account sync time
-- Expected performance: v1.0 syncs 1 account in ~2 seconds
+- Method: v0.0.1 single-account sync time
+- Expected performance: v0.0.1 syncs 1 account in ~2 seconds
 - Our target: 2 accounts in <5 seconds (2.5x baseline), 3 accounts in <8 seconds
 
 **Ablation plan:**
@@ -357,7 +357,7 @@ src/
 |--------|-----|----------------|----------|
 | Setup completion time | User onboarding friction | time.time() delta from wizard start to accounts.json write | N/A (new feature) |
 | Discovery time | Setup wizard responsiveness | time.time() delta during filesystem scan | <500ms for depth=2, ~/.claude* pattern |
-| Per-account sync time | Scalability with account count | time.time() delta per account in loop | ~2s (v1.0 single account baseline) |
+| Per-account sync time | Scalability with account count | time.time() delta per account in loop | ~2s (v0.0.1 single account baseline) |
 | State file size | Storage overhead | os.path.getsize(state.json) | v1: ~2KB, v2: ~5KB (3 accounts) |
 | False positive drift rate | Isolation correctness | Count drift warnings after isolated sync | 0% (perfect isolation) |
 
@@ -421,7 +421,7 @@ src/
 
 ### Common Implementation Traps
 
-- **Hardcoded ~/.claude/ assumptions:** v1.0 SourceReader hardcodes Path.home() / ".claude". Multi-account support breaks if not parameterized.
+- **Hardcoded ~/.claude/ assumptions:** v0.0.1 SourceReader hardcodes Path.home() / ".claude". Multi-account support breaks if not parameterized.
   - Correct approach: SourceReader.__init__(cc_home=Path, ...) with default cc_home=(Path.home() / ".claude")
 
 - **Flat state schema migration:** Migrating v1 state.json (flat targets) to v2 (nested accounts) without preserving old data loses sync history.
@@ -658,7 +658,7 @@ def setup_wizard():
 
 ### Account-Aware StateManager Extension
 ```python
-# Source: HarnessSync v1.0 StateManager + multi-account extension
+# Source: HarnessSync v0.0.1 StateManager + multi-account extension
 class StateManagerV2(StateManager):
     """Extended StateManager with per-account state tracking."""
 
@@ -769,20 +769,20 @@ class StateManagerV2(StateManager):
 1. **Should Phase 8 include concurrent multi-account sync?**
    - What we know: Sequential sync for 3 accounts takes ~6 seconds (acceptable). concurrent.futures.ThreadPoolExecutor is stdlib.
    - What's unclear: Does user value justify complexity? Most users sync on-demand, not continuously.
-   - Recommendation: Defer to user feedback after v1.0 + Phase 8 release. Start sequential, add concurrent if users report slow sync times.
+   - Recommendation: Defer to user feedback after v0.0.1 + Phase 8 release. Start sequential, add concurrent if users report slow sync times.
 
 2. **How should setup wizard handle target CLI directories that don't exist yet?**
    - What we know: Codex/Gemini/OpenCode may not be installed. Creating ~/.codex-work/ before Codex install is harmless.
    - What's unclear: Should wizard validate CLI installation or just create directories?
-   - Recommendation: Create directories unconditionally. Sync will fail gracefully if CLI not installed (same as v1.0). Document in wizard: "Target directories will be created. Install CLIs separately."
+   - Recommendation: Create directories unconditionally. Sync will fail gracefully if CLI not installed (same as v0.0.1). Document in wizard: "Target directories will be created. Install CLIs separately."
 
 3. **Should accounts.json support per-account adapter selection (e.g., personal → Codex only, work → Gemini only)?**
    - What we know: Some users may want personal Claude synced only to Codex, not all 3 CLIs.
    - What's unclear: Adds complexity. Is this common enough to include in Phase 8?
    - Recommendation: Start with all-or-nothing (account syncs to all configured targets). Add selective sync in future phase if requested.
 
-4. **What is the migration path for v1.0 users to multi-account setup?**
-   - What we know: v1.0 state.json has flat targets. Must migrate to nested accounts structure.
+4. **What is the migration path for v0.0.1 users to multi-account setup?**
+   - What we know: v0.0.1 state.json has flat targets. Must migrate to nested accounts structure.
    - What's unclear: Should migration happen automatically on first Phase 8 run, or require explicit /sync-setup?
    - Recommendation: Auto-migrate v1 state to "default" account on first run. Log migration message. User can rename "default" to "personal" via setup wizard.
 
@@ -809,7 +809,7 @@ class StateManagerV2(StateManager):
 ## Metadata
 
 **Confidence breakdown:**
-- Standard stack: HIGH - All stdlib, proven in v1.0
+- Standard stack: HIGH - All stdlib, proven in v0.0.1
 - Architecture patterns: HIGH - AWS CLI, kubectl, git config converge on same patterns
 - Account discovery: MEDIUM - pathlib.rglob() performance depends on filesystem structure
 - Setup wizard UX: MEDIUM - Interactive prompts work, but UX quality needs manual testing
