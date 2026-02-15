@@ -6,6 +6,7 @@ all registered adapters, and updates state. Supports scope filtering,
 dry-run preview mode, and per-account sync operations.
 """
 
+from datetime import datetime
 from pathlib import Path
 
 from src.adapters import AdapterRegistry
@@ -89,6 +90,8 @@ class SyncOrchestrator:
         # Translate key: SourceReader uses 'mcp_servers', adapters expect 'mcp'
         adapter_data = dict(source_data)
         adapter_data['mcp'] = adapter_data.pop('mcp_servers', {})
+        # Pass scoped MCP data for v2.0 scope-aware adapters
+        adapter_data['mcp_scoped'] = source_data.get('mcp_servers_scoped', {})
 
         # --- PRE-SYNC: SECRET DETECTION ---
         # Run secret detection on MCP env vars (before any writes)
@@ -178,7 +181,7 @@ class SyncOrchestrator:
 
         # --- POST-SYNC: STATE UPDATE ---
         if not self.dry_run:
-            self._update_state(results, reader)
+            self._update_state(results, reader, source_data)
 
         # --- POST-SYNC: BACKUP RETENTION CLEANUP (skip in dry-run) ---
         if not self.dry_run and backup_manager:
@@ -302,12 +305,49 @@ class SyncOrchestrator:
 
         return {"preview": df.format_output(), "is_preview": True}
 
-    def _update_state(self, results: dict, reader: SourceReader) -> None:
-        """Update state manager with sync results.
+    def _extract_plugin_metadata(self, mcp_scoped: dict) -> dict:
+        """Extract plugin metadata from mcp_scoped data.
+
+        Args:
+            mcp_scoped: MCP servers with scope metadata (from SourceReader.discover_all())
+
+        Returns:
+            Dict mapping plugin_name -> {version, mcp_count, mcp_servers, last_sync}
+        """
+        plugins = {}
+
+        for server_name, server_data in mcp_scoped.items():
+            metadata = server_data.get('metadata', {})
+
+            # Filter to plugin-sourced MCPs only
+            if metadata.get('source') != 'plugin':
+                continue
+
+            plugin_name = metadata.get('plugin_name', 'unknown')
+            plugin_version = metadata.get('plugin_version', 'unknown')
+
+            # Group by plugin_name
+            if plugin_name not in plugins:
+                plugins[plugin_name] = {
+                    'version': plugin_version,
+                    'mcp_count': 0,
+                    'mcp_servers': [],
+                    'last_sync': datetime.now().isoformat()
+                }
+
+            # Increment MCP count and add server name
+            plugins[plugin_name]['mcp_count'] += 1
+            plugins[plugin_name]['mcp_servers'].append(server_name)
+
+        return plugins
+
+    def _update_state(self, results: dict, reader: SourceReader, source_data: dict = None) -> None:
+        """Update state manager with sync results and plugin metadata.
 
         Args:
             results: Per-target sync results
             reader: SourceReader used for this sync (for source paths)
+            source_data: Source configuration data (optional, avoids re-calling discover_all)
         """
         source_paths = reader.get_source_paths()
 
@@ -348,6 +388,17 @@ class SyncOrchestrator:
                 failed=failed,
                 account=self.account
             )
+
+        # --- PLUGIN METADATA PERSISTENCE ---
+        # Extract and record plugin metadata after successful target syncs
+        if source_data is None:
+            source_data = reader.discover_all()
+
+        mcp_scoped = source_data.get('mcp_servers_scoped', {})
+        plugins_metadata = self._extract_plugin_metadata(mcp_scoped)
+
+        if plugins_metadata:
+            self.state_manager.record_plugin_sync(plugins_metadata, account=self.account)
 
     def get_status(self) -> dict:
         """Get sync status with drift detection.
