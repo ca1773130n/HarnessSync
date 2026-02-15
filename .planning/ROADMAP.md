@@ -121,6 +121,12 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 
 **Verification Level:** proxy
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 09-01-PLAN.md — Plugin MCP discovery with dual-format support and ${CLAUDE_PLUGIN_ROOT} expansion
+- [ ] 09-02-PLAN.md — 3-tier scope-aware MCP discovery with precedence and origin tagging
+
 ---
 
 ### Phase 10: Scope-Aware Target Sync & Environment Translation
@@ -178,7 +184,7 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 | 6 - MCP Server Integration | Complete | 2/2 | proxy | ██████████ 100% |
 | 7 - Packaging & Distribution | Complete | 3/3 | proxy | ██████████ 100% |
 | 8 - Multi-Account Support | Complete | 4/4 | proxy | ██████████ 100% |
-| **9 - Plugin Discovery & Scope-Aware Reading** | **Pending** | **0/0** | **proxy** | **░░░░░░░░░░ 0%** |
+| **9 - Plugin Discovery & Scope-Aware Reading** | **Planned** | **0/2** | **proxy** | **░░░░░░░░░░ 0%** |
 | **10 - Scope-Aware Sync & Env Translation** | **Pending** | **0/0** | **proxy** | **░░░░░░░░░░ 0%** |
 | **11 - State Enhancements & Integration** | **Pending** | **0/0** | **proxy** | **░░░░░░░░░░ 0%** |
 
