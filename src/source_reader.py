@@ -12,6 +12,7 @@ SourceReader discovers all 6 types of Claude Code configuration:
 Supports user scope (~/.claude/) and project scope (.claude/, CLAUDE.md).
 """
 
+import json
 from pathlib import Path
 from src.utils.paths import read_json_safe
 
@@ -239,53 +240,263 @@ class SourceReader:
 
         return commands
 
+    def _get_enabled_plugins(self) -> set[str]:
+        """Return set of enabled plugin identifiers from settings.json."""
+        enabled = set()
+
+        # User-scope settings
+        if self.cc_settings.exists():
+            settings = read_json_safe(self.cc_settings)
+            enabled_plugins = settings.get("enabledPlugins", {})
+            if isinstance(enabled_plugins, dict):
+                for plugin_key, is_enabled in enabled_plugins.items():
+                    if is_enabled:
+                        enabled.add(plugin_key)
+
+        # Project-scope settings (if applicable)
+        if self.project_dir and self.scope in ("project", "all"):
+            proj_settings = self.project_dir / ".claude" / "settings.json"
+            if proj_settings.exists():
+                settings = read_json_safe(proj_settings)
+                enabled_plugins = settings.get("enabledPlugins", {})
+                if isinstance(enabled_plugins, dict):
+                    for plugin_key, is_enabled in enabled_plugins.items():
+                        if is_enabled:
+                            enabled.add(plugin_key)
+                        elif plugin_key in enabled:
+                            enabled.discard(plugin_key)
+
+        return enabled
+
+    def _expand_plugin_root(self, config: dict, plugin_path: Path) -> dict:
+        """Expand ${CLAUDE_PLUGIN_ROOT} in MCP server config."""
+        config_str = json.dumps(config)
+        config_str = config_str.replace("${CLAUDE_PLUGIN_ROOT}", str(plugin_path))
+        return json.loads(config_str)
+
+    def _get_plugin_mcp_servers(self) -> dict[str, dict]:
+        """Discover MCP servers from installed Claude Code plugins."""
+        servers = {}
+
+        if not self.cc_plugins_registry.exists():
+            return servers
+
+        registry = read_json_safe(self.cc_plugins_registry)
+        plugins = registry.get("plugins", {})
+        if not isinstance(plugins, dict):
+            return servers
+
+        # Build set of explicitly disabled plugins from settings
+        disabled_plugins = set()
+        if self.cc_settings.exists():
+            settings = read_json_safe(self.cc_settings)
+            ep = settings.get("enabledPlugins", {})
+            if isinstance(ep, dict):
+                disabled_plugins = {k for k, v in ep.items() if v is False}
+
+        for plugin_key, installs in plugins.items():
+            # Version 2 format: plugin_key -> list of install entries
+            if not isinstance(installs, list):
+                installs = [installs]
+
+            for install in installs:
+                if not isinstance(install, dict):
+                    continue
+
+                # Skip only explicitly disabled plugins
+                if plugin_key in disabled_plugins:
+                    continue
+
+                install_path_str = install.get("installPath", "")
+                if not install_path_str:
+                    continue
+
+                try:
+                    install_path = Path(install_path_str)
+                    if not install_path.exists():
+                        continue
+                except (ValueError, OSError):
+                    continue
+
+                plugin_mcps = {}
+
+                # Method 1: Standalone .mcp.json at plugin root
+                mcp_json_path = install_path / ".mcp.json"
+                if mcp_json_path.exists():
+                    data = read_json_safe(mcp_json_path)
+                    if isinstance(data, dict):
+                        # Handle both flat and nested formats
+                        if "mcpServers" in data and isinstance(data["mcpServers"], dict):
+                            plugin_mcps.update(data["mcpServers"])
+                        else:
+                            plugin_mcps.update(data)
+
+                # Method 2: Inline mcpServers in plugin.json
+                for plugin_json_path in [
+                    install_path / ".claude-plugin" / "plugin.json",
+                    install_path / "plugin.json",
+                ]:
+                    if plugin_json_path.exists():
+                        plugin_data = read_json_safe(plugin_json_path)
+                        inline_mcps = plugin_data.get("mcpServers", {})
+                        if isinstance(inline_mcps, dict):
+                            plugin_mcps.update(inline_mcps)
+                        break  # Only check first found
+
+                # Expand variables and tag with metadata
+                plugin_name = plugin_key.split("@")[0]
+                plugin_version = install.get("version", "unknown")
+
+                for server_name, config in plugin_mcps.items():
+                    if not isinstance(config, dict):
+                        continue
+                    expanded = self._expand_plugin_root(config, install_path)
+                    expanded["_plugin_name"] = plugin_name
+                    expanded["_plugin_version"] = plugin_version
+                    expanded["_source"] = "plugin"
+                    servers[server_name] = expanded
+
+        return servers
+
+    def _get_user_scope_mcps(self) -> dict[str, dict]:
+        """Read user-scope MCPs from ~/.claude.json top-level mcpServers."""
+        claude_json = Path.home() / ".claude.json"
+        if not claude_json.exists():
+            return {}
+
+        data = read_json_safe(claude_json)
+        mcp_servers = data.get("mcpServers", {})
+        if not isinstance(mcp_servers, dict):
+            return {}
+
+        valid = {}
+        for name, config in mcp_servers.items():
+            if isinstance(config, dict) and (config.get("command") or config.get("url")):
+                valid[name] = config
+        return valid
+
+    def _get_project_scope_mcps(self) -> dict[str, dict]:
+        """Read project-scope MCPs from .mcp.json in project root."""
+        if not self.project_dir:
+            return {}
+
+        proj_mcp = self.project_dir / ".mcp.json"
+        if not proj_mcp.exists():
+            return {}
+
+        data = read_json_safe(proj_mcp)
+        mcp_servers = data.get("mcpServers", {})
+        if not isinstance(mcp_servers, dict):
+            return {}
+
+        valid = {}
+        for name, config in mcp_servers.items():
+            if isinstance(config, dict) and (config.get("command") or config.get("url")):
+                valid[name] = config
+        return valid
+
+    def _get_local_scope_mcps(self) -> dict[str, dict]:
+        """Read local-scope MCPs from ~/.claude.json projects[absolutePath].mcpServers."""
+        if not self.project_dir:
+            return {}
+
+        claude_json = Path.home() / ".claude.json"
+        if not claude_json.exists():
+            return {}
+
+        data = read_json_safe(claude_json)
+        projects = data.get("projects", {})
+        if not isinstance(projects, dict):
+            return {}
+
+        project_key = str(self.project_dir.resolve())
+        project_config = projects.get(project_key, {})
+        if not isinstance(project_config, dict):
+            return {}
+
+        mcp_servers = project_config.get("mcpServers", {})
+        if not isinstance(mcp_servers, dict):
+            return {}
+
+        valid = {}
+        for name, config in mcp_servers.items():
+            if isinstance(config, dict) and (config.get("command") or config.get("url")):
+                valid[name] = config
+        return valid
+
+    def get_mcp_servers_with_scope(self) -> dict[str, dict]:
+        """
+        Discover all MCP servers with scope metadata and precedence resolution.
+
+        Returns:
+            Dictionary mapping server_name -> {"config": {...}, "metadata": {...}}
+            Metadata includes: scope (user/project/local), source (file/plugin),
+            and optionally plugin_name/plugin_version for plugin sources.
+
+        Precedence: local > project > user (higher scope overrides lower).
+        Plugin MCPs are treated as user-scope.
+        """
+        servers = {}
+
+        # Layer 1 (lowest precedence): User-scope file-based MCPs
+        if self.scope in ("user", "all"):
+            for name, config in self._get_user_scope_mcps().items():
+                servers[name] = {
+                    "config": config,
+                    "metadata": {"scope": "user", "source": "file"},
+                }
+
+        # Layer 2 (same precedence as user): Plugin MCPs
+        if self.scope in ("user", "all"):
+            for name, config in self._get_plugin_mcp_servers().items():
+                if name not in servers:  # File-based user MCPs have priority
+                    # Extract and remove underscore-prefixed metadata from config
+                    clean_config = {k: v for k, v in config.items() if not k.startswith("_")}
+                    plugin_name = config.get("_plugin_name", "unknown")
+                    plugin_version = config.get("_plugin_version", "unknown")
+                    servers[name] = {
+                        "config": clean_config,
+                        "metadata": {
+                            "scope": "user",
+                            "source": "plugin",
+                            "plugin_name": plugin_name,
+                            "plugin_version": plugin_version,
+                        },
+                    }
+
+        # Layer 3 (overrides user): Project-scope MCPs
+        if self.scope in ("project", "all") and self.project_dir:
+            for name, config in self._get_project_scope_mcps().items():
+                servers[name] = {
+                    "config": config,
+                    "metadata": {"scope": "project", "source": "file"},
+                }
+
+        # Layer 4 (highest precedence): Local-scope MCPs
+        if self.scope in ("project", "all") and self.project_dir:
+            for name, config in self._get_local_scope_mcps().items():
+                servers[name] = {
+                    "config": config,
+                    "metadata": {"scope": "local", "source": "file"},
+                }
+
+        return servers
+
     def get_mcp_servers(self) -> dict[str, dict]:
         """
         Read MCP server configurations (SRC-05).
 
         Returns:
             Dictionary mapping server_name -> server_config_dict
-            Merges configs from ~/.mcp.json, ~/.claude/.mcp.json, and project .mcp.json
-            Later configs override earlier ones.
+            Backward-compatible flat dict without metadata.
 
         Note:
+            - Internally uses get_mcp_servers_with_scope() for layered discovery
             - Malformed entries (missing command/url) are filtered out
             - Supports both stdio (command/args) and url-based servers
-            - Invalid JSON files are handled gracefully (returns empty dict)
         """
-        servers = {}
-
-        if self.scope in ("user", "all"):
-            # Global MCP (~/.mcp.json)
-            if self.cc_mcp_global.exists():
-                data = read_json_safe(self.cc_mcp_global)
-                mcp_servers = data.get("mcpServers", {})
-                if isinstance(mcp_servers, dict):
-                    # Filter out malformed entries (no command or url)
-                    for name, config in mcp_servers.items():
-                        if isinstance(config, dict) and (config.get("command") or config.get("url")):
-                            servers[name] = config
-
-            # Claude MCP (~/.claude/.mcp.json) - overrides global
-            if self.cc_mcp_claude.exists():
-                data = read_json_safe(self.cc_mcp_claude)
-                mcp_servers = data.get("mcpServers", {})
-                if isinstance(mcp_servers, dict):
-                    for name, config in mcp_servers.items():
-                        if isinstance(config, dict) and (config.get("command") or config.get("url")):
-                            servers[name] = config
-
-        if self.scope in ("project", "all") and self.project_dir:
-            proj_mcp = self.project_dir / ".mcp.json"
-            if proj_mcp.exists():
-                data = read_json_safe(proj_mcp)
-                mcp_servers = data.get("mcpServers", {})
-                if isinstance(mcp_servers, dict):
-                    for name, config in mcp_servers.items():
-                        if isinstance(config, dict) and (config.get("command") or config.get("url")):
-                            servers[name] = config
-
-        return servers
+        scoped = self.get_mcp_servers_with_scope()
+        return {name: entry["config"] for name, entry in scoped.items()}
 
     def get_settings(self) -> dict:
         """
@@ -329,17 +540,21 @@ class SourceReader:
 
     def discover_all(self) -> dict:
         """
-        Convenience method to get all 6 config types at once.
+        Convenience method to get all config types at once.
 
         Returns:
-            Dictionary with keys: rules, skills, agents, commands, mcp_servers, settings
+            Dictionary with keys: rules, skills, agents, commands,
+            mcp_servers (flat), mcp_servers_scoped (with metadata), settings
         """
+        scoped = self.get_mcp_servers_with_scope()
+        flat = {name: entry["config"] for name, entry in scoped.items()}
         return {
             "rules": self.get_rules(),
             "skills": self.get_skills(),
             "agents": self.get_agents(),
             "commands": self.get_commands(),
-            "mcp_servers": self.get_mcp_servers(),
+            "mcp_servers": flat,
+            "mcp_servers_scoped": scoped,
             "settings": self.get_settings(),
         }
 
@@ -397,10 +612,9 @@ class SourceReader:
 
         # MCP servers sources
         if self.scope in ("user", "all"):
-            if self.cc_mcp_global.exists():
-                paths["mcp_servers"].append(self.cc_mcp_global)
-            if self.cc_mcp_claude.exists():
-                paths["mcp_servers"].append(self.cc_mcp_claude)
+            claude_json = Path.home() / ".claude.json"
+            if claude_json.exists():
+                paths["mcp_servers"].append(claude_json)
 
         if self.scope in ("project", "all") and self.project_dir:
             proj_mcp = self.project_dir / ".mcp.json"
