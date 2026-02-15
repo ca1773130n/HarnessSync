@@ -22,6 +22,178 @@ from src.state_manager import StateManager
 from src.utils.hashing import hash_file_sha256
 
 
+def _group_mcps_by_source(mcp_servers_scoped: dict) -> dict:
+    """
+    Group MCP servers by source (user/project/local/plugins).
+
+    Args:
+        mcp_servers_scoped: Output from SourceReader.get_mcp_servers_with_scope()
+                            {server_name: {"config": {...}, "metadata": {...}}}
+
+    Returns:
+        {
+            "user": [(server_name, scope), ...],
+            "project": [(server_name, scope), ...],
+            "local": [(server_name, scope), ...],
+            "plugins": {
+                "plugin_name@version": [(server_name, scope), ...],
+                ...
+            }
+        }
+    """
+    groups = {
+        "user": [],
+        "project": [],
+        "local": [],
+        "plugins": {}
+    }
+
+    for server_name, data in mcp_servers_scoped.items():
+        metadata = data.get("metadata", {})
+        scope = metadata.get("scope", "user")
+        source = metadata.get("source", "file")
+
+        if source == "plugin":
+            # Plugin-sourced MCP
+            plugin_name = metadata.get("plugin_name", "unknown")
+            plugin_version = metadata.get("plugin_version", "unknown")
+            plugin_key = f"{plugin_name}@{plugin_version}"
+
+            if plugin_key not in groups["plugins"]:
+                groups["plugins"][plugin_key] = []
+            groups["plugins"][plugin_key].append((server_name, scope))
+        else:
+            # File-based MCP
+            if scope == "user":
+                groups["user"].append((server_name, scope))
+            elif scope == "project":
+                groups["project"].append((server_name, scope))
+            elif scope == "local":
+                groups["local"].append((server_name, scope))
+
+    return groups
+
+
+def _format_mcp_groups(groups: dict) -> list[str]:
+    """
+    Format MCP groups as indented text lines for display.
+
+    Args:
+        groups: Output from _group_mcps_by_source()
+
+    Returns:
+        List of formatted lines ready for printing
+    """
+    lines = []
+    lines.append("  MCP Servers:")
+
+    # User-configured
+    user_count = len(groups["user"])
+    if user_count > 0:
+        lines.append(f"    User-configured ({user_count}):")
+        for server_name, scope in groups["user"][:10]:
+            lines.append(f"      - {server_name} ({scope})")
+        if user_count > 10:
+            lines.append(f"      ... and {user_count - 10} more")
+
+    # Project-configured
+    project_count = len(groups["project"])
+    if project_count > 0:
+        lines.append(f"    Project-configured ({project_count}):")
+        for server_name, scope in groups["project"][:10]:
+            lines.append(f"      - {server_name} ({scope})")
+        if project_count > 10:
+            lines.append(f"      ... and {project_count - 10} more")
+
+    # Local-configured
+    local_count = len(groups["local"])
+    if local_count > 0:
+        lines.append(f"    Local-configured ({local_count}):")
+        for server_name, scope in groups["local"][:10]:
+            lines.append(f"      - {server_name} ({scope})")
+        if local_count > 10:
+            lines.append(f"      ... and {local_count - 10} more")
+
+    # Plugin-provided
+    if groups["plugins"]:
+        lines.append("    Plugin-provided:")
+        for plugin_key, servers in groups["plugins"].items():
+            server_count = len(servers)
+            lines.append(f"      {plugin_key} ({server_count}):")
+            for server_name, scope in servers[:5]:
+                lines.append(f"        - {server_name} ({scope})")
+            if server_count > 5:
+                lines.append(f"        ... and {server_count - 5} more")
+
+    return lines
+
+
+def _format_plugin_drift(drift: dict) -> list[str]:
+    """
+    Format plugin drift warnings as indented text lines.
+
+    Args:
+        drift: Output from StateManager.detect_plugin_drift()
+               {plugin_name: drift_reason, ...}
+
+    Returns:
+        List of formatted lines, or empty list if no drift
+    """
+    if not drift:
+        return []
+
+    lines = []
+    lines.append("  Plugin Drift:")
+    for plugin_name, reason in drift.items():
+        lines.append(f"    - {plugin_name}: {reason}")
+
+    return lines
+
+
+def _extract_current_plugins(mcp_scoped: dict) -> dict:
+    """
+    Extract current plugin metadata from scoped MCP data.
+
+    Args:
+        mcp_scoped: Output from SourceReader.get_mcp_servers_with_scope()
+
+    Returns:
+        {
+            plugin_name: {
+                "version": str,
+                "mcp_count": int,
+                "mcp_servers": [str, ...],
+                "last_sync": str (ISO timestamp)
+            },
+            ...
+        }
+    """
+    from datetime import datetime
+
+    plugins = {}
+
+    for server_name, data in mcp_scoped.items():
+        metadata = data.get("metadata", {})
+        source = metadata.get("source")
+
+        if source == "plugin":
+            plugin_name = metadata.get("plugin_name", "unknown")
+            plugin_version = metadata.get("plugin_version", "unknown")
+
+            if plugin_name not in plugins:
+                plugins[plugin_name] = {
+                    "version": plugin_version,
+                    "mcp_count": 0,
+                    "mcp_servers": [],
+                    "last_sync": datetime.utcnow().isoformat() + "Z"
+                }
+
+            plugins[plugin_name]["mcp_count"] += 1
+            plugins[plugin_name]["mcp_servers"].append(server_name)
+
+    return plugins
+
+
 def main():
     """Entry point for /sync-status command."""
     # Parse arguments
@@ -188,6 +360,22 @@ def _show_account_status(account_name: str):
         else:
             print("  Drift: None detected")
 
+    # MCP source grouping and plugin drift (after per-target status)
+    mcp_scoped = reader.get_mcp_servers_with_scope()
+    if mcp_scoped:
+        print()  # Blank line before MCP section
+
+        # Display MCP grouping
+        groups = _group_mcps_by_source(mcp_scoped)
+        for line in _format_mcp_groups(groups):
+            print(line)
+
+        # Display plugin drift warnings (account-scoped)
+        current_plugins = _extract_current_plugins(mcp_scoped)
+        drift = state_manager.detect_plugin_drift(current_plugins, account=account_name)
+        for line in _format_plugin_drift(drift):
+            print(line)
+
 
 def _show_default_status():
     """Show default status view (all accounts if configured, else v1)."""
@@ -277,6 +465,22 @@ def _show_default_status():
                 print(f"    ... and {len(drifted) - 10} more")
         else:
             print("  Drift: None detected")
+
+    # MCP source grouping and plugin drift (after per-target status)
+    mcp_scoped = reader.get_mcp_servers_with_scope()
+    if mcp_scoped:
+        print()  # Blank line before MCP section
+
+        # Display MCP grouping
+        groups = _group_mcps_by_source(mcp_scoped)
+        for line in _format_mcp_groups(groups):
+            print(line)
+
+        # Display plugin drift warnings
+        current_plugins = _extract_current_plugins(mcp_scoped)
+        drift = state_manager.detect_plugin_drift(current_plugins)
+        for line in _format_plugin_drift(drift):
+            print(line)
 
 
 if __name__ == "__main__":
