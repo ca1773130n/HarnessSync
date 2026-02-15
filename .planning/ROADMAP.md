@@ -102,30 +102,21 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 
 ## v2.0 Phases (Milestone: Plugin & MCP Scope Sync)
 
-### Phase 9: Plugin Discovery & Scope-Aware Source Reading
+### Phase 9: Plugin Discovery & Scope-Aware Source Reading ✓
 
 **Goal:** Extend SourceReader to discover MCP servers from installed Claude Code plugins and implement 3-tier scope awareness (user/project/local) with proper precedence handling.
 
+**Status:** Complete (2026-02-15)
 **Dependencies:** Phase 1 (SourceReader exists), Phase 8 (account-aware infrastructure)
 
 **Requirements:** PLGD-01, PLGD-02, PLGD-03, PLGD-04, SCOPE-01, SCOPE-02, SCOPE-03, SCOPE-04, SCOPE-05
 
-**Success Criteria:**
-1. SourceReader discovers installed Claude Code plugins from `~/.claude/plugins/installed_plugins.json` with proper version tracking
-2. SourceReader extracts MCP server configs from plugin cache directories (both `.mcp.json` and inline `plugin.json` formats)
-3. SourceReader resolves `${CLAUDE_PLUGIN_ROOT}` variable to absolute plugin cache paths during discovery
-4. SourceReader reads user-scope MCPs from `~/.claude.json` top-level `mcpServers`, project-scope from `.mcp.json`, and local-scope from `~/.claude.json projects[path].mcpServers`
-5. Each discovered MCP server tagged with origin scope (user/project/local/plugin) and plugin metadata (name, version) if applicable
-6. MCP deduplication respects precedence (local > project > user), with plugin MCPs treated as user-scope
-7. Test discovery with 3 plugins providing total 5 MCP servers across 3 scopes, verifying 100% discovery and correct precedence resolution
-
-**Verification Level:** proxy
-
-**Plans:** 2 plans
+**Plans:** 2/2 complete
+**Verification:** proxy (passed)
 
 Plans:
-- [ ] 09-01-PLAN.md — Plugin MCP discovery with dual-format support and ${CLAUDE_PLUGIN_ROOT} expansion
-- [ ] 09-02-PLAN.md — 3-tier scope-aware MCP discovery with precedence and origin tagging
+- [x] 09-01-PLAN.md — Plugin MCP discovery with dual-format support and ${CLAUDE_PLUGIN_ROOT} expansion
+- [x] 09-02-PLAN.md — 3-tier scope-aware MCP discovery with precedence and origin tagging
 
 ---
 
@@ -148,6 +139,13 @@ Plans:
 8. Integration test with 2 user-scope MCPs (1 with `${API_KEY}`, 1 with `${PORT:-3000}`), 1 project-scope MCP, and 1 plugin MCP verifies all targets receive correct scoped configs
 
 **Verification Level:** proxy
+
+**Plans:** 3 plans
+
+Plans:
+- [ ] 10-01-PLAN.md -- Env var translator utility and transport detection module
+- [ ] 10-02-PLAN.md -- Scope-aware adapter interface with Codex/Gemini/OpenCode routing
+- [ ] 10-03-PLAN.md -- Integration test verifying all 7 requirements end-to-end
 
 ---
 
@@ -184,8 +182,8 @@ Plans:
 | 6 - MCP Server Integration | Complete | 2/2 | proxy | ██████████ 100% |
 | 7 - Packaging & Distribution | Complete | 3/3 | proxy | ██████████ 100% |
 | 8 - Multi-Account Support | Complete | 4/4 | proxy | ██████████ 100% |
-| **9 - Plugin Discovery & Scope-Aware Reading** | **Planned** | **0/2** | **proxy** | **░░░░░░░░░░ 0%** |
-| **10 - Scope-Aware Sync & Env Translation** | **Pending** | **0/0** | **proxy** | **░░░░░░░░░░ 0%** |
+| 9 - Plugin Discovery & Scope-Aware Reading | Complete | 2/2 | proxy | ██████████ 100% |
+| **10 - Scope-Aware Sync & Env Translation** | **Planned** | **0/3** | **proxy** | **░░░░░░░░░░ 0%** |
 | **11 - State Enhancements & Integration** | **Pending** | **0/0** | **proxy** | **░░░░░░░░░░ 0%** |
 
 ---
@@ -194,15 +192,15 @@ Plans:
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PLGD-01 | Phase 9 | Pending |
-| PLGD-02 | Phase 9 | Pending |
-| PLGD-03 | Phase 9 | Pending |
-| PLGD-04 | Phase 9 | Pending |
-| SCOPE-01 | Phase 9 | Pending |
-| SCOPE-02 | Phase 9 | Pending |
-| SCOPE-03 | Phase 9 | Pending |
-| SCOPE-04 | Phase 9 | Pending |
-| SCOPE-05 | Phase 9 | Pending |
+| PLGD-01 | Phase 9 | Complete |
+| PLGD-02 | Phase 9 | Complete |
+| PLGD-03 | Phase 9 | Complete |
+| PLGD-04 | Phase 9 | Complete |
+| SCOPE-01 | Phase 9 | Complete |
+| SCOPE-02 | Phase 9 | Complete |
+| SCOPE-03 | Phase 9 | Complete |
+| SCOPE-04 | Phase 9 | Complete |
+| SCOPE-05 | Phase 9 | Complete |
 | SYNC-01 | Phase 10 | Pending |
 | SYNC-02 | Phase 10 | Pending |
 | SYNC-03 | Phase 10 | Pending |
@@ -227,4 +225,5 @@ Not required for v2.0. All phases use proxy verification with no deferred valida
 *v1.0 roadmap created: 2026-02-13*
 *v1.0 complete: 2026-02-15 (8 phases, 24 plans)*
 *v2.0 roadmap created: 2026-02-15*
-*Next: `/grd:plan-phase 9`*
+*Phase 9 complete: 2026-02-15 (2 plans)*
+*Next: `/grd:plan-phase 10`*
