@@ -3,7 +3,7 @@
 Implements adapter for Codex CLI, syncing Claude Code configuration to Codex format:
 - Rules (CLAUDE.md) → AGENTS.md with managed markers
 - Skills → Symlinks in .agents/skills/
-- Agents → SKILL.md format in .agents/skills/agent-{name}/
+- Agents → SKILL.md format in .agents/skills/{name}/
 - Commands → SKILL.md format in .agents/skills/cmd-{name}/
 - MCP servers → config.toml (deferred to Plan 02-03)
 - Settings → config.toml sandbox/approval settings (deferred to Plan 02-03)
@@ -153,7 +153,7 @@ class CodexAdapter(AdapterBase):
         """Convert Claude Code agents to Codex SKILL.md format.
 
         Extracts name/description from agent frontmatter, role instructions from <role>
-        tags, and writes to .agents/skills/agent-{name}/SKILL.md. Discards Claude-specific
+        tags, and writes to .agents/skills/{name}/SKILL.md. Discards Claude-specific
         fields like tools and color.
 
         Args:
@@ -192,8 +192,8 @@ class CodexAdapter(AdapterBase):
                 # Format as SKILL.md
                 skill_content = self._format_skill_md(name, description, instructions)
 
-                # Write to .agents/skills/agent-{name}/SKILL.md
-                skill_dir = self.skills_dir / f"agent-{agent_name}"
+                # Write to .agents/skills/{name}/SKILL.md
+                skill_dir = self.skills_dir / f"{agent_name}"
                 ensure_dir(skill_dir)
                 skill_md = skill_dir / "SKILL.md"
                 skill_md.write_text(skill_content, encoding='utf-8')
