@@ -69,14 +69,44 @@
 - [ ] **PKG-02**: Plugin installable from GitHub repository via /plugin command
 - [ ] **PKG-03**: install.sh creates target directories and configures shell integration
 
-## v2 Requirements (Deferred)
+## v2.0 Requirements — Plugin & MCP Scope Sync
+
+### Plugin MCP Discovery
+- [ ] **PLGD-01**: SourceReader discovers installed Claude Code plugins from `~/.claude/plugins/installed_plugins.json` registry
+- [ ] **PLGD-02**: SourceReader extracts MCP server configs from plugin cache directories (both `.mcp.json` and inline `plugin.json` formats)
+- [ ] **PLGD-03**: SourceReader resolves `${CLAUDE_PLUGIN_ROOT}` variable to absolute plugin cache paths in MCP server configs
+- [ ] **PLGD-04**: SourceReader handles both `.claude-plugin/plugin.json` (new format) and root `plugin.json` (old format) for plugin metadata
+
+### Scope-Aware MCP Reading
+- [ ] **SCOPE-01**: SourceReader reads user-scope MCP servers from `~/.claude.json` top-level `mcpServers`
+- [ ] **SCOPE-02**: SourceReader reads project-scope MCP servers from `.mcp.json` in project root
+- [ ] **SCOPE-03**: SourceReader reads local-scope MCP servers from `~/.claude.json` under `projects[path].mcpServers`
+- [ ] **SCOPE-04**: SourceReader tags each discovered MCP server with its origin scope (user/project/local/plugin)
+- [ ] **SCOPE-05**: SourceReader deduplicates MCP servers appearing at multiple scopes, respecting precedence (local > project > user)
+
+### Scope-Aware Target Sync
+- [ ] **SYNC-01**: Gemini adapter writes user-scope MCPs to `~/.gemini/settings.json` and project-scope MCPs to `.gemini/settings.json`
+- [ ] **SYNC-02**: Codex adapter writes user-scope MCPs to `~/.codex/config.toml` and project-scope MCPs to `.codex/config.toml`
+- [ ] **SYNC-03**: Plugin-discovered MCPs sync to user-scope target configs (plugin MCPs are always user-level)
+- [ ] **SYNC-04**: Adapters detect unsupported transport types per target (e.g., SSE on Codex) and warn instead of silently failing
+
+### Environment Variable Translation
+- [ ] **ENV-01**: Translate Claude Code `${VAR}` env var interpolation syntax to Codex literal `env` map format
+- [ ] **ENV-02**: Translate Claude Code `${VAR:-default}` default value syntax to target equivalents or warn on unsupported
+- [ ] **ENV-03**: Preserve env var references in Gemini settings.json format (Gemini supports `${VAR}` natively)
+
+### State & Status Enhancements
+- [ ] **STATE-01**: StateManager tracks plugin versions and MCP server counts per plugin for update-triggered re-sync
+- [ ] **STATE-02**: /sync-status shows plugin-discovered MCPs separately from user-configured MCPs with scope labels
+- [ ] **STATE-03**: Drift detection extends to plugin MCP changes (plugin updated → MCPs may have changed)
+
+## v3 Requirements (Deferred)
 
 - [ ] Bidirectional sync (target → Claude Code) with conflict detection
 - [ ] 3-way merge strategies instead of overwrite
 - [ ] Semantic agent → skill conversion (extract tools, adapt permissions intelligently)
 - [ ] AI-assisted conflict resolution via Claude API
 - [ ] Drift reports with scheduled diffs
-- [ ] Profile support (work/home with different sync rules)
 - [ ] Team sharing via git (version-controlled sync rules)
 - [ ] Cross-CLI skill catalog
 - [ ] Support for additional targets (Cursor, Windsurf, Aider)
@@ -141,9 +171,35 @@
 | PKG-02 | Phase 7 | Pending |
 | PKG-03 | Phase 7 | Pending |
 
-**Coverage:** 44/44 v1 requirements mapped (100%)
+**v1 Coverage:** 44/44 requirements mapped (100%) — delivered in Phases 1-7
+**v1.1 Coverage:** 10/10 multi-account requirements — delivered in Phase 8
+**v2.0 Coverage:** 15/15 requirements defined — pending phase mapping
+
+## v2.0 Traceability
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| PLGD-01 | TBD | Pending |
+| PLGD-02 | TBD | Pending |
+| PLGD-03 | TBD | Pending |
+| PLGD-04 | TBD | Pending |
+| SCOPE-01 | TBD | Pending |
+| SCOPE-02 | TBD | Pending |
+| SCOPE-03 | TBD | Pending |
+| SCOPE-04 | TBD | Pending |
+| SCOPE-05 | TBD | Pending |
+| SYNC-01 | TBD | Pending |
+| SYNC-02 | TBD | Pending |
+| SYNC-03 | TBD | Pending |
+| SYNC-04 | TBD | Pending |
+| ENV-01 | TBD | Pending |
+| ENV-02 | TBD | Pending |
+| ENV-03 | TBD | Pending |
+| STATE-01 | TBD | Pending |
+| STATE-02 | TBD | Pending |
+| STATE-03 | TBD | Pending |
 
 ---
-*Requirements defined: 2026-02-13*
-*Source: Research FEATURES.md, SUMMARY.md, PROJECT.md*
-*Traceability updated: 2026-02-13*
+*Requirements defined: 2026-02-13 (v1), 2026-02-15 (v2.0)*
+*Source: Research v2-SUMMARY.md, v2-gemini-extensions.md, v2-codex-mcp.md, v2-claude-plugins.md*
+*Traceability updated: 2026-02-15*
