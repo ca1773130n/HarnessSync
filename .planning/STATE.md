@@ -4,23 +4,21 @@
 
 **Core Value:** One harness to rule them all — configure Claude Code once, sync everywhere (Codex, Gemini CLI, OpenCode) without manual duplication or format translation.
 
-**Current Focus:** Phase 8 - Multi-Account Support (Complete)
+**Current Focus:** Milestone v2.0 — Plugin & MCP Scope Sync (Not started)
 
 ---
 
 ## Current Position
 
-**Phase:** 8
-**Plan:** 04 (completed)
-**Status:** Complete
+**Milestone:** v2.0
+**Phase:** Not started (defining requirements)
+**Plan:** N/A
+**Status:** Initializing
 
 **Progress:**
-[██████████] 100%
-Phase 8: Multi-Account Support
-██████████ 100% (4/4 plans complete)
-
-Overall Project: 8/8 phases complete — v1.0 + Multi-Account DONE
-```
+[░░░░░░░░░░] 0%
+Milestone v2.0: Plugin & MCP Scope Sync
+Not started — defining requirements and roadmap
 
 ---
 
@@ -195,6 +193,7 @@ Phase 8 deferred validations (DEFER-08-01 through DEFER-08-05):
 ### Roadmap Evolution
 - Phase 8 added: Multi-Account Support — setup process for multiple harness accounts with sync across all backends (2026-02-15)
 - Phase 8 completed: 4 plans executed, 19 verification checks passed (2026-02-15)
+- Milestone v2.0 started: Plugin & MCP Scope Sync (2026-02-15)
 
 ### Blockers
 None. v1.0 + Phase 8 complete. All 8 phases delivered.
@@ -214,24 +213,13 @@ None. v1.0 + Phase 8 complete. All 8 phases delivered.
 ## Session Continuity
 
 ### What Just Happened
-Completed Phase 8 (Multi-Account Support). All 4 plans executed successfully:
-- **08-01:** Created AccountManager (CRUD, atomic writes, collision detection) + AccountDiscovery (depth-limited scanning, validation)
-- **08-02:** Parameterized SourceReader with cc_home, upgraded StateManager to v2 schema with auto v1 migration
-- **08-03:** Created SetupWizard (interactive 4-step flow) + /sync-setup command (list/remove/show/config-file)
-- **08-04:** Extended SyncOrchestrator, /sync, /sync-status with --account and --list-accounts flags
+Started milestone v2.0: Plugin & MCP Scope Sync. Archived v1.0 to MILESTONES.md.
 
 ### What's Next
-**Project v1.0 + Multi-Account is complete.** All 8 phases delivered, 24 plans executed, 101 verification checks passed with 0 failures. 27 deferred validations pending live testing.
-
-**Before publishing:**
-1. Update `username` placeholder in marketplace.json with actual GitHub username
-2. Push to GitHub and verify CI workflow passes
-3. Run `claude plugin validate .` when CLI is available
-4. Test installation via `/plugin install github:YOUR_USERNAME/HarnessSync`
-5. Test `/sync-setup` interactive wizard with real TTY
+Define requirements and create roadmap for v2.0. Research Gemini extensions system and Codex MCP format for plugin-to-extension mapping.
 
 ### Context for Next Session
-All 8 phases complete. 24 plans executed across 8 phases. 68 key decisions documented. 47/47 v1 requirements + 8 multi-account extensions delivered. 101 verification checks passed (100% pass rate). 27 deferred validations tracked across Phase 3-8. 5 new files created in Phase 8 (~650 lines), 7 existing files modified (~435 lines). Project ready for GitHub publish.
+v1.0 complete (8 phases, 24 plans, 101 verification checks). Starting v2.0 milestone to sync Claude Code plugins/MCPs to Gemini extensions and Codex MCPs.
 
 ---
 

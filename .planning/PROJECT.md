@@ -107,4 +107,22 @@ Claude Code Plugin (HarnessSync)
 - GUI/web dashboard — CLI-only tool
 
 ---
-*Last updated: 2026-02-13 after initialization*
+
+## Current Milestone: v2.0 — Plugin & MCP Scope Sync
+
+**Goal:** Synchronize Claude Code's installed/configured plugins and MCP servers (both user and project scope) to Gemini extensions and Codex MCP configurations. Gemini gets full plugin-to-extension mapping; Codex gets MCP server sync only (no plugin concept).
+
+**Target Features:**
+- Discover installed Claude Code plugins (from installed_plugins.json, plugin cache)
+- Map Claude Code plugins to Gemini extensions format
+- Sync plugin-provided MCP servers to Gemini and Codex
+- Scope-aware sync: user-scope plugins/MCPs and project-scope plugins/MCPs
+- Handle plugin dependencies and capabilities translation
+
+**Scope Notes:**
+- Codex: MCP servers only (Codex has no plugin/extension equivalent)
+- Gemini: Full plugin-to-extension mapping + MCP servers
+- OpenCode: Out of scope for this milestone (revisit later)
+
+---
+*Last updated: 2026-02-15 — v2.0 milestone started*
