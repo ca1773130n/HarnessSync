@@ -4,21 +4,21 @@
 
 **Core Value:** One harness to rule them all — configure Claude Code once, sync everywhere (Codex, Gemini CLI, OpenCode) without manual duplication or format translation.
 
-**Current Focus:** Milestone v2.0 — Plugin & MCP Scope Sync (Phase 9)
+**Current Focus:** Milestone v2.0 — Plugin & MCP Scope Sync (Phase 11)
 
 ---
 
 ## Current Position
 
 **Milestone:** v2.0
-**Phase:** 9 - Plugin Discovery & Scope-Aware Source Reading
-**Plan:** N/A (awaiting planning)
-**Status:** Ready for planning
+**Phase:** 11 - State Enhancements & Integration
+**Plan:** 01 - Plugin Tracking & Drift Detection
+**Status:** In Progress
 
 **Progress:**
-[░░░░░░░░░░] 0%
+[███████░░░] 72%
 Milestone v2.0: Plugin & MCP Scope Sync
-Phase 9: Plugin Discovery & Scope-Aware Source Reading
+Phase 9: Complete | Phase 10: Complete | Phase 11: In Progress (1/3 plans)
 
 ---
 
@@ -26,14 +26,14 @@ Phase 9: Plugin Discovery & Scope-Aware Source Reading
 
 ### Velocity
 - **Milestones completed:** 1 (v1.0)
-- **Phases completed:** 8/11
-- **Plans completed:** 24 (all v1.0)
-- **Average plan duration:** ~3 min
+- **Phases completed:** 10/11
+- **Plans completed:** 30 (24 v1.0 + 6 v2.0)
+- **Average plan duration:** ~2 min
 - **v1.0 complete:** 2026-02-15
 - **v2.0 started:** 2026-02-15
 
 ### Quality
-- **Verification passes:** 101 (82 prior + 14 sanity + 5 proxy)
+- **Verification passes:** 164 (113 prior + 12 sanity + 30 integration + 9 proxy)
 - **Verification failures:** 0
 - **Pass rate:** 100%
 
@@ -101,7 +101,16 @@ Phase 8 (DEFER-08-01 through DEFER-08-05):
 - Concurrent multi-account sync (requires live usage)
 - Live /sync --account in Claude Code session (requires integration testing)
 
-**v2.0 deferred validations:** None planned (all phases use proxy verification)
+**v2.0 deferred validations:**
+
+Phase 9 (DEFER-09-01, DEFER-09-02):
+- Real plugin MCP discovery and sync (requires real Claude Code plugins + Phase 10)
+- Scope-aware sync to target-level configs (requires Phase 10 adapters)
+
+Phase 10 (DEFER-10-01 through DEFER-10-03):
+- Real Codex CLI loads generated config.toml (requires Codex installation)
+- Real Gemini CLI loads generated settings.json (requires Gemini installation)
+- Full v2.0 pipeline with real plugins, scopes, and MCP invocation (requires full environment)
 
 ---
 
@@ -121,7 +130,7 @@ Phase 8 (DEFER-08-01 through DEFER-08-05):
 10. **Symlinks recorded as-is** - Prevent duplicate discovery (01-03)
 11. **Settings merge with local precedence** - user < project < project.local (01-03)
 12. **Manual TOML generation via f-strings** - tomllib is read-only (02-01)
-13. **Env var references preserved in TOML** - ${VAR} kept literal for runtime expansion (02-01)
+13. **Env var translation for Codex** - v2.0 translates ${VAR} to literal env map (was preserve in v1.0) (10-01)
 14. **Marker-based AGENTS.md management** - HTML comment markers preserve user content (02-02)
 15. **Config merge preservation** - Read existing, merge, write atomically (02-03)
 16. **Conservative sandbox mapping** - ANY denied tool → read-only mode (02-03)
@@ -146,6 +155,14 @@ Phase 8 (DEFER-08-01 through DEFER-08-05):
 32. **Gemini extensions not the target** - Plugin MCPs sync to settings.json, NOT extensions (2026-02-15)
 33. **3-tier scope precedence** - local > project > user (v1.0 flattened incorrectly) (2026-02-15)
 34. **Plugin MCPs are user-scope** - Always sync to user-level target configs (2026-02-15)
+35. **Disabled plugin filtering** - Only plugins with enabledPlugins[key]==False are skipped; unmentioned plugins treated as enabled (09-01)
+36. **User-scope MCPs from ~/.claude.json** - v2.0 reads from ~/.claude.json top-level mcpServers, replacing v1.0's ~/.mcp.json (09-02)
+37. **Existing env entries win on conflict** - User-specified env values take priority over extracted vars in Codex translation (10-01)
+38. **Uppercase-only env var pattern** - VAR_PATTERN matches [A-Z_][A-Z0-9_]* only per shell convention (10-01)
+39. **sync_mcp_scoped() with fallback** - New method in base class, falls back to sync_mcp() for backward compat (10-02)
+40. **Plugin metadata replacement semantics** - record_plugin_sync() replaces entire plugins section to prevent stale accumulation (11-01)
+41. **Drift priority: version > MCP count** - Version changes take priority when both version and MCP count change (11-01)
+42. **Decoupled drift detection** - detect_plugin_drift() accepts current_plugins dict instead of calling SourceReader (11-01)
 
 ### Active Todos
 
@@ -154,9 +171,11 @@ v1.0:
 - [x] Archive v1.0 milestone to MILESTONES.md
 
 v2.0:
-- [ ] Plan Phase 9: Plugin Discovery & Scope-Aware Source Reading
-- [ ] Plan Phase 10: Scope-Aware Target Sync & Environment Translation
-- [ ] Plan Phase 11: State Enhancements & Integration
+- [x] Execute Phase 9: Plugin Discovery & Scope-Aware Source Reading
+- [x] Execute Phase 10: Scope-Aware Target Sync & Environment Translation
+- [x] Execute Phase 11 Plan 01: Plugin Tracking & Drift Detection
+- [ ] Execute Phase 11 Plan 02: Drift Detection Integration
+- [ ] Execute Phase 11 Plan 03: End-to-End Pipeline Validation
 
 ### Roadmap Evolution
 
@@ -164,13 +183,18 @@ v2.0:
 - **2026-02-15:** Added Phase 8 (Multi-Account Support)
 - **2026-02-15:** Completed Phase 8, archived v1.0 to MILESTONES.md
 - **2026-02-15:** Created v2.0 roadmap (Phases 9-11)
+- **2026-02-15:** Completed Phase 9 (2 plans, 12 verification checks)
+- **2026-02-15:** Completed Phase 10 (3 plans, 42 verification checks)
 
 ### Blockers
 
-None. v1.0 complete, v2.0 roadmap ready for planning.
+None. Phase 10 complete, ready for Phase 11 planning.
 
 ### Recent Changes
 
+- **2026-02-15:** Phase 11 Plan 01 complete — plugin tracking & drift detection (2 tasks, 9 checks)
+- **2026-02-15:** Phase 10 complete — scope-aware adapters + env translation + transport detection (3 plans, 42 checks)
+- **2026-02-15:** Phase 9 complete — plugin MCP discovery + scope-aware reading (2 plans, 12 checks)
 - **2026-02-15:** v2.0 roadmap created with 3 phases (9-11) mapping all 19 v2.0 requirements
 - **2026-02-15:** Completed Phase 8 (Multi-Account Support) - AccountManager + discovery, StateManager v2 migration, SetupWizard, account-aware orchestrator
 - **2026-02-15:** Completed Phase 7 (Packaging & Distribution) - .claude-plugin/ structure, marketplace.json, install.sh, CI workflow
@@ -185,18 +209,18 @@ None. v1.0 complete, v2.0 roadmap ready for planning.
 
 ### What Just Happened
 
-Created v2.0 roadmap with 3 phases (9-11) covering plugin MCP discovery, scope-aware sync with env var translation, and state enhancements with drift detection.
+Executed Phase 11 Plan 01 (Plugin Tracking & Drift Detection). Extended StateManager with record_plugin_sync(), detect_plugin_drift(), and get_plugin_status() methods. Integrated plugin metadata extraction into SyncOrchestrator._update_state(). All 9 verification checks passed (7 StateManager + 2 Orchestrator). Plugin metadata now persists to state.json after each sync with replacement semantics to prevent stale accumulation.
 
 ### What's Next
 
-Plan Phase 9: Plugin Discovery & Scope-Aware Source Reading. Extend SourceReader to discover installed plugins from installed_plugins.json and extract MCPs from plugin cache directories with ${CLAUDE_PLUGIN_ROOT} resolution. Implement 3-tier scope awareness (user/project/local) with proper precedence handling.
+Execute Phase 11 Plan 02: Drift Detection Integration. Add plugin drift warnings to /sync-status command and sync orchestrator. Implement --refresh flag for forced plugin metadata updates.
 
 ### Context for Next Session
 
-v1.0 complete (8 phases, 24 plans, 101 verification checks). v2.0 roadmap created with 19 requirements mapped to 3 phases. Research complete (v2-SUMMARY.md) confirms Gemini extensions are NOT the target — plugin MCPs sync to settings.json with scope awareness. Ready to plan Phase 9.
+v1.0 complete (8 phases, 24 plans). Phase 9 complete (2 plans). Phase 10 complete (3 plans, 42 checks). Phase 11 Plan 01 complete (9 checks). StateManager now tracks plugin metadata (version, mcp_count, mcp_servers, last_sync). Orchestrator extracts plugin metadata from mcp_scoped and calls record_plugin_sync() after successful target syncs. Drift detection API ready for integration into commands.
 
 ---
 
 *Last updated: 2026-02-15*
-*Session: v2.0 roadmap creation*
-*Stopped at: v2.0 roadmap complete, awaiting Phase 9 planning*
+*Session: Phase 11 Plan 01 execution*
+*Stopped at: Phase 11 Plan 01 complete (Plugin Tracking & Drift Detection)*
