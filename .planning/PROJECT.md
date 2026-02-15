@@ -84,21 +84,23 @@ Claude Code Plugin (HarnessSync)
 - V **State tracking** — SHA256 change detection, sync timestamps — existing
 - V **Stale symlink cleanup** — Removes broken symlinks after sync — existing
 - V **macOS daemon** — launchd plist for background watch mode — existing
+- V **Plugin architecture** — Claude Code plugin with hooks, commands, MCP server — v1.0
+- V **PostToolUse hook** — Auto-sync on config file changes with 3s debounce — v1.0
+- V **Slash commands** — /sync and /sync-status for manual control — v1.0
+- V **MCP server** — JSON-RPC 2.0 sync tools for programmatic access — v1.0
+- V **Settings drift adaptation** — Env vars, permissions, allowed tools mapping per target — v1.0
+- V **Multi-account support** — Account discovery, setup wizard, scoped sync — v1.1
+- V **Plugin MCP discovery** — Discover MCPs from installed Claude Code plugins — v2.0
+- V **Scope-aware sync** — 3-tier scope (user/project/local) with target routing — v2.0
+- V **Env var translation** — ${VAR} and ${VAR:-default} translation per target format — v2.0
+- V **Plugin drift detection** — Version tracking, MCP count changes, add/remove detection — v2.0
+- V **Marketplace packaging** — .claude-plugin structure, marketplace.json, install.sh — v1.0
 
 ### Active
 
-- [ ] Rewrite as Claude Code plugin architecture
-- [ ] PostToolUse hook for auto-sync
-- [ ] Slash commands (/sync, /sync-status)
-- [ ] MCP server exposing sync tools
-- [ ] Adapter layer for settings drift (env vars, permissions, allowed tools)
-- [ ] Improved Codex format accuracy (deeper TOML generation, permission mapping)
-- [ ] Improved Gemini format accuracy (settings parity, extension mapping)
-- [ ] Improved OpenCode format accuracy (full config.json schema support)
-- [ ] Sync compatibility report (what mapped, what adapted, what can't)
-- [ ] Rename cc2all → HarnessSync throughout
-- [ ] Test suite
-- [ ] Plugin marketplace packaging
+- [ ] Bidirectional sync (target → Claude Code) with conflict detection
+- [ ] Support for additional targets (Cursor, Windsurf, Aider)
+- [ ] AI-assisted conflict resolution via Claude API
 
 ### Out of Scope
 
@@ -108,21 +110,12 @@ Claude Code Plugin (HarnessSync)
 
 ---
 
-## Current Milestone: v2.0 — Plugin & MCP Scope Sync
+## Completed Milestones
 
-**Goal:** Synchronize Claude Code's installed/configured plugins and MCP servers (both user and project scope) to Gemini extensions and Codex MCP configurations. Gemini gets full plugin-to-extension mapping; Codex gets MCP server sync only (no plugin concept).
+- **v1.0** — Core Plugin + Multi-Account (2026-02-15): 8 phases, 24 plans, 57 requirements
+- **v2.0** — Plugin & MCP Scope Sync (2026-02-15): 3 phases, 7 plans, 19 requirements
 
-**Target Features:**
-- Discover installed Claude Code plugins (from installed_plugins.json, plugin cache)
-- Map Claude Code plugins to Gemini extensions format
-- Sync plugin-provided MCP servers to Gemini and Codex
-- Scope-aware sync: user-scope plugins/MCPs and project-scope plugins/MCPs
-- Handle plugin dependencies and capabilities translation
-
-**Scope Notes:**
-- Codex: MCP servers only (Codex has no plugin/extension equivalent)
-- Gemini: Full plugin-to-extension mapping + MCP servers
-- OpenCode: Out of scope for this milestone (revisit later)
+See `.planning/MILESTONES.md` for full history.
 
 ---
-*Last updated: 2026-02-15 — v2.0 milestone started*
+*Last updated: 2026-02-15 — v2.0 milestone complete*
