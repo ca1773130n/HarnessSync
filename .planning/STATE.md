@@ -12,13 +12,13 @@
 
 **Milestone:** v2.0
 **Phase:** 11 - State Enhancements & Integration
-**Plan:** 01 - Plugin Tracking & Drift Detection
+**Plan:** 02 - Drift Detection Integration
 **Status:** In Progress
 
 **Progress:**
-[███████░░░] 72%
+[████████░░] 80%
 Milestone v2.0: Plugin & MCP Scope Sync
-Phase 9: Complete | Phase 10: Complete | Phase 11: In Progress (1/3 plans)
+Phase 9: Complete | Phase 10: Complete | Phase 11: In Progress (2/3 plans)
 
 ---
 
@@ -27,13 +27,13 @@ Phase 9: Complete | Phase 10: Complete | Phase 11: In Progress (1/3 plans)
 ### Velocity
 - **Milestones completed:** 1 (v1.0)
 - **Phases completed:** 10/11
-- **Plans completed:** 30 (24 v1.0 + 6 v2.0)
-- **Average plan duration:** ~2 min
+- **Plans completed:** 31 (24 v1.0 + 7 v2.0)
+- **Average plan duration:** ~2.5 min
 - **v1.0 complete:** 2026-02-15
 - **v2.0 started:** 2026-02-15
 
 ### Quality
-- **Verification passes:** 164 (113 prior + 12 sanity + 30 integration + 9 proxy)
+- **Verification passes:** 193 (113 prior + 12 sanity + 30 integration + 9 proxy + 29 integration)
 - **Verification failures:** 0
 - **Pass rate:** 100%
 
@@ -174,7 +174,7 @@ v2.0:
 - [x] Execute Phase 9: Plugin Discovery & Scope-Aware Source Reading
 - [x] Execute Phase 10: Scope-Aware Target Sync & Environment Translation
 - [x] Execute Phase 11 Plan 01: Plugin Tracking & Drift Detection
-- [ ] Execute Phase 11 Plan 02: Drift Detection Integration
+- [x] Execute Phase 11 Plan 02: Drift Detection Integration
 - [ ] Execute Phase 11 Plan 03: End-to-End Pipeline Validation
 
 ### Roadmap Evolution
@@ -192,6 +192,7 @@ None. Phase 10 complete, ready for Phase 11 planning.
 
 ### Recent Changes
 
+- **2026-02-15:** Phase 11 Plan 02 complete — drift detection integration & full v2.0 pipeline tests (2 tasks, 29 checks)
 - **2026-02-15:** Phase 11 Plan 01 complete — plugin tracking & drift detection (2 tasks, 9 checks)
 - **2026-02-15:** Phase 10 complete — scope-aware adapters + env translation + transport detection (3 plans, 42 checks)
 - **2026-02-15:** Phase 9 complete — plugin MCP discovery + scope-aware reading (2 plans, 12 checks)
@@ -209,18 +210,18 @@ None. Phase 10 complete, ready for Phase 11 planning.
 
 ### What Just Happened
 
-Executed Phase 11 Plan 01 (Plugin Tracking & Drift Detection). Extended StateManager with record_plugin_sync(), detect_plugin_drift(), and get_plugin_status() methods. Integrated plugin metadata extraction into SyncOrchestrator._update_state(). All 9 verification checks passed (7 StateManager + 2 Orchestrator). Plugin metadata now persists to state.json after each sync with replacement semantics to prevent stale accumulation.
+Executed Phase 11 Plan 02 (Drift Detection Integration). Enhanced /sync-status to display MCP servers grouped by source (user/project/local/plugin) with plugin@version labels and drift warnings. Created comprehensive integration test suite with 24 checks covering all Phase 11 success criteria and full v2.0 pipeline validation (3 plugins + 2 user + 1 project + 1 local MCPs). All verification checks passed (5 helper functions + 24 integration tests).
 
 ### What's Next
 
-Execute Phase 11 Plan 02: Drift Detection Integration. Add plugin drift warnings to /sync-status command and sync orchestrator. Implement --refresh flag for forced plugin metadata updates.
+Execute Phase 11 Plan 03: End-to-End Pipeline Validation. Create final integration test with real file system paths, verify complete v2.0 feature set, test edge cases (disabled plugins, missing metadata, concurrent syncs).
 
 ### Context for Next Session
 
-v1.0 complete (8 phases, 24 plans). Phase 9 complete (2 plans). Phase 10 complete (3 plans, 42 checks). Phase 11 Plan 01 complete (9 checks). StateManager now tracks plugin metadata (version, mcp_count, mcp_servers, last_sync). Orchestrator extracts plugin metadata from mcp_scoped and calls record_plugin_sync() after successful target syncs. Drift detection API ready for integration into commands.
+v1.0 complete (8 phases, 24 plans). Phase 9 complete (2 plans, 12 checks). Phase 10 complete (3 plans, 42 checks). Phase 11 Plans 01-02 complete (38 checks total). /sync-status now displays MCP source grouping and plugin drift warnings. Integration tests validate: plugin update simulation (1.0.0 -> 1.1.0), drift detection cycle, full pipeline with 8 MCPs, account-scoped plugin tracking. Plan 03 will complete Phase 11 and v2.0 milestone.
 
 ---
 
 *Last updated: 2026-02-15*
-*Session: Phase 11 Plan 01 execution*
-*Stopped at: Phase 11 Plan 01 complete (Plugin Tracking & Drift Detection)*
+*Session: Phase 11 Plan 02 execution*
+*Stopped at: Phase 11 Plan 02 complete (Drift Detection Integration)*
