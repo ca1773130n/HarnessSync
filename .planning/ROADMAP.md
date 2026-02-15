@@ -120,59 +120,40 @@ Plans:
 
 ---
 
-### Phase 10: Scope-Aware Target Sync & Environment Translation
+### Phase 10: Scope-Aware Target Sync & Environment Translation ✓
 
 **Goal:** Implement scope-to-target mapping for Gemini and Codex adapters, translate environment variable syntax between Claude/Codex/Gemini formats, and detect unsupported transport types.
 
+**Status:** Complete (2026-02-15)
 **Dependencies:** Phase 9 (scope-tagged MCPs available), Phase 2 (Codex adapter), Phase 3 (Gemini adapter)
 
 **Requirements:** SYNC-01, SYNC-02, SYNC-03, SYNC-04, ENV-01, ENV-02, ENV-03
 
-**Success Criteria:**
-1. Gemini adapter writes user-scope MCPs to `~/.gemini/settings.json` and project-scope MCPs to `.gemini/settings.json` (workspace-scoped file)
-2. Codex adapter writes user-scope MCPs to `~/.codex/config.toml` and project-scope MCPs to `.codex/config.toml` (project-scoped file)
-3. Plugin-discovered MCPs sync to user-scope target configs (plugin MCPs are always user-level, never project)
-4. Environment variable translation converts Claude's `${VAR}` interpolation syntax to Codex literal `env` map format with key-value pairs
-5. Environment variable translation handles `${VAR:-default}` default value syntax by expanding to `env` map with warning if VAR is undefined
-6. Environment variable references preserved in Gemini settings.json format (Gemini supports `${VAR}` natively)
-7. Adapters detect unsupported transport types per target (SSE on Codex, custom protocols) and log warnings with transport name instead of silently skipping
-8. Integration test with 2 user-scope MCPs (1 with `${API_KEY}`, 1 with `${PORT:-3000}`), 1 project-scope MCP, and 1 plugin MCP verifies all targets receive correct scoped configs
-
-**Verification Level:** proxy
-
-**Plans:** 3 plans
+**Plans:** 3/3 complete
+**Verification:** proxy (passed)
 
 Plans:
-- [ ] 10-01-PLAN.md -- Env var translator utility and transport detection module
-- [ ] 10-02-PLAN.md -- Scope-aware adapter interface with Codex/Gemini/OpenCode routing
-- [ ] 10-03-PLAN.md -- Integration test verifying all 7 requirements end-to-end
+- [x] 10-01-PLAN.md -- Env var translator utility and transport detection module
+- [x] 10-02-PLAN.md -- Scope-aware adapter interface with Codex/Gemini/OpenCode routing
+- [x] 10-03-PLAN.md -- Integration test verifying all 7 requirements end-to-end
 
 ---
 
-### Phase 11: State Enhancements & Integration
+### Phase 11: State Enhancements & Integration ✓
 
 **Goal:** Extend StateManager to track plugin versions for update-triggered re-sync, enhance /sync-status to display plugin-discovered MCPs with scope labels, and implement drift detection for plugin MCP changes.
 
+**Status:** Complete (2026-02-15)
 **Dependencies:** Phase 9 (plugin discovery), Phase 10 (scope-aware sync working)
 
 **Requirements:** STATE-01, STATE-02, STATE-03
 
-**Success Criteria:**
-1. StateManager tracks plugin versions and MCP server counts per plugin in state.json schema (plugin_name → {version, mcp_count, last_sync})
-2. StateManager detects plugin version changes on next sync and triggers re-sync of plugin-provided MCPs automatically
-3. /sync-status command displays plugin-discovered MCPs separately from user-configured MCPs with scope labels (user/project/local/plugin)
-4. /sync-status groups MCPs by source: "User-configured", "Project-configured", "Plugin-provided (plugin-name@version)"
-5. Drift detection extends to plugin MCP changes by comparing stored plugin version/mcp_count with current values
-6. Integration test with plugin update simulation (version 1.0.0 → 1.1.0 adding new MCP server) verifies re-sync trigger and status display
-7. Full pipeline validation with all v2.0 requirements: 3 plugins, 2 user MCPs, 1 project MCP, 1 local MCP verifies 100% discovery, correct scoping, env var translation, and drift detection
-
-**Verification Level:** proxy
-
-**Plans:** 2 plans
+**Plans:** 2/2 complete
+**Verification:** proxy (passed)
 
 Plans:
-- [ ] 11-01-PLAN.md -- StateManager plugin tracking + orchestrator metadata persistence
-- [ ] 11-02-PLAN.md -- /sync-status MCP source grouping + integration tests
+- [x] 11-01-PLAN.md -- StateManager plugin tracking + orchestrator metadata persistence
+- [x] 11-02-PLAN.md -- /sync-status MCP source grouping + integration tests
 
 ---
 
@@ -189,8 +170,8 @@ Plans:
 | 7 - Packaging & Distribution | Complete | 3/3 | proxy | ██████████ 100% |
 | 8 - Multi-Account Support | Complete | 4/4 | proxy | ██████████ 100% |
 | 9 - Plugin Discovery & Scope-Aware Reading | Complete | 2/2 | proxy | ██████████ 100% |
-| **10 - Scope-Aware Sync & Env Translation** | **Planned** | **0/3** | **proxy** | **░░░░░░░░░░ 0%** |
-| **11 - State Enhancements & Integration** | **Planned** | **0/2** | **proxy** | **░░░░░░░░░░ 0%** |
+| 10 - Scope-Aware Sync & Env Translation | Complete | 3/3 | proxy | ██████████ 100% |
+| 11 - State Enhancements & Integration | Complete | 2/2 | proxy | ██████████ 100% |
 
 ---
 
@@ -207,16 +188,16 @@ Plans:
 | SCOPE-03 | Phase 9 | Complete |
 | SCOPE-04 | Phase 9 | Complete |
 | SCOPE-05 | Phase 9 | Complete |
-| SYNC-01 | Phase 10 | Pending |
-| SYNC-02 | Phase 10 | Pending |
-| SYNC-03 | Phase 10 | Pending |
-| SYNC-04 | Phase 10 | Pending |
-| ENV-01 | Phase 10 | Pending |
-| ENV-02 | Phase 10 | Pending |
-| ENV-03 | Phase 10 | Pending |
-| STATE-01 | Phase 11 | Pending |
-| STATE-02 | Phase 11 | Pending |
-| STATE-03 | Phase 11 | Pending |
+| SYNC-01 | Phase 10 | Complete |
+| SYNC-02 | Phase 10 | Complete |
+| SYNC-03 | Phase 10 | Complete |
+| SYNC-04 | Phase 10 | Complete |
+| ENV-01 | Phase 10 | Complete |
+| ENV-02 | Phase 10 | Complete |
+| ENV-03 | Phase 10 | Complete |
+| STATE-01 | Phase 11 | Complete |
+| STATE-02 | Phase 11 | Complete |
+| STATE-03 | Phase 11 | Complete |
 
 **Coverage:** 19/19 v2.0 requirements mapped (100%)
 
@@ -232,4 +213,6 @@ Not required for v2.0. All phases use proxy verification with no deferred valida
 *v1.0 complete: 2026-02-15 (8 phases, 24 plans)*
 *v2.0 roadmap created: 2026-02-15*
 *Phase 9 complete: 2026-02-15 (2 plans)*
-*Next: `/grd:plan-phase 10`*
+*Phase 10 complete: 2026-02-15 (3 plans)*
+*Phase 11 complete: 2026-02-15 (2 plans)*
+*v2.0 complete: 2026-02-15 (3 phases, 7 plans, 19 requirements)*
