@@ -402,6 +402,107 @@ class StateManager:
         """Get last sync timestamp."""
         return self._state.get("last_sync")
 
+    def record_plugin_sync(self, plugins_metadata: dict, account: str = None) -> None:
+        """
+        Record plugin metadata after successful sync.
+
+        Args:
+            plugins_metadata: Dict mapping plugin_name -> {version, mcp_count, mcp_servers, last_sync}
+            account: Account name for per-account tracking (None = flat plugins section)
+
+        Implementation:
+            - REPLACES entire plugins section on each call (no merge) to avoid stale accumulation
+            - Stores in accounts.{account}.plugins if account is not None
+            - Stores in flat "plugins" section if account is None (v1 compat)
+        """
+        if account is not None:
+            # Account-scoped: write to accounts.{account}.plugins
+            if "accounts" not in self._state:
+                self._state["accounts"] = {}
+            if account not in self._state["accounts"]:
+                self._state["accounts"][account] = {}
+
+            # REPLACE entire plugins section (no merge)
+            self._state["accounts"][account]["plugins"] = dict(plugins_metadata)
+        else:
+            # v1 backward compatible: write to flat plugins
+            # REPLACE entire plugins section (no merge)
+            self._state["plugins"] = dict(plugins_metadata)
+
+        # Persist to disk
+        self._save()
+
+    def detect_plugin_drift(self, current_plugins: dict, account: str = None) -> dict:
+        """
+        Detect plugin drift by comparing current vs stored plugin metadata.
+
+        Args:
+            current_plugins: Dict mapping plugin_name -> {version, mcp_count, mcp_servers, last_sync}
+            account: Account name for per-account drift (None = flat plugins section)
+
+        Returns:
+            Dict mapping plugin_name -> drift reason string (empty dict = no drift)
+            Drift reasons: "removed", "added", "version_changed: {old} -> {new}",
+                          "mcp_count_changed: {old} -> {new}"
+            Priority: version_changed > mcp_count_changed (if both changed, report version)
+        """
+        # Load stored plugins from appropriate location
+        if account is not None:
+            account_state = self._state.get("accounts", {}).get(account)
+            if not account_state:
+                stored_plugins = {}
+            else:
+                stored_plugins = account_state.get("plugins", {})
+        else:
+            stored_plugins = self._state.get("plugins", {})
+
+        drift = {}
+
+        # Check for removed plugins
+        for plugin_name in stored_plugins:
+            if plugin_name not in current_plugins:
+                drift[plugin_name] = "removed"
+
+        # Check for added or changed plugins
+        for plugin_name, current_meta in current_plugins.items():
+            if plugin_name not in stored_plugins:
+                drift[plugin_name] = "added"
+                continue
+
+            stored_meta = stored_plugins[plugin_name]
+            current_version = current_meta.get("version")
+            stored_version = stored_meta.get("version")
+            current_count = current_meta.get("mcp_count")
+            stored_count = stored_meta.get("mcp_count")
+
+            # Check version change (higher priority)
+            if current_version != stored_version:
+                drift[plugin_name] = f"version_changed: {stored_version} -> {current_version}"
+            # Check MCP count change (only if version didn't change)
+            elif current_count != stored_count:
+                drift[plugin_name] = f"mcp_count_changed: {stored_count} -> {current_count}"
+
+        return drift
+
+    def get_plugin_status(self, account: str = None) -> dict:
+        """
+        Get stored plugin metadata.
+
+        Args:
+            account: Account name for per-account status (None = flat plugins section)
+
+        Returns:
+            Dict mapping plugin_name -> {version, mcp_count, mcp_servers, last_sync}
+            Empty dict if no plugins tracked yet
+        """
+        if account is not None:
+            account_state = self._state.get("accounts", {}).get(account)
+            if not account_state:
+                return {}
+            return account_state.get("plugins", {})
+        else:
+            return self._state.get("plugins", {})
+
     @property
     def state_file(self) -> Path:
         """Get state file path."""
