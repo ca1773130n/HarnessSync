@@ -38,7 +38,7 @@ That's it. HarnessSync will automatically sync your config whenever Claude Code 
 ```bash
 git clone https://github.com/YOUR_USERNAME/HarnessSync.git
 cd HarnessSync
-bash install.sh
+bash scripts/install.sh
 ```
 
 Then restart your shell:
@@ -180,8 +180,11 @@ HarnessSync/
 │   ├── mcp/                 # MCP server (JSON-RPC over stdio)
 │   │   └── server.py
 │   └── utils/               # Logging, hashing, paths
-├── install.sh               # Cross-platform installer
-├── shell-integration.sh     # Shell wrappers (codex/gemini/opencode)
+├── scripts/
+│   ├── install.sh           # Cross-platform installer
+│   ├── shell-integration.sh # Shell wrappers (codex/gemini/opencode)
+│   └── com.cc2all.sync.plist
+├── tests/                   # Verification & integration tests
 └── .github/workflows/
     └── validate.yml         # CI validation (3 platforms x 2 Python versions)
 ```

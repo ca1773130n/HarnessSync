@@ -9,7 +9,7 @@
 # Claude Code itself is untouched — it's the master.
 # ─────────────────────────────────────────────
 
-HARNESSSYNC_HOME="${HARNESSSYNC_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+HARNESSSYNC_HOME="${HARNESSSYNC_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 HARNESSSYNC_COOLDOWN="${HARNESSSYNC_COOLDOWN:-300}"  # 5 minutes between auto-syncs
 HARNESSSYNC_STAMP="$HOME/.harnesssync/.last-sync"
 

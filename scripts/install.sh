@@ -13,7 +13,7 @@ YELLOW="\033[33m"
 RED="\033[31m"
 NC="\033[0m"
 
-PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DRY_RUN=false
 
 # Parse arguments
@@ -96,7 +96,7 @@ fi
 if [[ -z "$SHELL_RC" ]]; then
     echo -e "  ${YELLOW}Could not detect shell (bash/zsh)${NC}"
     echo -e "  Add manually to your shell profile:"
-    echo -e "    source \"$PLUGIN_ROOT/shell-integration.sh\""
+    echo -e "    source \"$PLUGIN_ROOT/scripts/shell-integration.sh\""
 elif [[ "$DRY_RUN" == true ]]; then
     echo -e "  [DRY RUN] Would add HarnessSync to $SHELL_RC"
 else
@@ -105,7 +105,7 @@ else
     else
         echo "" >> "$SHELL_RC"
         echo "# HarnessSync: Claude Code → All Harnesses auto-sync" >> "$SHELL_RC"
-        echo "source \"$PLUGIN_ROOT/shell-integration.sh\"" >> "$SHELL_RC"
+        echo "source \"$PLUGIN_ROOT/scripts/shell-integration.sh\"" >> "$SHELL_RC"
         echo -e "  ${GREEN}✓${NC} Added to $SHELL_RC"
     fi
 fi

@@ -35,8 +35,8 @@ jobs:
           test -d commands || { echo "FAIL: Missing commands/ at root"; exit 1; }
           test -d hooks || { echo "FAIL: Missing hooks/ at root"; exit 1; }
           test -d src || { echo "FAIL: Missing src/ at root"; exit 1; }
-          test -f install.sh || { echo "FAIL: Missing install.sh"; exit 1; }
-          test -x install.sh || { echo "FAIL: install.sh not executable"; exit 1; }
+          test -f scripts/install.sh || { echo "FAIL: Missing scripts/install.sh"; exit 1; }
+          test -x scripts/install.sh || { echo "FAIL: scripts/install.sh not executable"; exit 1; }
           echo "Directory structure: OK"
 
       - name: Validate JSON files
@@ -110,20 +110,20 @@ jobs:
       - name: Test install.sh --dry-run
         shell: bash
         run: |
-          bash install.sh --dry-run
+          bash scripts/install.sh --dry-run
 
       - name: Check shell script syntax
         shell: bash
         run: |
-          bash -n install.sh && echo "install.sh syntax: OK"
-          bash -n shell-integration.sh && echo "shell-integration.sh syntax: OK"
+          bash -n scripts/install.sh && echo "install.sh syntax: OK"
+          bash -n scripts/shell-integration.sh && echo "shell-integration.sh syntax: OK"
 
       - name: Lint shell scripts
         if: runner.os == 'Linux'
         shell: bash
         run: |
           if command -v shellcheck >/dev/null 2>&1; then
-            shellcheck install.sh shell-integration.sh || echo "Shellcheck: warnings found (non-blocking)"
+            shellcheck scripts/install.sh scripts/shell-integration.sh || echo "Shellcheck: warnings found (non-blocking)"
           else
             echo "Shellcheck: not available (skipped)"
           fi
