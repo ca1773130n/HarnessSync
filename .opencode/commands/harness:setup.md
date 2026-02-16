@@ -1,1 +1,0 @@
-/Users/edward.seo/.claude/commands/harness:setup.md

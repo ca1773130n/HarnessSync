@@ -1,1 +1,0 @@
-/Users/edward.seo/.claude/agents/gsd-research-synthesizer.md

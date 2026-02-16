@@ -1,1 +1,0 @@
-/Users/edward.seo/.claude/agents/grd-project-researcher.md

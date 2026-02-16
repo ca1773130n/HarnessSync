@@ -1,1 +1,0 @@
-/Users/edward.seo/.claude/agents/grd-integration-checker.md
