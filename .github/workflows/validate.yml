@@ -52,12 +52,12 @@ jobs:
           python3 -c "
           import json, sys
           p = json.load(open('.claude-plugin/plugin.json'))
-          required = ['name', 'version', 'description', 'hooks', 'commands']
+          required = ['name', 'version', 'description', 'commands']
           missing = [f for f in required if f not in p]
           if missing:
               print(f'FAIL: Missing fields: {missing}')
               sys.exit(1)
-          assert p['name'] == 'HarnessSync', f'Wrong name: {p[\"name\"]}'
+          assert p['name'] == 'harness-sync', f'Wrong name: {p[\"name\"]}'
           print(f'plugin.json fields: OK (v{p[\"version\"]})')
           "
 
@@ -95,11 +95,10 @@ jobs:
           python3 -c "
           import json, os, sys
           p = json.load(open('.claude-plugin/plugin.json'))
-          refs = list(p.get('commands', {}).values())
+          cmds = p.get('commands', [])
+          refs = list(cmds) if isinstance(cmds, list) else list(cmds.values())
           if isinstance(p.get('hooks'), str):
               refs.append(p['hooks'])
-          if 'mcp' in p and 'server' in p['mcp']:
-              refs.append(p['mcp']['server'])
           missing = [f for f in refs if not os.path.isfile(f)]
           if missing:
               print(f'FAIL: Missing referenced files: {missing}')
