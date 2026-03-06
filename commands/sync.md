@@ -12,4 +12,4 @@ Options:
 - --allow-secrets: Allow sync even when secrets detected in env vars
 - --account NAME: Sync specific account only (omit to sync all accounts)
 
-!python ${CLAUDE_PLUGIN_ROOT}/src/commands/sync.py $ARGUMENTS
+!python3 ${CLAUDE_PLUGIN_ROOT}/src/commands/sync.py $ARGUMENTS

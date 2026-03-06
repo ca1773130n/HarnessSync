@@ -10,4 +10,4 @@ Options:
 - --account NAME: Show status for specific account
 - --list-accounts: List all configured accounts with sync status
 
-!python ${CLAUDE_PLUGIN_ROOT}/src/commands/sync_status.py $ARGUMENTS
+!python3 ${CLAUDE_PLUGIN_ROOT}/src/commands/sync_status.py $ARGUMENTS

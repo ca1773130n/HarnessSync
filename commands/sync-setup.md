@@ -14,4 +14,4 @@ Options:
 - --show NAME: Show detailed account configuration
 - --config-file PATH: Import accounts from JSON file (non-interactive)
 
-!python ${CLAUDE_PLUGIN_ROOT}/src/commands/sync_setup.py $ARGUMENTS
+!python3 ${CLAUDE_PLUGIN_ROOT}/src/commands/sync_setup.py $ARGUMENTS
