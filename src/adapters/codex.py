@@ -342,7 +342,7 @@ class CodexAdapter(AdapterBase):
 
         # Write user-scope servers
         if user_servers:
-            user_path = Path.home() / ".codex" / CONFIG_TOML
+            user_path = self.project_dir / CONFIG_TOML
             user_result = self._write_mcp_to_path(user_servers, user_path)
             result = result.merge(user_result)
 

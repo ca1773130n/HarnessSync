@@ -623,9 +623,11 @@ class SourceReader:
 
         # MCP servers sources
         if self.scope in ("user", "all"):
-            claude_json = Path.home() / ".claude.json"
+            claude_json = self.cc_home / ".claude.json"
             if claude_json.exists():
                 paths["mcp_servers"].append(claude_json)
+            if self.cc_mcp_claude.exists():
+                paths["mcp_servers"].append(self.cc_mcp_claude)
 
         if self.scope in ("project", "all") and self.project_dir:
             proj_mcp = self.project_dir / ".mcp.json"

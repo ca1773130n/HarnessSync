@@ -366,7 +366,7 @@ class GeminiAdapter(AdapterBase):
 
         # Write user-scope servers
         if user_servers:
-            user_path = Path.home() / ".gemini" / SETTINGS_JSON
+            user_path = self.project_dir / ".gemini" / SETTINGS_JSON
             user_result = self._write_mcp_to_settings(user_servers, user_path)
             result = result.merge(user_result)
 
