@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Pre-sync backup with timestamped storage and rollback context manager.
 

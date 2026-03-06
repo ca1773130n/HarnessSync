@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """File-based locking and time-based debouncing for sync operations.
 
 sync_lock: Non-blocking exclusive file lock using fcntl.flock (Unix)

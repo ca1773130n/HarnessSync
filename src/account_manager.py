@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Multi-account registry management with atomic persistence.
 

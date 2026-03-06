@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 State management with atomic writes and drift detection.
 

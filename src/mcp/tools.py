@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Tool handler bridge between MCP protocol and SyncOrchestrator.
 
 Each handler validates input, invokes orchestrator, and formats

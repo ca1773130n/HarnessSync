@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Structured sync operation result.
 
 SyncResult is a dataclass that tracks the outcome of sync operations

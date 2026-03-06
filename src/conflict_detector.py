@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Conflict detection via SHA256 hash comparison.
 

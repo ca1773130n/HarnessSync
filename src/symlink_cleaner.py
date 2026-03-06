@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Broken symlink detection and removal for target directories.
 

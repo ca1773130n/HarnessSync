@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Abstract base class for target adapters.
 
 AdapterBase defines the interface all target adapters (Codex, Gemini, OpenCode)

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 PostToolUse hook for auto-sync on config file edits.
 

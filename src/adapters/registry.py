@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Decorator-based adapter registry.
 
 AdapterRegistry enables self-registering adapters using the decorator pattern.

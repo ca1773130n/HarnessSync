@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """MCP tool definitions with inputSchema and manual validation functions.
 
 Defines three tools (sync_all, sync_target, get_status) with JSON Schema

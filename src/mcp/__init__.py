@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """MCP (Model Context Protocol) server package for HarnessSync.
 
 Exposes sync capabilities as MCP tools for programmatic access

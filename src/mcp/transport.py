@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Stdio transport for MCP JSON-RPC 2.0 protocol.
 
 Reads JSON-RPC requests from stdin, writes responses to stdout.

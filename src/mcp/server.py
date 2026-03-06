@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """MCP server entry point for HarnessSync.
 
 Launched via `python src/mcp/server.py`. Communicates with MCP clients

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """JSON-RPC 2.0 protocol handler for MCP message routing.
 
 Routes MCP methods (initialize, tools/list, tools/call) to handlers

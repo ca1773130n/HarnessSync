@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """HarnessSync utility modules."""
 
 from .logger import Logger

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Claude Code configuration discovery across user and project scopes.
 

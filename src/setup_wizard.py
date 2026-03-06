@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Interactive setup wizard for multi-account configuration.
 

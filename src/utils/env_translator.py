@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Environment variable translation and transport detection utilities.
 
 Provides translation pipeline for MCP server configs between Claude Code format

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Version-aware SHA256 file hashing.
 

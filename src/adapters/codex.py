@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Codex CLI adapter for HarnessSync.
 
 Implements adapter for Codex CLI, syncing Claude Code configuration to Codex format:

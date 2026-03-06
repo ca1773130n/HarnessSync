@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Adapter framework for syncing Claude Code config to different target CLIs.
 
 This package provides the core adapter infrastructure:

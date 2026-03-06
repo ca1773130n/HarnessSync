@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 #!/usr/bin/env python3
 """
 cc2all-sync: Claude Code → All Harnesses Sync Engine

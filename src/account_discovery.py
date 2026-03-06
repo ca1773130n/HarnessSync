@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Filesystem discovery for Claude Code configuration directories.
 

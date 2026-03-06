@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """OpenCode CLI adapter for HarnessSync.
 
 Implements adapter for OpenCode CLI, syncing Claude Code configuration to OpenCode format:

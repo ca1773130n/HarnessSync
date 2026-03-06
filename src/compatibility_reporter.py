@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Compatibility reporting for sync operations.
 

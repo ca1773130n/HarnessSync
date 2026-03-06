@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Manual TOML string formatting and parsing utilities.
 
 This module provides manual TOML generation and minimal parsing for Python 3.10 compatibility.

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 OS-aware symlink creation with fallback chain.
 

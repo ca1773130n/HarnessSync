@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Sync orchestrator coordinating SourceReader -> AdapterRegistry -> StateManager.
 
 SyncOrchestrator is the central coordination layer invoked by both

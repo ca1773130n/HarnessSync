@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Gemini CLI adapter for HarnessSync.
 
 Implements adapter for Gemini CLI, syncing Claude Code configuration to Gemini format:

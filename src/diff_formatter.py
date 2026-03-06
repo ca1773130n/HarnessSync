@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Unified diff output for dry-run preview mode.
 
 DiffFormatter accumulates diffs across configuration types and produces

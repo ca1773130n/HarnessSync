@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Colored logger with summary statistics."""
 
 import os
