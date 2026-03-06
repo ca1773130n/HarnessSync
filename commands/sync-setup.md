@@ -14,4 +14,4 @@ Options:
 - --show NAME: Show detailed account configuration
 - --config-file PATH: Import accounts from JSON file (non-interactive)
 
-!(command -v python3 >/dev/null 2>&1 && python3 ${CLAUDE_PLUGIN_ROOT}/src/commands/sync_setup.py $ARGUMENTS || python ${CLAUDE_PLUGIN_ROOT}/src/commands/sync_setup.py $ARGUMENTS)
+!PY=$(command -v python3 || command -v python) && [ -n "$PY" ] || { echo "Error: Python not found. Install Python 3 to use HarnessSync." >&2; exit 1; }; "$PY" ${CLAUDE_PLUGIN_ROOT}/src/commands/sync_setup.py $ARGUMENTS

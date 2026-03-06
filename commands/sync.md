@@ -12,4 +12,4 @@ Options:
 - --allow-secrets: Allow sync even when secrets detected in env vars
 - --account NAME: Sync specific account only (omit to sync all accounts)
 
-!(command -v python3 >/dev/null 2>&1 && python3 ${CLAUDE_PLUGIN_ROOT}/src/commands/sync.py $ARGUMENTS || python ${CLAUDE_PLUGIN_ROOT}/src/commands/sync.py $ARGUMENTS)
+!PY=$(command -v python3 || command -v python) && [ -n "$PY" ] || { echo "Error: Python not found. Install Python 3 to use HarnessSync." >&2; exit 1; }; "$PY" ${CLAUDE_PLUGIN_ROOT}/src/commands/sync.py $ARGUMENTS
