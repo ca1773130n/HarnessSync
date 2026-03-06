@@ -361,20 +361,29 @@ class SourceReader:
         return servers
 
     def _get_user_scope_mcps(self) -> dict[str, dict]:
-        """Read user-scope MCPs from ~/.claude.json top-level mcpServers."""
-        claude_json = Path.home() / ".claude.json"
-        if not claude_json.exists():
-            return {}
-
-        data = read_json_safe(claude_json)
-        mcp_servers = data.get("mcpServers", {})
-        if not isinstance(mcp_servers, dict):
-            return {}
-
+        """Read user-scope MCPs from cc_home/.claude.json and cc_home/.mcp.json."""
         valid = {}
-        for name, config in mcp_servers.items():
-            if isinstance(config, dict) and (config.get("command") or config.get("url")):
-                valid[name] = config
+
+        # Source 1: cc_home/.claude.json top-level mcpServers
+        claude_json = self.cc_home / ".claude.json"
+        if claude_json.exists():
+            data = read_json_safe(claude_json)
+            mcp_servers = data.get("mcpServers", {})
+            if isinstance(mcp_servers, dict):
+                for name, config in mcp_servers.items():
+                    if isinstance(config, dict) and (config.get("command") or config.get("url") or config.get("type")):
+                        valid[name] = config
+
+        # Source 2: cc_home/.mcp.json (if it exists)
+        if self.cc_mcp_claude.exists():
+            data = read_json_safe(self.cc_mcp_claude)
+            if isinstance(data, dict):
+                mcp_servers = data.get("mcpServers", data) if "mcpServers" in data else data
+                if isinstance(mcp_servers, dict):
+                    for name, config in mcp_servers.items():
+                        if name not in valid and isinstance(config, dict) and (config.get("command") or config.get("url") or config.get("type")):
+                            valid[name] = config
+
         return valid
 
     def _get_project_scope_mcps(self) -> dict[str, dict]:
@@ -398,11 +407,11 @@ class SourceReader:
         return valid
 
     def _get_local_scope_mcps(self) -> dict[str, dict]:
-        """Read local-scope MCPs from ~/.claude.json projects[absolutePath].mcpServers."""
+        """Read local-scope MCPs from cc_home/.claude.json projects[absolutePath].mcpServers."""
         if not self.project_dir:
             return {}
 
-        claude_json = Path.home() / ".claude.json"
+        claude_json = self.cc_home / ".claude.json"
         if not claude_json.exists():
             return {}
 
