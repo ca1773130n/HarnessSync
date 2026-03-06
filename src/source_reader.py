@@ -55,6 +55,62 @@ class SourceReader:
         self.cc_mcp_global = Path.home() / ".mcp.json"  # Global MCP is always at ~
         self.cc_mcp_claude = self.cc_home / ".mcp.json"
 
+    def _get_plugin_install_paths(self) -> list[Path]:
+        """Get install paths for all user-scope plugins from the registry.
+
+        Handles both v1 (flat dict) and v2 (dict of lists) formats of
+        installed_plugins.json.
+
+        Returns:
+            List of Path objects for each plugin install directory
+        """
+        if not self.cc_plugins_registry.exists():
+            return []
+
+        registry = read_json_safe(self.cc_plugins_registry)
+        plugins_data = registry.get("plugins", {})
+
+        paths = []
+
+        if isinstance(plugins_data, dict):
+            for plugin_key, installs in plugins_data.items():
+                # v2 format: each value is a list of install entries
+                if not isinstance(installs, list):
+                    installs = [installs]
+
+                for install in installs:
+                    if not isinstance(install, dict):
+                        continue
+                    if install.get("scope") != "user":
+                        continue
+                    install_path = install.get("installPath", "")
+                    if not install_path:
+                        continue
+                    try:
+                        p = Path(install_path)
+                        if p.exists():
+                            paths.append(p)
+                    except (OSError, ValueError):
+                        pass
+
+        elif isinstance(plugins_data, list):
+            for plugin_info in plugins_data:
+                if not isinstance(plugin_info, dict):
+                    continue
+                if plugin_info.get("scope") != "user":
+                    continue
+                install_path = plugin_info.get("installPath", "")
+                if not install_path:
+                    continue
+                try:
+                    p = Path(install_path)
+                    if p.exists():
+                        paths.append(p)
+                except (OSError, ValueError):
+                    pass
+
+        return paths
+
     def get_rules(self) -> str:
         """
         Get combined CLAUDE.md rules content (SRC-01).
@@ -125,36 +181,15 @@ class SourceReader:
                         pass  # Permission error or other issue
 
             # Plugin-installed skills
-            if self.cc_plugins_registry.exists():
-                registry = read_json_safe(self.cc_plugins_registry)
-                plugins_data = registry.get("plugins", {})
-
-                # Handle both dict and list formats
-                plugin_entries = []
-                if isinstance(plugins_data, dict):
-                    plugin_entries = plugins_data.values()
-                elif isinstance(plugins_data, list):
-                    plugin_entries = plugins_data
-
-                for plugin_info in plugin_entries:
-                    if not isinstance(plugin_info, dict):
-                        continue
-                    if plugin_info.get("scope") != "user":
-                        continue
-                    install_path = plugin_info.get("installPath", "")
-                    if not install_path:
-                        continue
-
-                    try:
-                        p = Path(install_path)
-                        # Scan for skills inside the plugin
-                        skills_dir = p / "skills"
-                        if skills_dir.is_dir():
-                            for d in skills_dir.iterdir():
-                                if d.is_dir() and (d / "SKILL.md").exists():
-                                    skills[d.name] = d
-                    except (OSError, ValueError):
-                        pass  # Invalid path or permission error
+            for p in self._get_plugin_install_paths():
+                try:
+                    skills_dir = p / "skills"
+                    if skills_dir.is_dir():
+                        for d in skills_dir.iterdir():
+                            if d.is_dir() and (d / "SKILL.md").exists():
+                                skills[d.name] = d
+                except (OSError, ValueError):
+                    pass
 
         if self.scope in ("project", "all") and self.project_dir:
             proj_skills = self.project_dir / ".claude" / "skills"
@@ -193,6 +228,17 @@ class SourceReader:
                     except OSError:
                         pass
 
+            # Plugin-installed agents
+            for p in self._get_plugin_install_paths():
+                try:
+                    agents_dir = p / "agents"
+                    if agents_dir.is_dir():
+                        for f in agents_dir.iterdir():
+                            if f.suffix == ".md" and not f.name.startswith('.') and f.is_file():
+                                agents[f.stem] = f
+                except (OSError, ValueError):
+                    pass
+
         if self.scope in ("project", "all") and self.project_dir:
             proj_agents = self.project_dir / ".claude" / "agents"
             if proj_agents.is_dir():
@@ -229,6 +275,17 @@ class SourceReader:
                             commands[f.stem] = f
                     except OSError:
                         pass
+
+            # Plugin-installed commands
+            for p in self._get_plugin_install_paths():
+                try:
+                    commands_dir = p / "commands"
+                    if commands_dir.is_dir():
+                        for f in commands_dir.iterdir():
+                            if f.suffix == ".md" and not f.name.startswith('.') and f.is_file():
+                                commands[f.stem] = f
+                except (OSError, ValueError):
+                    pass
 
         if self.scope in ("project", "all") and self.project_dir:
             proj_cmds = self.project_dir / ".claude" / "commands"
