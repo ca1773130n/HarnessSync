@@ -89,6 +89,13 @@ class SyncOrchestrator:
                               cc_home=self.cc_home)
         source_data = reader.discover_all()
 
+        # Convert rules string to list[dict] format expected by adapters
+        rules_str = source_data.get('rules', '')
+        if isinstance(rules_str, str) and rules_str:
+            source_data['rules'] = [{'path': 'CLAUDE.md', 'content': rules_str}]
+        elif isinstance(rules_str, str):
+            source_data['rules'] = []
+
         # Translate key: SourceReader uses 'mcp_servers', adapters expect 'mcp'
         adapter_data = dict(source_data)
         adapter_data['mcp'] = adapter_data.pop('mcp_servers', {})
