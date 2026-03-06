@@ -6,7 +6,6 @@
     "name": "HarnessSync Contributors"
   },
   "license": "MIT",
-  "hooks": "./hooks/hooks.json",
   "commands": [
     "./commands/sync.md",
     "./commands/sync-status.md",
