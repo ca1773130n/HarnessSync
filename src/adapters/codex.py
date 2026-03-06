@@ -510,19 +510,36 @@ class CodexAdapter(AdapterBase):
         frontmatter_text = match.group(1)
         body = match.group(2)
 
-        # Parse simple key: value lines
+        # Parse key: value lines with support for multiline block scalars (| and >)
         frontmatter = {}
-        for line in frontmatter_text.split('\n'):
-            if ':' in line:
+        lines = frontmatter_text.split('\n')
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if ':' in line and not line.startswith(' ') and not line.startswith('\t'):
                 key, val = line.split(':', 1)
                 key = key.strip()
                 val = val.strip()
+
+                # Handle YAML block scalar indicators (| or >)
+                if val in ('|', '>', '|+', '>+', '|-', '>-'):
+                    # Collect indented continuation lines
+                    block_lines = []
+                    i += 1
+                    while i < len(lines) and (lines[i].startswith(' ') or lines[i].startswith('\t') or lines[i] == ''):
+                        block_lines.append(lines[i].strip())
+                        i += 1
+                    val = '\n'.join(block_lines).strip()
+                    frontmatter[key] = val
+                    continue
+
                 # Remove quotes if present
                 if val.startswith('"') and val.endswith('"'):
                     val = val[1:-1]
                 elif val.startswith("'") and val.endswith("'"):
                     val = val[1:-1]
                 frontmatter[key] = val
+            i += 1
 
         return frontmatter, body
 
@@ -555,10 +572,21 @@ class CodexAdapter(AdapterBase):
         if not description:
             description = name
 
+        # Truncate long descriptions for frontmatter (keep first sentence)
+        short_desc = description.split('\n')[0].strip()
+        if len(short_desc) > 200:
+            short_desc = short_desc[:200].rsplit(' ', 1)[0] + '...'
+
+        # Quote description if it contains YAML-unsafe characters
+        if any(c in short_desc for c in ':"\'{}[]|>&*!%#`@,'):
+            quoted_desc = '"' + short_desc.replace('\\', '\\\\').replace('"', '\\"') + '"'
+        else:
+            quoted_desc = short_desc
+
         # Build frontmatter
         frontmatter = f"""---
 name: {name}
-description: {description}
+description: {quoted_desc}
 ---"""
 
         # Build skill body
