@@ -18,6 +18,7 @@ sys.path.insert(0, PLUGIN_ROOT)
 
 from pathlib import Path
 from src.account_manager import AccountManager
+from src.account_discovery import auto_discover_accounts
 from src.setup_wizard import SetupWizard
 
 
@@ -59,6 +60,11 @@ def main():
         help="Import accounts from JSON file (non-interactive)"
     )
     parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Auto-discover and configure accounts from home directory"
+    )
+    parser.add_argument(
         "--add",
         type=str,
         metavar="NAME",
@@ -95,23 +101,81 @@ def main():
             _import_config_file(args.config_file)
         elif args.add:
             _add_account_inline(args.add, args.source, args.targets)
+        elif args.auto or not sys.stdin.isatty():
+            _auto_setup()
         else:
-            # Default: try interactive, fall back to usage hint
-            if sys.stdin.isatty():
-                wizard.run_add_account()
-            else:
-                print("No TTY available for interactive setup.")
-                print()
-                print("Add an account with:")
-                print("  /sync-setup --add NAME --source ~/.claude-personal --targets codex=~/.codex,gemini=~/.gemini,opencode=~/.opencode")
-                print()
-                print("Or use: --list, --show NAME, --remove NAME, --config-file PATH")
+            wizard.run_add_account()
 
     except KeyboardInterrupt:
         print("\nSetup cancelled.")
 
     except Exception as e:
         print(f"Setup error: {e}", file=sys.stderr)
+
+
+def _auto_setup() -> None:
+    """Auto-discover accounts by scanning home directory.
+
+    Finds .claude* sources matched to .codex*/.gemini*/.opencode* targets
+    by suffix, filtering out targets without auth credentials.
+    """
+    print("Scanning home directory for CLI accounts...")
+    print()
+
+    discovered = auto_discover_accounts()
+
+    if not discovered:
+        print("No matching accounts found.")
+        print()
+        print("HarnessSync looks for:")
+        print("  Source:  ~/.claude, ~/.claude-<name>")
+        print("  Targets: ~/.codex[-<name>], ~/.gemini[-<name>], ~/.opencode[-<name>]")
+        print()
+        print("Targets must have auth credentials (e.g. auth.json for Codex,")
+        print("settings.json for Gemini) to be recognized.")
+        return
+
+    am = AccountManager()
+    added = 0
+    skipped = 0
+
+    for account in discovered:
+        name = account['name']
+        source = account['source']
+        targets = account['targets']
+
+        # Check if already configured with same paths
+        existing = am.get_account(name)
+        if existing:
+            existing_targets = existing.get('targets', {})
+            existing_source = existing.get('source', {}).get('path', '')
+            if (str(source) == existing_source and
+                    all(str(targets.get(k)) == existing_targets.get(k) for k in targets)):
+                print(f"  [{name}] already configured (unchanged)")
+                skipped += 1
+                continue
+
+        target_list = ", ".join(f"{cli}" for cli in sorted(targets))
+        print(f"  [{name}]")
+        print(f"    source:  {source}")
+        print(f"    targets: {target_list}")
+
+        try:
+            am.add_account(name, source, targets)
+            print(f"    -> configured")
+            added += 1
+        except ValueError as e:
+            print(f"    -> skipped: {e}")
+            skipped += 1
+
+    print()
+    if added:
+        print(f"Configured {added} account(s).", end="")
+        if skipped:
+            print(f" ({skipped} unchanged)", end="")
+        print()
+    else:
+        print(f"All {skipped} account(s) already up to date.")
 
 
 def _add_account_inline(name: str, source: str, targets_str: str) -> None:

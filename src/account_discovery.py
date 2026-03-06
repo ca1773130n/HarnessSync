@@ -140,3 +140,93 @@ def discover_target_configs(home_dir: Path = None) -> dict[str, list[Path]]:
         targets[cli].sort(key=lambda p: p.name)
 
     return targets
+
+
+# Auth credential markers per CLI — if none exist, the CLI isn't set up
+_TARGET_AUTH_MARKERS = {
+    'codex': ['auth.json'],
+    'gemini': ['settings.json', '.gemini/oauth_creds.json', '.gemini/google_accounts.json'],
+    'opencode': ['package.json', 'config.json'],
+}
+
+
+def _has_auth(target_dir: Path, cli: str) -> bool:
+    """Check if a target CLI directory has valid auth credentials."""
+    markers = _TARGET_AUTH_MARKERS.get(cli, [])
+    for marker in markers:
+        if (target_dir / marker).exists():
+            return True
+    return False
+
+
+def _extract_suffix(name: str, prefix: str) -> str:
+    """Extract account suffix from directory name.
+
+    .claude-personal1 with prefix '.claude' -> 'personal1'
+    .codex with prefix '.codex' -> ''
+    .gemini-work with prefix '.gemini' -> 'work'
+    """
+    rest = name[len(prefix):]
+    return rest.lstrip('-')
+
+
+def auto_discover_accounts(home_dir: Path = None) -> list[dict]:
+    """Auto-discover accounts by scanning home directory.
+
+    Matches .claude* source dirs to .codex*/.gemini*/.opencode* target dirs
+    by suffix pattern. Filters targets that lack auth credentials.
+
+    Args:
+        home_dir: Directory to search (default: Path.home())
+
+    Returns:
+        List of account dicts with keys: name, source, targets
+        Each targets dict maps cli name -> Path
+    """
+    home_dir = home_dir or Path.home()
+
+    # Step 1: Discover all .claude* source directories
+    sources = discover_claude_configs(home_dir, max_depth=1)
+    valid_sources = [p for p in sources if validate_claude_config(p)]
+
+    # Step 2: Build suffix -> source mapping
+    # .claude -> 'default', .claude-personal1 -> 'personal1'
+    suffix_to_source = {}
+    for src in valid_sources:
+        suffix = _extract_suffix(src.name, '.claude')
+        account_name = suffix if suffix else 'default'
+        suffix_to_source[account_name] = src
+
+    # Step 3: Scan for target dirs and match by suffix
+    cli_prefixes = {'codex': '.codex', 'gemini': '.gemini', 'opencode': '.opencode'}
+    # Build suffix -> {cli: path} mapping from targets
+    suffix_to_targets: dict[str, dict[str, Path]] = {}
+
+    try:
+        for entry in home_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            for cli, prefix in cli_prefixes.items():
+                if entry.name.startswith(prefix):
+                    suffix = _extract_suffix(entry.name, prefix)
+                    account_name = suffix if suffix else 'default'
+                    # Check auth credentials
+                    if not _has_auth(entry, cli):
+                        continue
+                    suffix_to_targets.setdefault(account_name, {})[cli] = entry
+    except (OSError, PermissionError):
+        pass
+
+    # Step 4: Match sources to targets
+    accounts = []
+    for account_name, source_path in sorted(suffix_to_source.items()):
+        targets = suffix_to_targets.get(account_name, {})
+        if not targets:
+            continue  # No valid targets for this source
+        accounts.append({
+            'name': account_name,
+            'source': source_path,
+            'targets': targets,
+        })
+
+    return accounts
