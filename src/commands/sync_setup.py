@@ -58,6 +58,24 @@ def main():
         metavar="PATH",
         help="Import accounts from JSON file (non-interactive)"
     )
+    parser.add_argument(
+        "--add",
+        type=str,
+        metavar="NAME",
+        help="Add account non-interactively (use with --source)"
+    )
+    parser.add_argument(
+        "--source",
+        type=str,
+        metavar="PATH",
+        help="Source Claude Code config directory (use with --add)"
+    )
+    parser.add_argument(
+        "--targets",
+        type=str,
+        metavar="CLI=PATH,...",
+        help="Target paths as codex=/path,gemini=/path,opencode=/path (use with --add)"
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -75,15 +93,68 @@ def main():
             wizard.run_show(args.show)
         elif args.config_file:
             _import_config_file(args.config_file)
+        elif args.add:
+            _add_account_inline(args.add, args.source, args.targets)
         else:
-            # Default: run interactive wizard
-            wizard.run_add_account()
+            # Default: try interactive, fall back to usage hint
+            if sys.stdin.isatty():
+                wizard.run_add_account()
+            else:
+                print("No TTY available for interactive setup.")
+                print()
+                print("Add an account with:")
+                print("  /sync-setup --add NAME --source ~/.claude-personal --targets codex=~/.codex,gemini=~/.gemini,opencode=~/.opencode")
+                print()
+                print("Or use: --list, --show NAME, --remove NAME, --config-file PATH")
 
     except KeyboardInterrupt:
         print("\nSetup cancelled.")
 
     except Exception as e:
         print(f"Setup error: {e}", file=sys.stderr)
+
+
+def _add_account_inline(name: str, source: str, targets_str: str) -> None:
+    """Add account non-interactively via CLI args.
+
+    Args:
+        name: Account name
+        source: Path to Claude Code config directory
+        targets_str: Comma-separated CLI=PATH pairs (e.g. codex=~/.codex,gemini=~/.gemini)
+    """
+    if not source:
+        print("Error: --source is required with --add", file=sys.stderr)
+        return
+
+    source_path = Path(source).expanduser()
+
+    # Parse targets
+    if targets_str:
+        targets = {}
+        for pair in targets_str.split(","):
+            pair = pair.strip()
+            if "=" not in pair:
+                print(f"Error: Invalid target format '{pair}'. Use CLI=PATH", file=sys.stderr)
+                return
+            cli, path = pair.split("=", 1)
+            targets[cli.strip()] = Path(path.strip()).expanduser()
+    else:
+        # Default target paths
+        suffix = "" if name == "default" else f"-{name}"
+        targets = {
+            cli: Path.home() / f".{cli}{suffix}"
+            for cli in ["codex", "gemini", "opencode"]
+        }
+
+    am = AccountManager()
+    try:
+        am.add_account(name, source_path, targets)
+        print(f"Account '{name}' configured successfully!")
+        print(f"  Source:  {source_path}")
+        for cli, path in sorted(targets.items()):
+            print(f"  Target:  {cli} -> {path}")
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
 
 
 def _import_config_file(config_path: str) -> None:

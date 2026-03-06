@@ -4,11 +4,13 @@ description: Configure multi-account sync setup (discover, add, remove accounts)
 
 Configure HarnessSync multi-account support.
 
-Usage: /sync-setup [--list] [--remove NAME] [--show NAME] [--config-file PATH]
+Usage: /sync-setup [--add NAME --source PATH [--targets CLI=PATH,...]] [--list] [--remove NAME] [--show NAME] [--config-file PATH]
 
-Default (no args): Run interactive setup wizard to add a new account.
+Default (no args): Run interactive setup wizard (TTY required), or show usage hint.
 
 Options:
+- --add NAME --source PATH: Add account non-interactively
+- --targets CLI=PATH,...: Target paths (e.g. codex=~/.codex,gemini=~/.gemini). Defaults to ~/.{cli} or ~/.{cli}-{name}
 - --list: List all configured accounts
 - --remove NAME: Remove account configuration
 - --show NAME: Show detailed account configuration
