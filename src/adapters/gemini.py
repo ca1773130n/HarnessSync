@@ -4,14 +4,14 @@ from __future__ import annotations
 
 Implements adapter for Gemini CLI, syncing Claude Code configuration to Gemini format:
 - Rules (CLAUDE.md) → GEMINI.md with managed markers
-- Skills → Inline content in GEMINI.md (no symlinks, YAML frontmatter stripped)
-- Agents → Inline content in GEMINI.md
-- Commands → Brief descriptions in GEMINI.md
-- MCP servers → settings.json mcpServers format
+- Skills → Native .gemini/skills/<name>/SKILL.md files
+- Agents → Native .gemini/agents/<name>.md files
+- Commands → Native .gemini/commands/<name>.toml files
+- MCP servers → settings.json mcpServers format (with trust/includeTools/excludeTools/cwd)
 - Settings → settings.json tools.exclude/tools.allowed (never auto-enable yolo)
 
-The adapter uses subsection markers within the main HarnessSync managed block
-to allow incremental syncing without losing other sections.
+The adapter writes native Gemini CLI discovery files for skills, agents, and commands
+instead of inlining content into GEMINI.md. Only rules remain in GEMINI.md.
 """
 
 import re
@@ -103,10 +103,11 @@ class GeminiAdapter(AdapterBase):
         )
 
     def sync_skills(self, skills: dict[str, Path]) -> SyncResult:
-        """Sync skills to GEMINI.md via inline content.
+        """Sync skills to native .gemini/skills/<name>/SKILL.md files.
 
-        Reads SKILL.md from each skill directory, strips YAML frontmatter,
-        and inlines the content into GEMINI.md with section headers.
+        Copies SKILL.md content (frontmatter + body preserved) to Gemini's native
+        skill discovery path. Validates that name and description frontmatter
+        fields exist before writing.
 
         Args:
             skills: Dict mapping skill name to skill directory path
@@ -117,64 +118,47 @@ class GeminiAdapter(AdapterBase):
         if not skills:
             return SyncResult()
 
-        skill_sections = []
-        synced_count = 0
+        result = SyncResult()
 
         for name, skill_dir in skills.items():
             try:
                 # Read SKILL.md from skill directory
                 skill_md = skill_dir / "SKILL.md"
                 if not skill_md.exists():
+                    result.skipped += 1
+                    result.skipped_files.append(f"{name}: SKILL.md not found")
                     continue
 
                 content = skill_md.read_text(encoding='utf-8')
 
-                # Parse frontmatter and extract body
-                frontmatter, body = self._parse_frontmatter(content)
-                skill_name = frontmatter.get('name', name)
-                description = frontmatter.get('description', '')
+                # Validate frontmatter has required fields
+                frontmatter, _ = self._parse_frontmatter(content)
+                if 'name' not in frontmatter or 'description' not in frontmatter:
+                    result.skipped += 1
+                    result.skipped_files.append(f"{name}: missing name or description in frontmatter")
+                    continue
 
-                # Strip leading/trailing whitespace from body
-                body = body.strip()
+                # Write to native discovery path
+                target_dir = self.project_dir / ".gemini" / "skills" / name
+                ensure_dir(target_dir)
+                (target_dir / "SKILL.md").write_text(content, encoding='utf-8')
 
-                # Build skill section
-                section = f"## Skill: {skill_name}\n\n"
-                if description:
-                    section += f"**Purpose:** {description}\n\n"
-                section += body
-
-                skill_sections.append(section)
-                synced_count += 1
+                result.synced += 1
+                result.synced_files.append(str(target_dir / "SKILL.md"))
 
             except Exception:
-                # Silently skip malformed skills
+                result.failed += 1
+                result.failed_files.append(f"{name}: write failed")
                 continue
 
-        if not skill_sections:
-            return SyncResult()
-
-        # Combine all skill sections
-        combined = '\n\n---\n\n'.join(skill_sections)
-
-        # Build subsection with markers
-        skills_subsection = f"""<!-- HarnessSync:Skills -->
-{combined}
-<!-- End HarnessSync:Skills -->"""
-
-        # Write into GEMINI.md (merge with existing content)
-        self._write_subsection("Skills", skills_subsection)
-
-        return SyncResult(
-            synced=synced_count,
-            adapted=synced_count,
-            synced_files=[str(self.gemini_md_path)]
-        )
+        return result
 
     def sync_agents(self, agents: dict[str, Path]) -> SyncResult:
-        """Convert Claude Code agents to Gemini inline format.
+        """Sync agents to native .gemini/agents/<name>.md files.
 
-        Extracts name/description from agent frontmatter, role instructions from <role>
-        tags, and inlines into GEMINI.md agents subsection.
+        Writes each agent as a Gemini-compatible .md file with frontmatter
+        (name, description, optional tools/model/max_turns) and body from
+        <role> tags (stripped). Drops Gemini-incompatible fields like color.
 
         Args:
             agents: Dict mapping agent name to agent .md file path
@@ -185,59 +169,94 @@ class GeminiAdapter(AdapterBase):
         if not agents:
             return SyncResult()
 
-        agent_sections = []
-        synced_count = 0
+        result = SyncResult()
 
         for agent_name, agent_path in agents.items():
             try:
                 # Read agent file
                 if not agent_path.exists():
+                    result.skipped += 1
+                    result.skipped_files.append(f"{agent_name}: file not found")
                     continue
 
                 content = agent_path.read_text(encoding='utf-8')
 
-                # Parse frontmatter and extract role
+                # Parse frontmatter and extract body
                 frontmatter, body = self._parse_frontmatter(content)
                 name = frontmatter.get('name', agent_name)
                 description = frontmatter.get('description', '')
-                role_instructions = self._extract_role_section(body)
 
-                # Skip if no content
-                if not role_instructions.strip():
+                # Extract role body (strip <role> tags, fall back to full body)
+                role_body = self._extract_role_section(body)
+                if not role_body.strip():
+                    result.skipped += 1
+                    result.skipped_files.append(f"{agent_name}: no body content")
                     continue
 
-                # Build agent section
-                section = f"## Agent: {name}\n\n"
-                if description:
-                    section += f"**Description:** {description}\n\n"
-                section += role_instructions.strip()
+                # Build Gemini-compatible frontmatter
+                fm_lines = []
+                fm_lines.append(f"name: {self._quote_yaml_value(name)}")
+                fm_lines.append(f"description: {self._quote_yaml_value(description)}")
 
-                agent_sections.append(section)
-                synced_count += 1
+                # Pass through optional Gemini-compatible fields
+                for field in ('model', 'max_turns'):
+                    if field in frontmatter:
+                        fm_lines.append(f"{field}: {frontmatter[field]}")
+
+                # Handle tools as a YAML list
+                if 'tools' in frontmatter:
+                    tools_val = frontmatter['tools']
+                    # Parse tools: could be comma-separated string or already parsed
+                    if isinstance(tools_val, str) and tools_val.strip():
+                        # Could be "tool1, tool2" or "- tool1\n- tool2" from block scalar
+                        if '\n' in tools_val:
+                            # Block scalar parsed lines (already "- " prefixed from source)
+                            tool_items = [t.lstrip('- ').strip() for t in tools_val.split('\n') if t.strip()]
+                        else:
+                            tool_items = [t.strip() for t in tools_val.split(',') if t.strip()]
+                        fm_lines.append("tools:")
+                        for tool in tool_items:
+                            fm_lines.append(f"- {tool}")
+
+                # Drop color field (Gemini-incompatible) -- simply not included
+
+                # Build final file content
+                frontmatter_str = '\n'.join(fm_lines)
+                agent_content = f"---\n{frontmatter_str}\n---\n\n{role_body.strip()}\n"
+
+                # Write to native discovery path
+                agents_dir = self.project_dir / ".gemini" / "agents"
+                ensure_dir(agents_dir)
+                target_path = agents_dir / f"{agent_name}.md"
+                target_path.write_text(agent_content, encoding='utf-8')
+
+                result.synced += 1
+                result.adapted += 1
+                result.synced_files.append(str(target_path))
 
             except Exception:
-                # Silently skip malformed agents
+                result.failed += 1
+                result.failed_files.append(f"{agent_name}: write failed")
                 continue
 
-        if not agent_sections:
-            return SyncResult()
+        return result
 
-        # Combine all agent sections
-        combined = '\n\n---\n\n'.join(agent_sections)
+    def _quote_yaml_value(self, value: str) -> str:
+        """Quote a YAML value if it contains unsafe characters.
 
-        # Build subsection with markers
-        agents_subsection = f"""<!-- HarnessSync:Agents -->
-{combined}
-<!-- End HarnessSync:Agents -->"""
+        Args:
+            value: Raw string value for YAML frontmatter
 
-        # Write into GEMINI.md (merge with existing content)
-        self._write_subsection("Agents", agents_subsection)
-
-        return SyncResult(
-            synced=synced_count,
-            adapted=synced_count,
-            synced_files=[str(self.gemini_md_path)]
-        )
+        Returns:
+            Quoted string if needed, original otherwise
+        """
+        if not value:
+            return '""'
+        # Quote if contains YAML-unsafe characters
+        if any(c in value for c in ':"\'{}[]|>&*!%#`@,'):
+            escaped = value.replace('\\', '\\\\').replace('"', '\\"')
+            return f'"{escaped}"'
+        return value
 
     def sync_commands(self, commands: dict[str, Path]) -> SyncResult:
         """Convert Claude Code commands to Gemini brief descriptions.
