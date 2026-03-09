@@ -396,8 +396,11 @@ class CodexAdapter(AdapterBase):
 
             settings_section = '\n'.join(settings_lines) if settings_lines else ''
 
+            # Extract non-managed sections for preservation
+            preserved = self._extract_unmanaged_toml(config_path)
+
             # Build complete config.toml
-            final_toml = self._build_config_toml(settings_section, mcp_toml)
+            final_toml = self._build_config_toml(settings_section, mcp_toml, preserved)
 
             # Write atomically
             write_toml_atomic(config_path, final_toml)
@@ -470,8 +473,11 @@ class CodexAdapter(AdapterBase):
                 # Re-generate MCP section from existing config
                 mcp_section = format_mcp_servers_toml(existing_config['mcp_servers'])
 
+            # Extract non-managed sections for preservation
+            preserved = self._extract_unmanaged_toml(config_path)
+
             # Build complete config.toml
-            final_toml = self._build_config_toml(settings_section, mcp_section)
+            final_toml = self._build_config_toml(settings_section, mcp_section, preserved)
 
             # Write atomically
             write_toml_atomic(config_path, final_toml)
@@ -686,7 +692,65 @@ description: {quoted_desc}
         config_path = self.project_dir / ".codex" / CONFIG_TOML
         return read_toml_safe(config_path)
 
-    def _build_config_toml(self, settings_section: str, mcp_section: str) -> str:
+    def _extract_unmanaged_toml(self, config_path: Path) -> str:
+        """Extract TOML sections not managed by HarnessSync for re-emission.
+
+        Managed content (will be regenerated):
+        - Header comments (# ... HarnessSync ..., # Do not edit ...)
+        - sandbox_mode and approval_policy top-level keys
+        - All [mcp_servers.*] sections
+
+        Everything else is preserved verbatim.
+
+        Args:
+            config_path: Path to existing config.toml
+
+        Returns:
+            Raw TOML string of non-managed sections, or empty string
+        """
+        if not config_path.exists():
+            return ''
+
+        try:
+            raw = config_path.read_text(encoding='utf-8')
+        except (OSError, UnicodeDecodeError):
+            return ''
+
+        kept_lines: list[str] = []
+        in_mcp_section = False
+
+        for line in raw.split('\n'):
+            stripped = line.strip()
+
+            # Skip HarnessSync header comments
+            if stripped.startswith('#') and ('HarnessSync' in stripped or 'Do not edit' in stripped or 'MCP servers' in stripped):
+                continue
+
+            # Skip managed top-level keys
+            if stripped.startswith('sandbox_mode') and '=' in stripped:
+                continue
+            if stripped.startswith('approval_policy') and '=' in stripped:
+                continue
+
+            # Track table headers
+            if stripped.startswith('['):
+                if stripped.startswith('[mcp_servers'):
+                    in_mcp_section = True
+                    continue
+                else:
+                    in_mcp_section = False
+
+            # Skip lines inside mcp_servers sections
+            if in_mcp_section:
+                continue
+
+            kept_lines.append(line)
+
+        # Strip leading/trailing blank lines
+        result = '\n'.join(kept_lines).strip()
+        return result
+
+    def _build_config_toml(self, settings_section: str, mcp_section: str, preserved_sections: str = '') -> str:
         """Combine settings and MCP sections into complete config.toml.
 
         Args:
@@ -708,5 +772,9 @@ description: {quoted_desc}
 
         if mcp_section:
             lines.append(mcp_section)
+
+        if preserved_sections:
+            lines.append('')
+            lines.append(preserved_sections)
 
         return '\n'.join(lines)
