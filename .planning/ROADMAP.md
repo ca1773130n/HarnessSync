@@ -4,7 +4,7 @@
 
 HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. v0.0.1 delivered the core plugin with hooks, slash commands, MCP server, and multi-account support. v0.0.2 added scope-aware MCP sync with plugin discovery. **v0.1.1** modernizes all three adapters to match the latest CLI versions -- fixing broken settings formats, adding rules directory discovery, migrating Gemini to native skills/agents/commands, and rewriting OpenCode's permission system.
 
-**Phases:** 14 (12 complete, 2 remaining in v0.1.1)
+**Phases:** 14 (13 complete, 1 remaining in v0.1.1)
 **Depth:** Standard (3 phases for v0.1.1)
 **Coverage:** 47/47 v1 + 19/19 v0.0.2 + 19/19 v0.1.1 requirements mapped
 
@@ -166,16 +166,16 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 
 **Goal:** Migrate Gemini adapter from inlining skills/agents/commands into GEMINI.md to writing native format files (SKILL.md, agent .md, command .toml) that Gemini CLI discovers and loads natively with proper lazy-loading and activation.
 
-**Status:** Pending
+**Status:** Complete (2026-03-09)
 **Dependencies:** Phase 12 (rules discovery available for adapters, settings fix landed)
-**Verification Level:** proxy
+**Verification Level:** proxy (passed)
 
 **Requirements:** GMN-07, GMN-08, GMN-09, GMN-11, GMN-12
-**Plans:** 2 plans
+**Plans:** 2/2 complete
 
 Plans:
-- [ ] 13-01-PLAN.md — Rewrite sync_skills, sync_agents, sync_commands to native files + MCP field passthrough
-- [ ] 13-02-PLAN.md — GEMINI.md stale subsection cleanup + end-to-end verification
+- [x] 13-01-PLAN.md — Rewrite sync_skills, sync_agents, sync_commands to native files + MCP field passthrough
+- [x] 13-02-PLAN.md — GEMINI.md stale subsection cleanup + end-to-end verification
 
 **Success Criteria:**
 1. Skills sync to `.gemini/skills/<name>/SKILL.md` files with `name` and `description` frontmatter instead of being inlined in GEMINI.md
@@ -221,7 +221,7 @@ Plans:
 | 10 - Scope-Aware Sync & Env Translation | Complete | 3/3 | proxy | ██████████ 100% |
 | 11 - State Enhancements & Integration | Complete | 2/2 | proxy | ██████████ 100% |
 | 12 - Critical Fixes & Rules Discovery | Complete | 3/3 | proxy (passed) | ██████████ 100% |
-| 13 - Gemini Native Format Migration | Planned | 0/2 | proxy | ░░░░░░░░░░ 0% |
+| 13 - Gemini Native Format Migration | Complete | 2/2 | proxy (passed) | ██████████ 100% |
 | 14 - Cross-Adapter Polish | Pending | 0/? | proxy | ░░░░░░░░░░ 0% |
 
 ---
@@ -240,11 +240,11 @@ Plans:
 | OC-07 | Phase 12 | Complete |
 | OC-08 | Phase 12 | Complete |
 | OC-09 | Phase 12 | Complete |
-| GMN-07 | Phase 13 | Pending |
-| GMN-08 | Phase 13 | Pending |
-| GMN-09 | Phase 13 | Pending |
-| GMN-11 | Phase 13 | Pending |
-| GMN-12 | Phase 13 | Pending |
+| GMN-07 | Phase 13 | Complete |
+| GMN-08 | Phase 13 | Complete |
+| GMN-09 | Phase 13 | Complete |
+| GMN-11 | Phase 13 | Complete |
+| GMN-12 | Phase 13 | Complete |
 | CDX-09 | Phase 14 | Pending |
 | OC-10 | Phase 14 | Pending |
 | OC-11 | Phase 14 | Pending |
