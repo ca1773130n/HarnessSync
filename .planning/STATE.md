@@ -4,16 +4,16 @@
 
 **Core Value:** One harness to rule them all — configure Claude Code once, sync everywhere (Codex, Gemini CLI, OpenCode) without manual duplication or format translation.
 
-**Current Focus:** Between milestones. v0.0.2 complete.
+**Current Focus:** v0.1.1 — Target CLI Modernization
 
 ---
 
 ## Current Position
 
-**Milestone:** v0.0.2 (complete)
-**Phase:** All complete
+**Milestone:** v0.1.1 (starting)
+**Phase:** Not started (defining requirements)
 **Plan:** N/A
-**Status:** Awaiting next milestone
+**Status:** Researching latest CLI versions
 
 **Progress:**
 [██████████] 100%

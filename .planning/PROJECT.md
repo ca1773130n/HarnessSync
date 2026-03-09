@@ -96,7 +96,19 @@ Claude Code Plugin (HarnessSync)
 - V **Plugin drift detection** — Version tracking, MCP count changes, add/remove detection — v0.0.2
 - V **Marketplace packaging** — .claude-plugin structure, marketplace.json, install.sh — v0.0.1
 
-### Active
+### Active — v0.1.1: Target CLI Modernization
+
+Goal: Update adapters to reflect the latest versions of Claude Code, Codex CLI, Gemini CLI, and OpenCode. These tools are evolving rapidly — new config formats, new features, changed directory structures. HarnessSync must keep pace.
+
+- [ ] Audit current adapter output against latest CLI versions
+- [ ] Update Codex adapter for latest Codex CLI features and config format
+- [ ] Update Gemini adapter for latest Gemini CLI features and config format
+- [ ] Update OpenCode adapter for latest OpenCode features and config format
+- [ ] Update SourceReader for any new Claude Code config types or locations
+- [ ] Fix plugin agent/command discovery (done in pre-milestone hotfixes)
+- [ ] Fix YAML frontmatter generation for Codex SKILL.md (done in pre-milestone hotfixes)
+
+### Deferred
 
 - [ ] Bidirectional sync (target → Claude Code) with conflict detection
 - [ ] Support for additional targets (Cursor, Windsurf, Aider)
