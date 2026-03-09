@@ -713,8 +713,88 @@ class GeminiAdapter(AdapterBase):
             # No markers - append managed section
             return f"{existing.rstrip()}\n\n{managed}"
 
+    def sync_all(self, source_data: dict) -> dict[str, SyncResult]:
+        """Sync all configuration types, then clean stale GEMINI.md subsections.
+
+        Overrides base sync_all to add post-sync cleanup of legacy inlined
+        Skills/Agents/Commands subsections from GEMINI.md. Cleanup only runs
+        if all three native-format syncs (skills, agents, commands) completed
+        without failures, to avoid data loss.
+
+        Args:
+            source_data: Dict with keys 'rules', 'skills', 'agents',
+                        'commands', 'mcp', 'settings'
+
+        Returns:
+            Dict mapping config type to SyncResult
+        """
+        results = super().sync_all(source_data)
+
+        # Only cleanup if all three native-format syncs succeeded (no failures)
+        skills_ok = results.get('skills', SyncResult()).failed == 0
+        agents_ok = results.get('agents', SyncResult()).failed == 0
+        commands_ok = results.get('commands', SyncResult()).failed == 0
+
+        if skills_ok and agents_ok and commands_ok:
+            self.cleanup_legacy_inline_sections()
+
+        return results
+
+    def cleanup_legacy_inline_sections(self) -> int:
+        """Remove stale Skills/Agents/Commands subsections from GEMINI.md.
+
+        Public API for cleaning up legacy inlined subsections that are no longer
+        needed after migration to native format files. Safe to call multiple times
+        (idempotent -- returns 0 if no subsections found).
+
+        Returns:
+            Number of subsections removed (0-3)
+        """
+        return self._cleanup_stale_subsections()
+
+    def _cleanup_stale_subsections(self) -> int:
+        """Remove HarnessSync:Skills/Agents/Commands markers and content from GEMINI.md.
+
+        Scans for subsection marker pairs (<!-- HarnessSync:X --> / <!-- End HarnessSync:X -->)
+        and removes everything between and including the markers. Preserves the main
+        managed section (<!-- Managed by HarnessSync -->) containing rules.
+
+        Returns:
+            Number of subsections removed (0-3)
+        """
+        content = self._read_gemini_md()
+        if not content:
+            return 0
+
+        removed = 0
+        for section in ["Skills", "Agents", "Commands"]:
+            start_marker = f"<!-- HarnessSync:{section} -->"
+            end_marker = f"<!-- End HarnessSync:{section} -->"
+
+            if start_marker in content:
+                start_idx = content.find(start_marker)
+                end_idx = content.find(end_marker)
+                if end_idx != -1:
+                    end_pos = end_idx + len(end_marker)
+                    before = content[:start_idx].rstrip()
+                    after = content[end_pos:].lstrip()
+                    if before and after:
+                        content = f"{before}\n\n{after}"
+                    else:
+                        content = before or after
+                    removed += 1
+
+        if removed > 0:
+            self._write_gemini_md(content.strip())
+
+        return removed
+
     def _write_subsection(self, subsection_name: str, subsection_content: str) -> None:
         """Write or update a subsection within GEMINI.md.
+
+        Legacy method -- retained for backward compatibility. Since Phase 13,
+        sync_skills, sync_agents, and sync_commands write native format files
+        instead of calling this method. Do NOT remove as other code may reference it.
 
         Reads current GEMINI.md, finds the subsection markers, replaces that
         subsection, and writes back. This allows incremental syncing.
