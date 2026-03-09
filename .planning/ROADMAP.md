@@ -4,7 +4,7 @@
 
 HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. v0.0.1 delivered the core plugin with hooks, slash commands, MCP server, and multi-account support. v0.0.2 added scope-aware MCP sync with plugin discovery. **v0.1.1** modernizes all three adapters to match the latest CLI versions -- fixing broken settings formats, adding rules directory discovery, migrating Gemini to native skills/agents/commands, and rewriting OpenCode's permission system.
 
-**Phases:** 14 (11 complete, 3 in v0.1.1)
+**Phases:** 14 (12 complete, 2 remaining in v0.1.1)
 **Depth:** Standard (3 phases for v0.1.1)
 **Coverage:** 47/47 v1 + 19/19 v0.0.2 + 19/19 v0.1.1 requirements mapped
 
@@ -144,11 +144,12 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 
 **Goal:** Fix broken adapter outputs (Codex deprecated approval policy, Codex config filename, Gemini v1 settings keys, OpenCode permission system) and extend SourceReader to discover `.claude/rules/` directory content as a new config surface.
 
-**Status:** Pending
+**Status:** Complete (2026-03-09)
 **Dependencies:** Phase 1 (SourceReader), Phase 2 (Codex adapter), Phase 3 (Gemini/OpenCode adapters)
-**Verification Level:** proxy
+**Verification Level:** proxy (passed)
 
 **Requirements:** RULES-01, RULES-02, RULES-03, RULES-04, CDX-07, CDX-08, GMN-10, OC-07, OC-08, OC-09
+**Plans:** 3/3 complete
 
 **Success Criteria:**
 1. SourceReader returns content from `.claude/rules/*.md` and `~/.claude/rules/*.md` (including recursive subdirectories) alongside existing CLAUDE.md content
@@ -219,7 +220,7 @@ Plans:
 | 9 - Plugin Discovery & Scope-Aware Reading | Complete | 2/2 | proxy | ██████████ 100% |
 | 10 - Scope-Aware Sync & Env Translation | Complete | 3/3 | proxy | ██████████ 100% |
 | 11 - State Enhancements & Integration | Complete | 2/2 | proxy | ██████████ 100% |
-| 12 - Critical Fixes & Rules Discovery | Pending | 0/? | proxy | ░░░░░░░░░░ 0% |
+| 12 - Critical Fixes & Rules Discovery | Complete | 3/3 | proxy (passed) | ██████████ 100% |
 | 13 - Gemini Native Format Migration | Planned | 0/2 | proxy | ░░░░░░░░░░ 0% |
 | 14 - Cross-Adapter Polish | Pending | 0/? | proxy | ░░░░░░░░░░ 0% |
 
@@ -229,16 +230,16 @@ Plans:
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| RULES-01 | Phase 12 | Pending |
-| RULES-02 | Phase 12 | Pending |
-| RULES-03 | Phase 12 | Pending |
-| RULES-04 | Phase 12 | Pending |
-| CDX-07 | Phase 12 | Pending |
-| CDX-08 | Phase 12 | Pending |
-| GMN-10 | Phase 12 | Pending |
-| OC-07 | Phase 12 | Pending |
-| OC-08 | Phase 12 | Pending |
-| OC-09 | Phase 12 | Pending |
+| RULES-01 | Phase 12 | Complete |
+| RULES-02 | Phase 12 | Complete |
+| RULES-03 | Phase 12 | Complete |
+| RULES-04 | Phase 12 | Complete |
+| CDX-07 | Phase 12 | Complete |
+| CDX-08 | Phase 12 | Complete |
+| GMN-10 | Phase 12 | Complete |
+| OC-07 | Phase 12 | Complete |
+| OC-08 | Phase 12 | Complete |
+| OC-09 | Phase 12 | Complete |
 | GMN-07 | Phase 13 | Pending |
 | GMN-08 | Phase 13 | Pending |
 | GMN-09 | Phase 13 | Pending |
