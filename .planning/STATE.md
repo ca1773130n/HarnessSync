@@ -11,13 +11,13 @@
 ## Current Position
 
 **Milestone:** v0.1.1
-**Phase:** 12 - Critical Fixes & Rules Discovery
-**Plan:** 03 of 03 complete
-**Status:** Phase 12 complete, ready for phase 13
+**Phase:** 13 - Gemini Native Format Migration
+**Plan:** 01 of 02 complete
+**Status:** Executing phase 13
 
 **Progress:**
-[███░░░░░░░] 33%
-v0.0.1: Complete (8 phases) | v0.0.2: Complete (3 phases) | v0.1.1: 1/3 phases
+[██████░░░░] 50%
+v0.0.1: Complete (8 phases) | v0.0.2: Complete (3 phases) | v0.1.1: 1/3 phases + 13-01 done
 
 ---
 
@@ -26,7 +26,7 @@ v0.0.1: Complete (8 phases) | v0.0.2: Complete (3 phases) | v0.1.1: 1/3 phases
 ### Velocity
 - **Milestones completed:** 2 (v0.0.1, v0.0.2)
 - **Phases completed:** 12/14
-- **Plans completed:** 34 (24 v0.0.1 + 7 v0.0.2 + 3 v0.1.1)
+- **Plans completed:** 35 (24 v0.0.1 + 7 v0.0.2 + 4 v0.1.1)
 - **Average plan duration:** ~2.5 min
 - **v0.0.1 complete:** 2026-02-15
 - **v0.0.2 complete:** 2026-02-15
@@ -73,6 +73,10 @@ None yet (all phases use proxy verification).
 - **12-02:** Regex-based frontmatter parsing instead of PyYAML dependency; support both paths: and globs: keys
 - **12-03:** Dead code cc2all_sync.py not fixed for deprecated patterns (already documented as dead code)
 - **12-03:** Orphan codex.toml at project root left in place (may contain user customizations)
+- **13-01:** Skills written as verbatim copies to .gemini/skills/<name>/SKILL.md (identical schema)
+- **13-01:** Agent frontmatter rebuilt additively (name, description, then optional tools/model/max_turns)
+- **13-01:** TOML command format with triple-quoted multi-line strings for prompts
+- **13-01:** MCP passthrough uses explicit allowlist of 4 fields (trust, includeTools, excludeTools, cwd)
 
 ### v0.1.1 Research Findings
 - **Claude Code:** New `.claude/rules/` directory with YAML frontmatter path-scoping (HIGH priority gap)
@@ -84,6 +88,7 @@ None yet (all phases use proxy verification).
 None.
 
 ### Recent Changes
+- **2026-03-09:** Phase 13 Plan 01 complete -- Gemini native format migration (skills, agents, commands, MCP fields)
 - **2026-03-09:** Phase 12 complete -- all 3 plans executed, 14 integration tests pass, zero deprecated patterns
 - **2026-03-09:** Phase 12 Plan 02 complete -- rules directory discovery added to SourceReader
 - **2026-03-09:** Phase 12 Plan 01 complete -- Codex/Gemini/OpenCode adapter fixes
@@ -96,16 +101,16 @@ None.
 ## Session Continuity
 
 ### What Just Happened
-Completed Phase 12 Plan 03 -- integration tests and codebase sweep. All 14 tests pass. Phase 12 fully complete.
+Completed Phase 13 Plan 01 -- Gemini native format migration. Rewrote sync_skills, sync_agents, sync_commands to write native files, added MCP field passthrough. All verification passes.
 
 ### What's Next
-Execute Phase 13: Gemini Native Format Migration.
+Execute Phase 13 Plan 02 (if exists), or proceed to Phase 14.
 
 ### Context for Next Session
-Phase 12 complete (3 plans). All adapter config formats fixed, rules directory discovery added, 14 integration tests verify everything. Orphan codex.toml at project root from pre-fix adapter (not deleted). cc2all_sync.py is dead code with some legacy patterns (acceptable).
+Phase 13 Plan 01 complete. Gemini adapter now writes native files (.gemini/skills/, .gemini/agents/, .gemini/commands/) instead of inlining into GEMINI.md. MCP passes through trust/includeTools/excludeTools/cwd. The _write_subsection and subsection marker cleanup methods remain in gemini.py but are no longer called by skills/agents/commands sync methods. GEMINI.md now only contains rules. 14 existing Phase 12 tests still pass.
 
 ---
 
 *Last updated: 2026-03-09*
-*Session: Phase 12 Plan 03 execution*
-*Stopped at: Completed 12-03-PLAN.md*
+*Session: Phase 13 Plan 01 execution*
+*Stopped at: Completed 13-01-PLAN.md*
