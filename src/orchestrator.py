@@ -96,6 +96,16 @@ class SyncOrchestrator:
         elif isinstance(rules_str, str):
             source_data['rules'] = []
 
+        # Merge rules from .claude/rules/ directories into the rules list
+        rules_files = source_data.get('rules_files', [])
+        for rf in rules_files:
+            source_data['rules'].append({
+                'path': str(rf['path']),
+                'content': rf['content'],
+                'scope_patterns': rf.get('scope_patterns', []),
+                'scope': rf.get('scope', 'project'),
+            })
+
         # Translate key: SourceReader uses 'mcp_servers', adapters expect 'mcp'
         adapter_data = dict(source_data)
         adapter_data['mcp'] = adapter_data.pop('mcp_servers', {})
