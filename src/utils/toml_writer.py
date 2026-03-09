@@ -183,6 +183,10 @@ def format_mcp_server_toml(name: str, config: dict) -> str:
     if 'args' in config and isinstance(config['args'], list):
         lines.append(f'args = {format_toml_value(config["args"])}')
 
+    # Working directory
+    if 'cwd' in config and isinstance(config['cwd'], str):
+        lines.append(f'cwd = {format_toml_value(config["cwd"])}')
+
     # Boolean flags
     if 'enabled' in config:
         lines.append(f'enabled = {format_toml_value(config["enabled"])}')

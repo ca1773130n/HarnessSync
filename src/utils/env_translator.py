@@ -126,6 +126,45 @@ def preserve_env_vars_for_gemini(config: dict) -> tuple[dict, list[str]]:
     return config.copy(), []
 
 
+def translate_env_vars_for_opencode_headers(headers: dict) -> tuple[dict, list[str]]:
+    """Translate ${VAR} references in MCP headers to OpenCode {env:VAR} syntax.
+
+    OpenCode uses {env:VAR_NAME} for environment variable interpolation in headers,
+    not the ${VAR_NAME} syntax used by Claude Code. This function translates header
+    string values only -- do NOT apply to url, command, or environment fields.
+
+    Args:
+        headers: Dict of header name -> header value
+
+    Returns:
+        Tuple of (translated_headers, warnings)
+        - translated_headers: New dict with ${VAR} replaced by {env:VAR}
+        - warnings: List of warnings for default value stripping
+    """
+    translated = {}
+    warnings = []
+
+    for key, value in headers.items():
+        if isinstance(value, str):
+            def _replacer(match, _key=key):
+                var_name = match.group(1)
+                default_part = match.group(2)  # e.g., ":-fallback" or None
+                if default_part is not None:
+                    # Strip the leading ":-" to get the default value
+                    default_value = default_part[2:]
+                    warnings.append(
+                        f"Header '{_key}': default value '{default_value}' "
+                        f"stripped (OpenCode {{env:VAR}} does not support defaults)"
+                    )
+                return f'{{env:{var_name}}}'
+
+            translated[key] = VAR_PATTERN.sub(_replacer, value)
+        else:
+            translated[key] = value
+
+    return translated, warnings
+
+
 def detect_transport_type(config: dict) -> str:
     """Detect MCP server transport type from config.
 
