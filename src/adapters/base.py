@@ -33,16 +33,6 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from .result import SyncResult
 
-# Patterns that indicate a command depends on Claude Code runtime
-_CC_RUNTIME_PATTERNS = re.compile(
-    r'\$ARGUMENTS'
-    r'|subagent_type\s*='
-    r'|Agent\s+tool'
-    r'|TaskCreate|TaskUpdate|TodoWrite'
-    r'|EnterPlanMode|ExitPlanMode',
-    re.IGNORECASE,
-)
-
 
 class AdapterBase(ABC):
     """Abstract base class for target adapters."""
@@ -156,13 +146,13 @@ class AdapterBase(ABC):
         pass
 
     @staticmethod
-    def is_portable_command(content: str) -> bool:
-        """Check if a command's content is portable (no Claude Code runtime deps).
+    def adapt_command_content(content: str) -> str:
+        """Adapt Claude Code command content for use in other targets.
 
-        Returns True if the command can be meaningfully used outside Claude Code.
-        Returns False if it uses $ARGUMENTS, Agent tool, subagent spawning, etc.
+        Replaces Claude Code-specific syntax with portable equivalents:
+        - $ARGUMENTS -> [user-provided arguments]
         """
-        return not bool(_CC_RUNTIME_PATTERNS.search(content))
+        return content.replace('$ARGUMENTS', '[user-provided arguments]')
 
     def sync_all(self, source_data: dict) -> dict[str, SyncResult]:
         """Sync all configuration types.

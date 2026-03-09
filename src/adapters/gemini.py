@@ -265,9 +265,8 @@ class GeminiAdapter(AdapterBase):
 
                 content = cmd_path.read_text(encoding='utf-8')
 
-                # Skip commands that depend on Claude Code runtime
-                if not self.is_portable_command(content):
-                    continue
+                # Adapt Claude Code-specific syntax for portability
+                content = self.adapt_command_content(content)
 
                 # Parse frontmatter
                 frontmatter, _ = self._parse_frontmatter(content)
