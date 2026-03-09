@@ -28,9 +28,20 @@ Example usage:
         # ... implement other sync methods ...
 """
 
+import re
 from abc import ABC, abstractmethod
 from pathlib import Path
 from .result import SyncResult
+
+# Patterns that indicate a command depends on Claude Code runtime
+_CC_RUNTIME_PATTERNS = re.compile(
+    r'\$ARGUMENTS'
+    r'|subagent_type\s*='
+    r'|Agent\s+tool'
+    r'|TaskCreate|TaskUpdate|TodoWrite'
+    r'|EnterPlanMode|ExitPlanMode',
+    re.IGNORECASE,
+)
 
 
 class AdapterBase(ABC):
@@ -143,6 +154,15 @@ class AdapterBase(ABC):
             SyncResult tracking synced/skipped/failed settings
         """
         pass
+
+    @staticmethod
+    def is_portable_command(content: str) -> bool:
+        """Check if a command's content is portable (no Claude Code runtime deps).
+
+        Returns True if the command can be meaningfully used outside Claude Code.
+        Returns False if it uses $ARGUMENTS, Agent tool, subagent spawning, etc.
+        """
+        return not bool(_CC_RUNTIME_PATTERNS.search(content))
 
     def sync_all(self, source_data: dict) -> dict[str, SyncResult]:
         """Sync all configuration types.

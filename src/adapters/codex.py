@@ -237,6 +237,12 @@ class CodexAdapter(AdapterBase):
 
                 content = cmd_path.read_text(encoding='utf-8')
 
+                # Skip commands that depend on Claude Code runtime
+                if not self.is_portable_command(content):
+                    result.skipped += 1
+                    result.skipped_files.append(f"{cmd_name}: requires Claude Code runtime")
+                    continue
+
                 # Parse frontmatter
                 frontmatter, body = self._parse_frontmatter(content)
                 name = frontmatter.get('name', cmd_name)
