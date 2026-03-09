@@ -12,8 +12,8 @@
 
 **Milestone:** v0.1.1
 **Phase:** 12 - Critical Fixes & Rules Discovery
-**Plan:** Not started
-**Status:** Roadmap created, awaiting phase planning
+**Plan:** 02 of 03 complete
+**Status:** Executing phase 12 plans
 
 **Progress:**
 [░░░░░░░░░░] 0%
@@ -26,7 +26,7 @@ v0.0.1: Complete (8 phases) | v0.0.2: Complete (3 phases) | v0.1.1: 0/3 phases
 ### Velocity
 - **Milestones completed:** 2 (v0.0.1, v0.0.2)
 - **Phases completed:** 11/14
-- **Plans completed:** 31 (24 v0.0.1 + 7 v0.0.2)
+- **Plans completed:** 33 (24 v0.0.1 + 7 v0.0.2 + 2 v0.1.1)
 - **Average plan duration:** ~2.5 min
 - **v0.0.1 complete:** 2026-02-15
 - **v0.0.2 complete:** 2026-02-15
@@ -67,6 +67,8 @@ None yet (all phases use proxy verification).
 
 ### Key Decisions
 42 decisions documented across v0.0.1 (31) and v0.0.2 (11). See MILESTONES.md archives.
+- **12-02:** Added get_rules_files() as new method (not modifying get_rules() return type) for backward compatibility
+- **12-02:** Regex-based frontmatter parsing instead of PyYAML dependency; support both paths: and globs: keys
 
 ### v0.1.1 Research Findings
 - **Claude Code:** New `.claude/rules/` directory with YAML frontmatter path-scoping (HIGH priority gap)
@@ -78,6 +80,8 @@ None yet (all phases use proxy verification).
 None.
 
 ### Recent Changes
+- **2026-03-09:** Phase 12 Plan 02 complete -- rules directory discovery added to SourceReader
+- **2026-03-09:** Phase 12 Plan 01 complete -- Codex/Gemini/OpenCode adapter fixes
 - **2026-03-09:** v0.1.1 requirements defined from CLI research
 - **2026-03-09:** v0.1.1 roadmap created (3 phases, 19 requirements)
 - **2026-02-15:** v0.0.2 milestone complete
@@ -87,16 +91,16 @@ None.
 ## Session Continuity
 
 ### What Just Happened
-Created v0.1.1 roadmap with 3 phases (12-14). Phase 12 handles critical fixes (broken Codex/Gemini/OpenCode settings formats) and new rules directory discovery. Phase 13 migrates Gemini to native file formats. Phase 14 polishes remaining cross-adapter issues.
+Completed Phase 12 Plan 02 -- added rules directory discovery to SourceReader with YAML frontmatter parsing and orchestrator integration.
 
 ### What's Next
-Plan and execute Phase 12 with `/grd:plan-phase 12`.
+Execute Phase 12 Plan 03 (remaining phase 12 work).
 
 ### Context for Next Session
-v0.1.1 milestone roadmap is ready. 19 requirements mapped across 3 phases. Research completed for all 4 target CLIs. Phase 12 is the critical path -- it fixes actively broken functionality and adds upstream rules discovery that Phase 13/14 can leverage.
+Phase 12 Plans 01-02 complete. SourceReader now discovers .claude/rules/ directories recursively with frontmatter path-scoping. Orchestrator merges rules files into adapter data flow. All adapter fixes (Codex, Gemini, OpenCode) applied in Plan 01.
 
 ---
 
 *Last updated: 2026-03-09*
-*Session: v0.1.1 roadmap creation*
-*Stopped at: Roadmap created, awaiting phase 12 planning*
+*Session: Phase 12 Plan 02 execution*
+*Stopped at: Completed 12-02-PLAN.md*
