@@ -12,12 +12,12 @@
 
 **Milestone:** v0.1.1
 **Phase:** 12 - Critical Fixes & Rules Discovery
-**Plan:** 02 of 03 complete
-**Status:** Executing phase 12 plans
+**Plan:** 03 of 03 complete
+**Status:** Phase 12 complete, ready for phase 13
 
 **Progress:**
-[░░░░░░░░░░] 0%
-v0.0.1: Complete (8 phases) | v0.0.2: Complete (3 phases) | v0.1.1: 0/3 phases
+[███░░░░░░░] 33%
+v0.0.1: Complete (8 phases) | v0.0.2: Complete (3 phases) | v0.1.1: 1/3 phases
 
 ---
 
@@ -25,14 +25,14 @@ v0.0.1: Complete (8 phases) | v0.0.2: Complete (3 phases) | v0.1.1: 0/3 phases
 
 ### Velocity
 - **Milestones completed:** 2 (v0.0.1, v0.0.2)
-- **Phases completed:** 11/14
-- **Plans completed:** 33 (24 v0.0.1 + 7 v0.0.2 + 2 v0.1.1)
+- **Phases completed:** 12/14
+- **Plans completed:** 34 (24 v0.0.1 + 7 v0.0.2 + 3 v0.1.1)
 - **Average plan duration:** ~2.5 min
 - **v0.0.1 complete:** 2026-02-15
 - **v0.0.2 complete:** 2026-02-15
 
 ### Quality
-- **Verification passes:** 193+
+- **Verification passes:** 207+
 - **Verification failures:** 0
 - **Pass rate:** 100%
 
@@ -71,6 +71,8 @@ None yet (all phases use proxy verification).
 - **12-01:** Old permissions (plural) key deleted when writing new permission format to prevent ambiguity
 - **12-02:** Added get_rules_files() as new method (not modifying get_rules() return type) for backward compatibility
 - **12-02:** Regex-based frontmatter parsing instead of PyYAML dependency; support both paths: and globs: keys
+- **12-03:** Dead code cc2all_sync.py not fixed for deprecated patterns (already documented as dead code)
+- **12-03:** Orphan codex.toml at project root left in place (may contain user customizations)
 
 ### v0.1.1 Research Findings
 - **Claude Code:** New `.claude/rules/` directory with YAML frontmatter path-scoping (HIGH priority gap)
@@ -82,6 +84,7 @@ None yet (all phases use proxy verification).
 None.
 
 ### Recent Changes
+- **2026-03-09:** Phase 12 complete -- all 3 plans executed, 14 integration tests pass, zero deprecated patterns
 - **2026-03-09:** Phase 12 Plan 02 complete -- rules directory discovery added to SourceReader
 - **2026-03-09:** Phase 12 Plan 01 complete -- Codex/Gemini/OpenCode adapter fixes
 - **2026-03-09:** v0.1.1 requirements defined from CLI research
@@ -93,16 +96,16 @@ None.
 ## Session Continuity
 
 ### What Just Happened
-Completed Phase 12 Plan 02 -- added rules directory discovery to SourceReader with YAML frontmatter parsing and orchestrator integration.
+Completed Phase 12 Plan 03 -- integration tests and codebase sweep. All 14 tests pass. Phase 12 fully complete.
 
 ### What's Next
-Execute Phase 12 Plan 03 (remaining phase 12 work).
+Execute Phase 13: Gemini Native Format Migration.
 
 ### Context for Next Session
-Phase 12 Plans 01-02 complete. SourceReader now discovers .claude/rules/ directories recursively with frontmatter path-scoping. Orchestrator merges rules files into adapter data flow. All adapter fixes (Codex, Gemini, OpenCode) applied in Plan 01.
+Phase 12 complete (3 plans). All adapter config formats fixed, rules directory discovery added, 14 integration tests verify everything. Orphan codex.toml at project root from pre-fix adapter (not deleted). cc2all_sync.py is dead code with some legacy patterns (acceptable).
 
 ---
 
 *Last updated: 2026-03-09*
-*Session: Phase 12 Plan 02 execution*
-*Stopped at: Completed 12-02-PLAN.md*
+*Session: Phase 12 Plan 03 execution*
+*Stopped at: Completed 12-03-PLAN.md*
