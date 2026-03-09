@@ -36,7 +36,7 @@ HARNESSSYNC_MARKER = "<!-- Managed by HarnessSync -->"
 HARNESSSYNC_MARKER_END = "<!-- End HarnessSync managed content -->"
 AGENTS_MD = "AGENTS.md"
 SKILLS_DIR = ".agents/skills"
-CONFIG_TOML = "codex.toml"
+CONFIG_TOML = "config.toml"
 
 
 @AdapterRegistry.register("codex")
@@ -298,8 +298,8 @@ class CodexAdapter(AdapterBase):
         """Translate MCP server configs with scope routing and env var translation.
 
         Routes servers by scope:
-        - user/local/plugin -> user-scope config (~/.codex/codex.toml)
-        - project -> project-scope config (.codex/codex.toml)
+        - user/local/plugin -> user-scope config (~/.codex/config.toml)
+        - project -> project-scope config (.codex/config.toml)
 
         Translates ${VAR} to resolved values for Codex (no native interpolation).
         Skips unsupported transports (SSE) with warning.
@@ -450,7 +450,7 @@ class CodexAdapter(AdapterBase):
             # Determine approval_policy
             approval_mode = settings.get('approval_mode', 'ask')
             if approval_mode == 'auto':
-                approval_policy = 'on-failure'
+                approval_policy = 'on-request'
             else:
                 approval_policy = 'on-request'  # Conservative default
 

@@ -180,10 +180,10 @@ def test_4_codex_artifacts():
         # Verify Codex artifacts
         assert (project_dir / 'AGENTS.md').exists(), "Codex AGENTS.md missing"
         assert (project_dir / '.agents' / 'skills' / 'test-skill').exists(), "Codex skill symlink missing"
-        assert (project_dir / '.codex' / 'codex.toml').exists(), "Codex codex.toml missing"
+        assert (project_dir / '.codex' / 'config.toml').exists(), "Codex config.toml missing"
 
         # Verify TOML content
-        config_path = project_dir / '.codex' / 'codex.toml'
+        config_path = project_dir / '.codex' / 'config.toml'
         config = read_toml_safe(config_path)
         assert 'mcp_servers' in config, "Codex MCP servers missing from TOML"
 
@@ -308,7 +308,7 @@ def test_7_conservative_permissions():
         codex_adapter = AdapterRegistry.get_adapter('codex', codex_dir)
         codex_adapter.sync_all(source_data)
 
-        codex_config = read_toml_safe(codex_dir / '.codex' / 'codex.toml')
+        codex_config = read_toml_safe(codex_dir / '.codex' / 'config.toml')
         assert codex_config.get('sandbox_mode') == 'read-only', "Codex not conservative (expected read-only)"
 
         # Gemini: deny list -> blockedTools

@@ -114,8 +114,8 @@ def run_tests():
             adapter = CodexAdapter(proj_dir)
             result = adapter.sync_mcp_scoped(SCOPED_MCPS)
 
-            user_config_path = home_dir / ".codex" / "codex.toml"
-            proj_config_path = proj_dir / ".codex" / "codex.toml"
+            user_config_path = home_dir / ".codex" / "config.toml"
+            proj_config_path = proj_dir / ".codex" / "config.toml"
 
             # --- SYNC-02: Codex scope routing ---
             print("SYNC-02: Codex scope routing")
