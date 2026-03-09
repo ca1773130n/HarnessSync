@@ -67,6 +67,8 @@ None yet (all phases use proxy verification).
 
 ### Key Decisions
 42 decisions documented across v0.0.1 (31) and v0.0.2 (11). See MILESTONES.md archives.
+- **12-01:** OpenCode uses per-tool permission (singular) with allow/ask/deny and bash wildcard patterns
+- **12-01:** Old permissions (plural) key deleted when writing new permission format to prevent ambiguity
 - **12-02:** Added get_rules_files() as new method (not modifying get_rules() return type) for backward compatibility
 - **12-02:** Regex-based frontmatter parsing instead of PyYAML dependency; support both paths: and globs: keys
 
