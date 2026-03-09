@@ -27,7 +27,7 @@ from src.utils.paths import (
     read_json_safe,
     write_json_atomic,
 )
-from src.utils.env_translator import check_transport_support
+from src.utils.env_translator import check_transport_support, translate_env_vars_for_opencode_headers
 
 
 # OpenCode CLI constants
@@ -300,9 +300,12 @@ class OpenCodeAdapter(AdapterBase):
                     server_config['type'] = 'remote'
                     server_config['url'] = config['url']
 
-                    # Include headers if present
+                    # Include headers if present (translate ${VAR} to {env:VAR})
                     if 'headers' in config:
-                        server_config['headers'] = config['headers']
+                        translated_headers, header_warnings = translate_env_vars_for_opencode_headers(config['headers'])
+                        server_config['headers'] = translated_headers
+                        if header_warnings:
+                            result.skipped_files.extend(header_warnings)
 
                     server_config['enabled'] = True
 
