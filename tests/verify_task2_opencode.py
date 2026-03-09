@@ -311,23 +311,23 @@ def test_7_conservative_permissions():
         codex_config = read_toml_safe(codex_dir / '.codex' / 'config.toml')
         assert codex_config.get('sandbox_mode') == 'read-only', "Codex not conservative (expected read-only)"
 
-        # Gemini: deny list -> blockedTools
+        # Gemini: deny list -> tools.exclude
         gemini_dir = base_dir / 'gemini'
         gemini_dir.mkdir()
         gemini_adapter = AdapterRegistry.get_adapter('gemini', gemini_dir)
         gemini_adapter.sync_all(source_data)
 
         gemini_settings = json.loads((gemini_dir / '.gemini' / 'settings.json').read_text())
-        assert 'blockedTools' in gemini_settings.get('tools', {}), "Gemini not conservative (expected blockedTools)"
+        assert 'exclude' in gemini_settings.get('tools', {}), "Gemini not conservative (expected tools.exclude)"
 
-        # OpenCode: deny list -> restricted mode
+        # OpenCode: deny list -> per-tool permission with "deny" values
         opencode_dir = base_dir / 'opencode'
         opencode_dir.mkdir()
         opencode_adapter = AdapterRegistry.get_adapter('opencode', opencode_dir)
         opencode_adapter.sync_all(source_data)
 
         opencode_config = json.loads((opencode_dir / 'opencode.json').read_text())
-        assert opencode_config['permissions']['mode'] == 'restricted', "OpenCode not conservative (expected restricted)"
+        assert 'permission' in opencode_config, "OpenCode not using permission (singular)"
 
     print("✓ Test 7: Conservative permission mapping across all 3 adapters")
 

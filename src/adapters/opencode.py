@@ -8,7 +8,7 @@ Implements adapter for OpenCode CLI, syncing Claude Code configuration to OpenCo
 - Agents → Symlinks in .opencode/agents/
 - Commands → Symlinks in .opencode/commands/
 - MCP servers → opencode.json with type-discriminated format (local/remote)
-- Settings → opencode.json permissions with conservative mapping
+- Settings → opencode.json permission (singular) with per-tool allow/ask/deny
 
 The adapter uses native symlink support (not inline content) and type-discriminated
 MCP server configs (type: "local" for stdio, type: "remote" for URL).
@@ -369,15 +369,29 @@ class OpenCodeAdapter(AdapterBase):
 
         return result
 
-    def sync_settings(self, settings: dict) -> SyncResult:
-        """Map Claude Code settings to opencode.json permissions.
+    # Claude Code tool name -> OpenCode permission identifier mapping
+    TOOL_MAPPING = {
+        'Bash': 'bash',
+        'Read': 'read',
+        'Write': 'edit',
+        'Edit': 'edit',
+        'Glob': 'glob',
+        'Grep': 'grep',
+        'WebFetch': 'webfetch',
+        'WebSearch': 'websearch',
+        'TodoWrite': 'todowrite',
+        'TodoRead': 'todoread',
+    }
 
-        Maps Claude Code permission settings to OpenCode configuration.
-        Uses conservative defaults:
-        - Deny list → restricted mode with denied tools
-        - Allow list (no deny) → default mode with allowed tools
-        - Both empty → default mode
-        - NEVER sets yolo or unrestricted mode
+    def sync_settings(self, settings: dict) -> SyncResult:
+        """Map Claude Code settings to opencode.json permission (singular).
+
+        Maps Claude Code permission settings to OpenCode per-tool permission format.
+        Uses allow/ask/deny values per tool identifier:
+        - Deny list tools -> "deny"
+        - Allow list tools -> "allow"
+        - Bash patterns (e.g. Bash(git commit:*)) -> permission.bash dict with wildcards
+        - NEVER sets unrestricted mode
 
         Args:
             settings: Settings dict from Claude Code configuration
@@ -394,28 +408,47 @@ class OpenCodeAdapter(AdapterBase):
             # Read existing opencode.json to preserve mcp section
             existing_config = read_json_safe(self.opencode_json_path)
 
-            # Extract permissions
+            # Extract permissions from Claude Code settings
             permissions = settings.get('permissions', {})
             allow_list = permissions.get('allow', [])
             deny_list = permissions.get('deny', [])
 
-            # Conservative mapping
-            permissions_config = {}
+            # Build per-tool permission config
+            permission_config = {}
 
-            if deny_list:
-                # Deny list takes precedence → restricted mode
-                permissions_config['mode'] = 'restricted'
-                permissions_config['denied'] = deny_list
-            elif allow_list:
-                # Allow list only (no deny) → default mode with allowed
-                permissions_config['mode'] = 'default'
-                permissions_config['allowed'] = allow_list
-            else:
-                # Both empty → default mode
-                permissions_config['mode'] = 'default'
+            # Process deny list: map each tool to "deny"
+            for tool in deny_list:
+                oc_tool = self.TOOL_MAPPING.get(tool)
+                if oc_tool:
+                    permission_config[oc_tool] = 'deny'
 
-            # Add permissions config to settings
-            existing_config['permissions'] = permissions_config
+            # Process allow list: handle bash patterns and simple tool mappings
+            for tool in allow_list:
+                if tool.startswith('Bash(') and tool.endswith(')'):
+                    # Extract bash pattern: Bash(git commit:*) -> "git commit *"
+                    pattern = tool[5:-1].replace(':', ' ')
+                    # Initialize bash as dict if needed
+                    if 'bash' not in permission_config or isinstance(permission_config.get('bash'), str):
+                        old_val = permission_config.get('bash')
+                        permission_config['bash'] = {}
+                        if isinstance(old_val, str):
+                            permission_config['bash']['*'] = old_val
+                    permission_config['bash'][pattern] = 'allow'
+                else:
+                    oc_tool = self.TOOL_MAPPING.get(tool)
+                    if oc_tool:
+                        permission_config[oc_tool] = 'allow'
+
+            # If bash has specific patterns but no default, add "*": "ask"
+            if isinstance(permission_config.get('bash'), dict) and '*' not in permission_config['bash']:
+                permission_config['bash']['*'] = 'ask'
+
+            # Write permission (singular) key; remove old permissions (plural) if present
+            if 'permissions' in existing_config:
+                del existing_config['permissions']
+
+            if permission_config:
+                existing_config['permission'] = permission_config
 
             # Check for auto-approval mode and warn (NEVER enable yolo)
             approval_mode = settings.get('approval_mode', 'ask')

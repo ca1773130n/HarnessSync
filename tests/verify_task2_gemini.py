@@ -228,7 +228,7 @@ def test_sync_mcp_env_var_preservation():
 
 
 def test_sync_settings_deny_list():
-    """Test sync_settings with deny list creates blockedTools."""
+    """Test sync_settings with deny list creates tools.exclude."""
     print("TEST 6: sync_settings with deny list...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -249,14 +249,14 @@ def test_sync_settings_deny_list():
         assert result.synced == 1, f"Expected synced=1, got {result.synced}"
         assert result.adapted == 1, f"Expected adapted=1, got {result.adapted}"
 
-        # Verify blockedTools in settings.json
+        # Verify exclude in settings.json
         settings_path = project_dir / ".gemini" / "settings.json"
         with open(settings_path, 'r') as f:
             settings_json = json.load(f)
 
         assert "tools" in settings_json, "tools config not found"
-        assert "blockedTools" in settings_json["tools"], "blockedTools not found"
-        assert settings_json["tools"]["blockedTools"] == ["Bash", "Edit"], "blockedTools mismatch"
+        assert "exclude" in settings_json["tools"], "exclude not found"
+        assert settings_json["tools"]["exclude"] == ["Bash", "Edit"], "exclude mismatch"
 
         # Verify warnings for blocked tools
         assert any("Bash: blocked" in f for f in result.skipped_files), "Bash warning not found"
@@ -266,7 +266,7 @@ def test_sync_settings_deny_list():
 
 
 def test_sync_settings_allow_list():
-    """Test sync_settings with allow list creates allowedTools."""
+    """Test sync_settings with allow list creates tools.allowed."""
     print("TEST 7: sync_settings with allow list...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -283,14 +283,14 @@ def test_sync_settings_allow_list():
         # Sync settings
         result = adapter.sync_settings(settings)
 
-        # Verify allowedTools in settings.json
+        # Verify allowed in settings.json
         settings_path = project_dir / ".gemini" / "settings.json"
         with open(settings_path, 'r') as f:
             settings_json = json.load(f)
 
         assert "tools" in settings_json, "tools config not found"
-        assert "allowedTools" in settings_json["tools"], "allowedTools not found"
-        assert settings_json["tools"]["allowedTools"] == ["Read", "Write"], "allowedTools mismatch"
+        assert "allowed" in settings_json["tools"], "allowed not found"
+        assert settings_json["tools"]["allowed"] == ["Read", "Write"], "allowed mismatch"
 
     print("  ✓ sync_settings with allow list works correctly")
 
@@ -364,7 +364,7 @@ def test_sync_settings_mcp_coexistence():
         assert "tools" in settings_json, "tools not added"
 
         assert "test-server" in settings_json["mcpServers"], "test-server lost"
-        assert "blockedTools" in settings_json["tools"], "blockedTools not found"
+        assert "exclude" in settings_json["tools"], "exclude not found"
 
     print("  ✓ sync_settings + sync_mcp coexistence works correctly")
 

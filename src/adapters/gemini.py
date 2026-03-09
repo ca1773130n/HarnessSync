@@ -8,7 +8,7 @@ Implements adapter for Gemini CLI, syncing Claude Code configuration to Gemini f
 - Agents → Inline content in GEMINI.md
 - Commands → Brief descriptions in GEMINI.md
 - MCP servers → settings.json mcpServers format
-- Settings → settings.json tools.blockedTools/allowedTools (never auto-enable yolo)
+- Settings → settings.json tools.exclude/tools.allowed (never auto-enable yolo)
 
 The adapter uses subsection markers within the main HarnessSync managed block
 to allow incremental syncing without losing other sections.
@@ -454,7 +454,7 @@ class GeminiAdapter(AdapterBase):
         """Map Claude Code settings to Gemini configuration.
 
         Maps Claude Code permission settings to Gemini tools configuration.
-        Uses conservative defaults: deny list -> blockedTools, allow list -> allowedTools.
+        Uses conservative defaults: deny list -> tools.exclude, allow list -> tools.allowed.
         NEVER auto-enables yolo mode (security constraint).
 
         Args:
@@ -482,14 +482,14 @@ class GeminiAdapter(AdapterBase):
 
             if deny_list:
                 # Deny list takes precedence
-                tools_config['blockedTools'] = deny_list
+                tools_config['exclude'] = deny_list
                 # Add warnings for blocked tools
                 for tool in deny_list:
                     result.skipped_files.append(f"{tool}: blocked (Claude Code deny list)")
 
             elif allow_list:
                 # Allow list only if no deny list
-                tools_config['allowedTools'] = allow_list
+                tools_config['allowed'] = allow_list
 
             # Add tools config to settings if any rules defined
             if tools_config:
