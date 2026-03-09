@@ -131,8 +131,20 @@ class OpenCodeAdapter(AdapterBase):
         # Ensure skills directory exists
         ensure_dir(target_dir)
 
+        # OpenCode natively discovers skills from .claude/skills/, so skip those
+        claude_skills_dir = self.project_dir / ".claude" / "skills"
+
         # Create symlinks for each skill
         for name, source_path in skills.items():
+            # Skip skills that OpenCode natively discovers from .claude/skills/
+            try:
+                if source_path.is_relative_to(claude_skills_dir):
+                    result.skipped += 1
+                    result.skipped_files.append(f"{name}: natively discovered by OpenCode from .claude/skills/")
+                    continue
+            except (ValueError, TypeError):
+                pass  # Not relative to claude_skills_dir, proceed with symlink
+
             target_path = target_dir / name
 
             # Create symlink with fallback
