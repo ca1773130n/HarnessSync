@@ -12,12 +12,12 @@
 
 **Milestone:** v0.1.1
 **Phase:** 14 - Cross-Adapter Polish
-**Plan:** 01 of 02 complete
-**Status:** In progress
+**Plan:** 02 of 02 complete
+**Status:** Phase complete
 
 **Progress:**
-[█████████░] 86%
-v0.0.1: Complete (8 phases) | v0.0.2: Complete (3 phases) | v0.1.1: 2/3 phases complete (12, 13) + 14 in progress
+[██████████] 100%
+v0.0.1: Complete (8 phases) | v0.0.2: Complete (3 phases) | v0.1.1: 3/3 phases complete (12, 13, 14)
 
 ---
 
@@ -26,7 +26,7 @@ v0.0.1: Complete (8 phases) | v0.0.2: Complete (3 phases) | v0.1.1: 2/3 phases c
 ### Velocity
 - **Milestones completed:** 2 (v0.0.1, v0.0.2)
 - **Phases completed:** 13/14
-- **Plans completed:** 36 (24 v0.0.1 + 7 v0.0.2 + 5 v0.1.1)
+- **Plans completed:** 37 (24 v0.0.1 + 7 v0.0.2 + 6 v0.1.1)
 - **Average plan duration:** ~2.5 min
 - **v0.0.1 complete:** 2026-02-15
 - **v0.0.2 complete:** 2026-02-15
@@ -80,6 +80,7 @@ None yet (all phases use proxy verification).
 - **13-02:** Cleanup gated on zero failures across all three native syncs (safety constraint)
 - **13-02:** sync_all override calls cleanup automatically; _write_subsection retained as legacy
 - **14-01:** cwd field added after args array in TOML output order; reused VAR_PATTERN for header translation; translation only in sync_mcp() remote branch
+- **14-02:** Raw text preservation for non-managed TOML sections; is_relative_to() for skill path ancestry check; claude_skills_dir computed once outside loop
 
 ### v0.1.1 Research Findings
 - **Claude Code:** New `.claude/rules/` directory with YAML frontmatter path-scoping (HIGH priority gap)
@@ -91,6 +92,8 @@ None yet (all phases use proxy verification).
 None.
 
 ### Recent Changes
+- **2026-03-09:** Phase 14 complete -- all 2 plans executed (CDX-09, OC-10, OC-11, PRES-01)
+- **2026-03-09:** Phase 14 Plan 02 complete -- OpenCode skill dedup (OC-11) + Codex/Gemini config preservation (PRES-01)
 - **2026-03-09:** Phase 14 Plan 01 complete -- cwd TOML passthrough (CDX-09) + OpenCode header env var translation (OC-10)
 - **2026-03-09:** Phase 13 complete -- native format migration + stale subsection cleanup + 66-check verification
 - **2026-03-09:** Phase 13 Plan 02 complete -- stale GEMINI.md cleanup + end-to-end verification (66 checks)
@@ -107,16 +110,16 @@ None.
 ## Session Continuity
 
 ### What Just Happened
-Completed Phase 14 Plan 01 -- Added cwd field passthrough to Codex TOML formatter and OpenCode header env var translation (${VAR} to {env:VAR}).
+Completed Phase 14 Plan 02 -- OpenCode skill dedup (OC-11) and Codex/Gemini config preservation (PRES-01). Phase 14 is now complete.
 
 ### What's Next
-Continue with Phase 14 Plan 02 (OC-11 skill dedup and PRES-01 config preservation).
+v0.1.1 milestone is complete. All 3 phases (12, 13, 14) executed with 6 plans total. Ready for milestone wrap-up or next milestone planning.
 
 ### Context for Next Session
-Phase 14 Plan 01 complete. toml_writer.py format_mcp_server_toml() now emits cwd field. env_translator.py has translate_env_vars_for_opencode_headers() that converts ${VAR} to {env:VAR} and strips defaults with warnings. OpenCode adapter sync_mcp() applies header translation for remote servers. sync_mcp_scoped() inherits via delegation. No regressions in existing TOML formatting.
+Phase 14 complete. OpenCode sync_skills() now skips skills under .claude/skills/ (natively discovered). Codex _extract_unmanaged_toml() preserves [agents], [profiles], [features] sections through config.toml writes. Both _write_mcp_to_path() and sync_settings() pass preserved_sections. Gemini preservation confirmed by test (JSON dict-merge already works). tests/verify_phase14_preservation.py covers all three adapters.
 
 ---
 
 *Last updated: 2026-03-09*
-*Session: Phase 14 Plan 01 execution*
-*Stopped at: Completed 14-01-PLAN.md*
+*Session: Phase 14 Plan 02 execution*
+*Stopped at: Completed 14-02-PLAN.md*
