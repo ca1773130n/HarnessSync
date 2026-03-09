@@ -15,6 +15,7 @@ Supports user scope (~/.claude/) and project scope (.claude/, CLAUDE.md).
 """
 
 import json
+import re
 from pathlib import Path
 from src.utils.paths import read_json_safe
 
@@ -110,6 +111,131 @@ class SourceReader:
                     pass
 
         return paths
+
+    def _parse_rules_frontmatter(self, content: str) -> tuple[dict, str]:
+        """Parse YAML frontmatter from rules file content.
+
+        Extracts `paths:` and `globs:` keys from frontmatter delimited by
+        `---` at the start of the file. Supports three value formats:
+        - Single string: ``paths: src/api/**/*.ts``
+        - YAML list: ``paths:\\n  - src/components/**/*.tsx``
+        - Inline list: ``paths: [a, b]``
+
+        Args:
+            content: Full file content (may or may not have frontmatter)
+
+        Returns:
+            Tuple of (frontmatter_dict, body_without_frontmatter).
+            frontmatter_dict has 'scope_patterns' key (list of strings).
+            If no frontmatter, returns ({}, full_content).
+        """
+        # Check for frontmatter delimiters
+        if not content.startswith('---'):
+            return {}, content
+
+        # Find closing ---
+        end_match = re.search(r'\n---\s*\n', content[3:])
+        if not end_match:
+            # No closing delimiter — treat as no frontmatter
+            return {}, content
+
+        fm_text = content[3:end_match.start() + 3]
+        body = content[end_match.end() + 3:]
+
+        # Extract paths or globs patterns
+        scope_patterns = []
+        # Try paths: first, then globs: as fallback
+        for key in ('paths', 'globs'):
+            # Match the key line (use [^\n]* to stay on same line)
+            key_match = re.search(rf'^{key}:[ \t]*([^\n]*)$', fm_text, re.MULTILINE)
+            if not key_match:
+                continue
+
+            value = key_match.group(1).strip()
+            if value:
+                if value.startswith('[') and value.endswith(']'):
+                    # Inline list: paths: [a, b]
+                    items = [item.strip().strip('"').strip("'")
+                             for item in value[1:-1].split(',')]
+                    scope_patterns = [i for i in items if i]
+                else:
+                    # Single string: paths: src/**/*.ts
+                    scope_patterns = [value]
+            else:
+                # Multi-line YAML list: paths:\n  - item1\n  - item2
+                list_pattern = re.compile(r'^\s+-\s+(.+)$', re.MULTILINE)
+                # Grab lines after the key until next key or end
+                key_pos = key_match.end()
+                remaining = fm_text[key_pos:]
+                # Find next top-level key (non-indented line with colon)
+                next_key = re.search(r'^\S+:', remaining, re.MULTILINE)
+                if next_key:
+                    remaining = remaining[:next_key.start()]
+                items = list_pattern.findall(remaining)
+                scope_patterns = [item.strip().strip('"').strip("'") for item in items]
+
+            # paths: takes precedence over globs: — stop after first match
+            break
+
+        result = {}
+        if scope_patterns:
+            result['scope_patterns'] = scope_patterns
+
+        return result, body
+
+    def get_rules_files(self) -> list[dict]:
+        """Return list of rules from .claude/rules/ directories.
+
+        Discovers .md files recursively from both user-level (cc_home/rules/)
+        and project-level (.claude/rules/) directories. Parses YAML frontmatter
+        for optional path-scoping via ``paths:`` or ``globs:`` keys.
+
+        Returns:
+            List of dicts with keys:
+            - path: Path to the .md file
+            - content: Markdown body (after frontmatter stripped)
+            - scope_patterns: List of path patterns from frontmatter (empty if none)
+            - scope: 'user' or 'project'
+        """
+        rules = []
+
+        if self.scope in ("user", "all"):
+            user_rules_dir = self.cc_home / "rules"
+            if user_rules_dir.is_dir():
+                for md_file in sorted(user_rules_dir.rglob("*.md")):
+                    if not md_file.is_file():
+                        continue
+                    try:
+                        content = md_file.read_text(encoding='utf-8', errors='replace')
+                        frontmatter, body = self._parse_rules_frontmatter(content)
+                        rules.append({
+                            'path': md_file,
+                            'content': body,
+                            'scope_patterns': frontmatter.get('scope_patterns', []),
+                            'scope': 'user',
+                        })
+                    except (OSError, UnicodeDecodeError):
+                        pass
+
+        if self.scope in ("project", "all") and self.project_dir:
+            proj_rules_dir = self.project_dir / ".claude" / "rules"
+            if proj_rules_dir.is_dir():
+                for md_file in sorted(proj_rules_dir.rglob("*.md")):
+                    if not md_file.is_file():
+                        continue
+                    try:
+                        content = md_file.read_text(encoding='utf-8', errors='replace')
+                        frontmatter, body = self._parse_rules_frontmatter(content)
+                        rules.append({
+                            'path': md_file,
+                            'content': body,
+                            'scope_patterns': frontmatter.get('scope_patterns', []),
+                            'scope': 'project',
+                        })
+                    except (OSError, UnicodeDecodeError):
+                        pass
+
+        return rules
 
     def get_rules(self) -> str:
         """
@@ -618,6 +744,7 @@ class SourceReader:
         flat = {name: entry["config"] for name, entry in scoped.items()}
         return {
             "rules": self.get_rules(),
+            "rules_files": self.get_rules_files(),
             "skills": self.get_skills(),
             "agents": self.get_agents(),
             "commands": self.get_commands(),
