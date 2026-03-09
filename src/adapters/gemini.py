@@ -259,10 +259,11 @@ class GeminiAdapter(AdapterBase):
         return value
 
     def sync_commands(self, commands: dict[str, Path]) -> SyncResult:
-        """Convert Claude Code commands to Gemini brief descriptions.
+        """Sync commands to native .gemini/commands/<name>.toml files.
 
-        Extracts command name and description from frontmatter and creates
-        a bullet list in GEMINI.md (NOT full content, just summaries).
+        Writes each command as a TOML file with description and prompt fields.
+        Maps $ARGUMENTS to {{args}}. Handles namespaced commands (colons create
+        subdirectory paths).
 
         Args:
             commands: Dict mapping command name to command .md file path
@@ -273,52 +274,79 @@ class GeminiAdapter(AdapterBase):
         if not commands:
             return SyncResult()
 
-        command_lines = []
-        synced_count = 0
+        result = SyncResult()
 
         for cmd_name, cmd_path in commands.items():
             try:
                 # Read command file
                 if not cmd_path.exists():
+                    result.skipped += 1
+                    result.skipped_files.append(f"{cmd_name}: file not found")
                     continue
 
                 content = cmd_path.read_text(encoding='utf-8')
 
-                # Adapt Claude Code-specific syntax for portability
-                content = self.adapt_command_content(content)
-
-                # Parse frontmatter
-                frontmatter, _ = self._parse_frontmatter(content)
+                # Parse frontmatter and extract body (prompt template)
+                frontmatter, body = self._parse_frontmatter(content)
                 name = frontmatter.get('name', cmd_name)
-                description = frontmatter.get('description', f"Claude Code command: {cmd_name}")
+                description = frontmatter.get('description', '')
+                prompt = body.strip()
 
-                # Build brief description line
-                command_lines.append(f"- **/{name}**: {description}")
-                synced_count += 1
+                # Map $ARGUMENTS -> {{args}} in prompt body
+                prompt = prompt.replace('$ARGUMENTS', '{{args}}')
+
+                # Build TOML content
+                toml_content = self._format_command_toml(description, prompt)
+
+                # Handle namespaced commands: colon -> subdirectory
+                # e.g., "harness:setup" -> "harness/setup.toml"
+                if ':' in name:
+                    parts = name.split(':')
+                    toml_path = self.project_dir / ".gemini" / "commands"
+                    for part in parts[:-1]:
+                        toml_path = toml_path / part
+                    toml_path = toml_path / f"{parts[-1]}.toml"
+                else:
+                    toml_path = self.project_dir / ".gemini" / "commands" / f"{name}.toml"
+
+                ensure_dir(toml_path.parent)
+                toml_path.write_text(toml_content, encoding='utf-8')
+
+                result.synced += 1
+                result.adapted += 1
+                result.synced_files.append(str(toml_path))
 
             except Exception:
-                # Silently skip malformed commands
+                result.failed += 1
+                result.failed_files.append(f"{cmd_name}: write failed")
                 continue
 
-        if not command_lines:
-            return SyncResult()
+        return result
 
-        # Build commands section
-        commands_content = "## Available Commands\n\n" + '\n'.join(command_lines)
+    def _format_command_toml(self, description: str, prompt: str) -> str:
+        """Format a Gemini command TOML file with description and prompt fields.
 
-        # Build subsection with markers
-        commands_subsection = f"""<!-- HarnessSync:Commands -->
-{commands_content}
-<!-- End HarnessSync:Commands -->"""
+        Args:
+            description: Command description (for TOML basic string)
+            prompt: Command prompt body (for TOML multi-line string)
 
-        # Write into GEMINI.md (merge with existing content)
-        self._write_subsection("Commands", commands_subsection)
+        Returns:
+            TOML file content string
+        """
+        lines = []
 
-        return SyncResult(
-            synced=synced_count,
-            adapted=synced_count,
-            synced_files=[str(self.gemini_md_path)]
-        )
+        if description:
+            # Escape for TOML basic string (backslash and double-quote)
+            desc_escaped = description.replace('\\', '\\\\').replace('"', '\\"')
+            lines.append(f'description = "{desc_escaped}"')
+
+        # Handle triple-quote in prompt body to avoid premature termination
+        if '"""' in prompt:
+            prompt = prompt.replace('"""', '""\\"')
+
+        lines.append(f'prompt = """\n{prompt}\n"""')
+
+        return '\n'.join(lines) + '\n'
 
     def sync_mcp(self, mcp_servers: dict[str, dict]) -> SyncResult:
         """Translate MCP server configs to Gemini settings.json.
@@ -452,6 +480,11 @@ class GeminiAdapter(AdapterBase):
                 else:
                     # Skip servers without command or url
                     continue
+
+                # Pass through additional Gemini CLI fields (GMN-11)
+                for field in ('trust', 'includeTools', 'excludeTools', 'cwd'):
+                    if field in config:
+                        server_config[field] = config[field]
 
                 # Add to mcpServers (override if exists)
                 existing_settings['mcpServers'][server_name] = server_config
