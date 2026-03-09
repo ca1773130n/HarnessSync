@@ -170,6 +170,11 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 **Verification Level:** proxy
 
 **Requirements:** GMN-07, GMN-08, GMN-09, GMN-11, GMN-12
+**Plans:** 2 plans
+
+Plans:
+- [ ] 13-01-PLAN.md — Rewrite sync_skills, sync_agents, sync_commands to native files + MCP field passthrough
+- [ ] 13-02-PLAN.md — GEMINI.md stale subsection cleanup + end-to-end verification
 
 **Success Criteria:**
 1. Skills sync to `.gemini/skills/<name>/SKILL.md` files with `name` and `description` frontmatter instead of being inlined in GEMINI.md
@@ -215,7 +220,7 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 | 10 - Scope-Aware Sync & Env Translation | Complete | 3/3 | proxy | ██████████ 100% |
 | 11 - State Enhancements & Integration | Complete | 2/2 | proxy | ██████████ 100% |
 | 12 - Critical Fixes & Rules Discovery | Pending | 0/? | proxy | ░░░░░░░░░░ 0% |
-| 13 - Gemini Native Format Migration | Pending | 0/? | proxy | ░░░░░░░░░░ 0% |
+| 13 - Gemini Native Format Migration | Planned | 0/2 | proxy | ░░░░░░░░░░ 0% |
 | 14 - Cross-Adapter Polish | Pending | 0/? | proxy | ░░░░░░░░░░ 0% |
 
 ---
