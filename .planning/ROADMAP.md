@@ -2,17 +2,17 @@
 
 ## Overview
 
-HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. v0.0.1 delivered the core plugin with hooks, slash commands, MCP server, and multi-account support. **v0.0.2** extends MCP discovery to include Claude Code plugins with proper scope-aware syncing (user/project/local scopes to target-native scopes).
+HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. v0.0.1 delivered the core plugin with hooks, slash commands, MCP server, and multi-account support. v0.0.2 added scope-aware MCP sync with plugin discovery. **v0.1.1** modernizes all three adapters to match the latest CLI versions -- fixing broken settings formats, adding rules directory discovery, migrating Gemini to native skills/agents/commands, and rewriting OpenCode's permission system.
 
-**Phases:** 11 (8 complete, 3 in v0.0.2)
-**Depth:** Standard (3-4 phases for v0.0.2)
-**Coverage:** 47/47 v1 requirements + 19/19 v0.0.2 requirements mapped
+**Phases:** 14 (11 complete, 3 in v0.1.1)
+**Depth:** Standard (3 phases for v0.1.1)
+**Coverage:** 47/47 v1 + 19/19 v0.0.2 + 19/19 v0.1.1 requirements mapped
 
 ---
 
 ## v0.0.1 Phases (Complete)
 
-### Phase 1: Foundation & State Management ✓
+### Phase 1: Foundation & State Management
 
 **Goal:** Establish core infrastructure with hash-based drift detection, OS-aware symlink creation, and Claude Code config discovery.
 
@@ -23,9 +23,9 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 
 ---
 
-### Phase 2: Adapter Framework & Codex Sync ✓
+### Phase 2: Adapter Framework & Codex Sync
 
-**Goal:** Create extensible adapter pattern and implement Codex adapter with full JSON→TOML translation, agent→skill conversion, and MCP server format mapping.
+**Goal:** Create extensible adapter pattern and implement Codex adapter with full JSON-to-TOML translation, agent-to-skill conversion, and MCP server format mapping.
 
 **Status:** Complete (2026-02-13)
 **Requirements:** ADP-01, ADP-02, ADP-03, CDX-01, CDX-02, CDX-03, CDX-04, CDX-05, CDX-06
@@ -34,7 +34,7 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 
 ---
 
-### Phase 3: Gemini & OpenCode Adapters ✓
+### Phase 3: Gemini & OpenCode Adapters
 
 **Goal:** Implement remaining target adapters (Gemini with inline skills, OpenCode with native agent/command support) to validate adapter pattern extensibility.
 
@@ -45,7 +45,7 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 
 ---
 
-### Phase 4: Plugin Interface (Commands, Hooks, Skills) ✓
+### Phase 4: Plugin Interface (Commands, Hooks, Skills)
 
 **Goal:** Deliver user-facing components for manual control (/sync), reactive auto-sync (PostToolUse hooks), and status visibility (/sync-status).
 
@@ -56,7 +56,7 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 
 ---
 
-### Phase 5: Safety & Validation ✓
+### Phase 5: Safety & Validation
 
 **Goal:** Implement security validations (permission audits, secret detection, conflict warnings) and rollback capabilities before MVP release.
 
@@ -67,7 +67,7 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 
 ---
 
-### Phase 6: MCP Server Integration ✓
+### Phase 6: MCP Server Integration
 
 **Goal:** Expose sync capabilities as MCP tools for programmatic access by other agents and cross-CLI orchestration.
 
@@ -78,7 +78,7 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 
 ---
 
-### Phase 7: Packaging & Distribution ✓
+### Phase 7: Packaging & Distribution
 
 **Goal:** Prepare plugin for marketplace distribution with proper structure validation, installation testing, and documentation.
 
@@ -89,7 +89,7 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 
 ---
 
-### Phase 8: Multi-Account Support ✓
+### Phase 8: Multi-Account Support
 
 **Goal:** Enable sync across multiple harness accounts with discovery, configuration, and account-scoped sync operations.
 
@@ -100,60 +100,102 @@ HarnessSync syncs Claude Code configuration to Codex, Gemini CLI, and OpenCode. 
 
 ---
 
-## v0.0.2 Phases (Milestone: Plugin & MCP Scope Sync)
+## v0.0.2 Phases (Complete)
 
-### Phase 9: Plugin Discovery & Scope-Aware Source Reading ✓
+### Phase 9: Plugin Discovery & Scope-Aware Source Reading
 
 **Goal:** Extend SourceReader to discover MCP servers from installed Claude Code plugins and implement 3-tier scope awareness (user/project/local) with proper precedence handling.
 
 **Status:** Complete (2026-02-15)
 **Dependencies:** Phase 1 (SourceReader exists), Phase 8 (account-aware infrastructure)
-
 **Requirements:** PLGD-01, PLGD-02, PLGD-03, PLGD-04, SCOPE-01, SCOPE-02, SCOPE-03, SCOPE-04, SCOPE-05
-
 **Plans:** 2/2 complete
 **Verification:** proxy (passed)
 
-Plans:
-- [x] 09-01-PLAN.md — Plugin MCP discovery with dual-format support and ${CLAUDE_PLUGIN_ROOT} expansion
-- [x] 09-02-PLAN.md — 3-tier scope-aware MCP discovery with precedence and origin tagging
-
 ---
 
-### Phase 10: Scope-Aware Target Sync & Environment Translation ✓
+### Phase 10: Scope-Aware Target Sync & Environment Translation
 
 **Goal:** Implement scope-to-target mapping for Gemini and Codex adapters, translate environment variable syntax between Claude/Codex/Gemini formats, and detect unsupported transport types.
 
 **Status:** Complete (2026-02-15)
 **Dependencies:** Phase 9 (scope-tagged MCPs available), Phase 2 (Codex adapter), Phase 3 (Gemini adapter)
-
 **Requirements:** SYNC-01, SYNC-02, SYNC-03, SYNC-04, ENV-01, ENV-02, ENV-03
-
 **Plans:** 3/3 complete
 **Verification:** proxy (passed)
 
-Plans:
-- [x] 10-01-PLAN.md -- Env var translator utility and transport detection module
-- [x] 10-02-PLAN.md -- Scope-aware adapter interface with Codex/Gemini/OpenCode routing
-- [x] 10-03-PLAN.md -- Integration test verifying all 7 requirements end-to-end
-
 ---
 
-### Phase 11: State Enhancements & Integration ✓
+### Phase 11: State Enhancements & Integration
 
 **Goal:** Extend StateManager to track plugin versions for update-triggered re-sync, enhance /sync-status to display plugin-discovered MCPs with scope labels, and implement drift detection for plugin MCP changes.
 
 **Status:** Complete (2026-02-15)
 **Dependencies:** Phase 9 (plugin discovery), Phase 10 (scope-aware sync working)
-
 **Requirements:** STATE-01, STATE-02, STATE-03
-
 **Plans:** 2/2 complete
 **Verification:** proxy (passed)
 
-Plans:
-- [x] 11-01-PLAN.md -- StateManager plugin tracking + orchestrator metadata persistence
-- [x] 11-02-PLAN.md -- /sync-status MCP source grouping + integration tests
+---
+
+## v0.1.1 Phases (Milestone: Target CLI Modernization)
+
+### Phase 12: Critical Fixes & Rules Discovery
+
+**Goal:** Fix broken adapter outputs (Codex deprecated approval policy, Codex config filename, Gemini v1 settings keys, OpenCode permission system) and extend SourceReader to discover `.claude/rules/` directory content as a new config surface.
+
+**Status:** Pending
+**Dependencies:** Phase 1 (SourceReader), Phase 2 (Codex adapter), Phase 3 (Gemini/OpenCode adapters)
+**Verification Level:** proxy
+
+**Requirements:** RULES-01, RULES-02, RULES-03, RULES-04, CDX-07, CDX-08, GMN-10, OC-07, OC-08, OC-09
+
+**Success Criteria:**
+1. SourceReader returns content from `.claude/rules/*.md` and `~/.claude/rules/*.md` (including recursive subdirectories) alongside existing CLAUDE.md content
+2. Rules with `paths:` YAML frontmatter are tagged with their path patterns in the output; rules without frontmatter load unconditionally
+3. Codex adapter writes `approval_policy = 'on-request'` (not deprecated `'on-failure'`) when mapping Claude Code auto-approve settings
+4. Codex adapter writes to `config.toml` (official name) instead of `codex.toml`
+5. Gemini adapter writes `tools.allowed` and `tools.exclude` (v2 format) instead of `tools.allowedTools` and `tools.blockedTools` (v1 format)
+6. OpenCode adapter writes `permission` (singular) with per-tool `allow`/`ask`/`deny` values instead of deprecated `permissions.mode` format
+7. OpenCode adapter maps Claude Code allowed tools to `permission.bash` patterns (e.g., `"git *": "allow"`) and denied tools to deny patterns
+
+---
+
+### Phase 13: Gemini Native Format Migration
+
+**Goal:** Migrate Gemini adapter from inlining skills/agents/commands into GEMINI.md to writing native format files (SKILL.md, agent .md, command .toml) that Gemini CLI discovers and loads natively with proper lazy-loading and activation.
+
+**Status:** Pending
+**Dependencies:** Phase 12 (rules discovery available for adapters, settings fix landed)
+**Verification Level:** proxy
+
+**Requirements:** GMN-07, GMN-08, GMN-09, GMN-11, GMN-12
+
+**Success Criteria:**
+1. Skills sync to `.gemini/skills/<name>/SKILL.md` files with `name` and `description` frontmatter instead of being inlined in GEMINI.md
+2. Agents sync to `.gemini/agents/<name>.md` files with Gemini-compatible frontmatter (`name`, `description`, and optional `tools`, `model`, `max_turns`) instead of being inlined in GEMINI.md
+3. Commands sync to `.gemini/commands/<name>.toml` files with `description` and `prompt` fields, with `$ARGUMENTS` mapped to `{{args}}`, instead of bullet points in GEMINI.md
+4. MCP server configs pass through `trust`, `includeTools`, `excludeTools`, and `cwd` fields when present in source config
+5. After migration to native formats, stale inlined skills/agents/commands sections are cleaned from GEMINI.md (only rules remain)
+
+---
+
+### Phase 14: Cross-Adapter Polish
+
+**Goal:** Complete remaining targeted fixes across Codex and OpenCode adapters -- MCP field passthrough, env var translation, skill deduplication, and settings preservation -- ensuring adapters do not clobber non-synced config fields.
+
+**Status:** Pending
+**Dependencies:** Phase 12 (critical fixes landed), Phase 13 (Gemini migration validates the pattern)
+**Verification Level:** proxy
+
+**Requirements:** CDX-09, OC-10, OC-11, PRES-01
+
+**Success Criteria:**
+1. Codex MCP config passes through `cwd`, `enabled_tools`, and `disabled_tools` fields when present in source config
+2. OpenCode MCP `headers` env var references use `{env:VAR_NAME}` syntax instead of `${VAR_NAME}`
+3. OpenCode adapter skips skill symlinks for skills that already exist in `.claude/skills/` (which OpenCode natively discovers), avoiding duplicate skill loading
+4. Writing Gemini `settings.json` preserves existing `hooks`, `security`, `general`, and other non-synced sections instead of clobbering them
+5. Writing Codex `config.toml` preserves existing `[agents]`, `[profiles]`, `[features]`, and other non-synced sections instead of clobbering them
 
 ---
 
@@ -172,47 +214,48 @@ Plans:
 | 9 - Plugin Discovery & Scope-Aware Reading | Complete | 2/2 | proxy | ██████████ 100% |
 | 10 - Scope-Aware Sync & Env Translation | Complete | 3/3 | proxy | ██████████ 100% |
 | 11 - State Enhancements & Integration | Complete | 2/2 | proxy | ██████████ 100% |
+| 12 - Critical Fixes & Rules Discovery | Pending | 0/? | proxy | ░░░░░░░░░░ 0% |
+| 13 - Gemini Native Format Migration | Pending | 0/? | proxy | ░░░░░░░░░░ 0% |
+| 14 - Cross-Adapter Polish | Pending | 0/? | proxy | ░░░░░░░░░░ 0% |
 
 ---
 
-## v0.0.2 Coverage
+## v0.1.1 Coverage
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PLGD-01 | Phase 9 | Complete |
-| PLGD-02 | Phase 9 | Complete |
-| PLGD-03 | Phase 9 | Complete |
-| PLGD-04 | Phase 9 | Complete |
-| SCOPE-01 | Phase 9 | Complete |
-| SCOPE-02 | Phase 9 | Complete |
-| SCOPE-03 | Phase 9 | Complete |
-| SCOPE-04 | Phase 9 | Complete |
-| SCOPE-05 | Phase 9 | Complete |
-| SYNC-01 | Phase 10 | Complete |
-| SYNC-02 | Phase 10 | Complete |
-| SYNC-03 | Phase 10 | Complete |
-| SYNC-04 | Phase 10 | Complete |
-| ENV-01 | Phase 10 | Complete |
-| ENV-02 | Phase 10 | Complete |
-| ENV-03 | Phase 10 | Complete |
-| STATE-01 | Phase 11 | Complete |
-| STATE-02 | Phase 11 | Complete |
-| STATE-03 | Phase 11 | Complete |
+| RULES-01 | Phase 12 | Pending |
+| RULES-02 | Phase 12 | Pending |
+| RULES-03 | Phase 12 | Pending |
+| RULES-04 | Phase 12 | Pending |
+| CDX-07 | Phase 12 | Pending |
+| CDX-08 | Phase 12 | Pending |
+| GMN-10 | Phase 12 | Pending |
+| OC-07 | Phase 12 | Pending |
+| OC-08 | Phase 12 | Pending |
+| OC-09 | Phase 12 | Pending |
+| GMN-07 | Phase 13 | Pending |
+| GMN-08 | Phase 13 | Pending |
+| GMN-09 | Phase 13 | Pending |
+| GMN-11 | Phase 13 | Pending |
+| GMN-12 | Phase 13 | Pending |
+| CDX-09 | Phase 14 | Pending |
+| OC-10 | Phase 14 | Pending |
+| OC-11 | Phase 14 | Pending |
+| PRES-01 | Phase 14 | Pending |
 
-**Coverage:** 19/19 v0.0.2 requirements mapped (100%)
+**Coverage:** 19/19 v0.1.1 requirements mapped (100%)
 
 ---
 
 ## Integration Phase
 
-Not required for v0.0.2. All phases use proxy verification with no deferred validations.
+Not required for v0.1.1. All phases use proxy verification with no deferred validations.
 
 ---
 
 *v0.0.1 roadmap created: 2026-02-13*
 *v0.0.1 complete: 2026-02-15 (8 phases, 24 plans)*
 *v0.0.2 roadmap created: 2026-02-15*
-*Phase 9 complete: 2026-02-15 (2 plans)*
-*Phase 10 complete: 2026-02-15 (3 plans)*
-*Phase 11 complete: 2026-02-15 (2 plans)*
 *v0.0.2 complete: 2026-02-15 (3 phases, 7 plans, 19 requirements)*
+*v0.1.1 roadmap created: 2026-03-09*

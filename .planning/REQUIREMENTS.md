@@ -69,7 +69,7 @@
 - [x] **PKG-02**: Plugin installable from GitHub repository via /plugin command
 - [x] **PKG-03**: install.sh creates target directories and configures shell integration
 
-## v0.0.2 Requirements — Plugin & MCP Scope Sync
+## v0.0.2 Requirements -- Plugin & MCP Scope Sync
 
 ### Plugin MCP Discovery
 - [x] **PLGD-01**: SourceReader discovers installed Claude Code plugins from `~/.claude/plugins/installed_plugins.json` registry
@@ -98,9 +98,9 @@
 ### State & Status Enhancements
 - [x] **STATE-01**: StateManager tracks plugin versions and MCP server counts per plugin for update-triggered re-sync
 - [x] **STATE-02**: /sync-status shows plugin-discovered MCPs separately from user-configured MCPs with scope labels
-- [x] **STATE-03**: Drift detection extends to plugin MCP changes (plugin updated → MCPs may have changed)
+- [x] **STATE-03**: Drift detection extends to plugin MCP changes (plugin updated -> MCPs may have changed)
 
-## v0.1.1 Requirements — Target CLI Modernization
+## v0.1.1 Requirements -- Target CLI Modernization
 
 ### Source Reader: Claude Code Rules Discovery
 - [ ] **RULES-01**: SourceReader discovers `.claude/rules/*.md` files (project-level rules with optional YAML frontmatter path-scoping)
@@ -116,7 +116,7 @@
 ### Gemini Adapter: Native Format Migration
 - [ ] **GMN-07**: Sync skills to native `.gemini/skills/<name>/SKILL.md` files instead of inlining in GEMINI.md
 - [ ] **GMN-08**: Sync agents to native `.gemini/agents/<name>.md` files with Gemini-compatible frontmatter (name, description, tools, model, max_turns) instead of inlining in GEMINI.md
-- [ ] **GMN-09**: Sync commands to native `.gemini/commands/<name>.toml` files with `description` and `prompt` fields, mapping `$ARGUMENTS` → `{{args}}`, instead of bullet points in GEMINI.md
+- [ ] **GMN-09**: Sync commands to native `.gemini/commands/<name>.toml` files with `description` and `prompt` fields, mapping `$ARGUMENTS` -> `{{args}}`, instead of bullet points in GEMINI.md
 - [ ] **GMN-10**: Fix settings.json tools format: write `tools.allowed` and `tools.exclude` (v2) instead of `tools.allowedTools` and `tools.blockedTools` (v1)
 - [ ] **GMN-11**: Pass through new MCP fields (`trust`, `includeTools`, `excludeTools`, `cwd`) when present in source config
 - [ ] **GMN-12**: Clean up stale inlined skills/agents/commands sections from GEMINI.md after migrating to native formats
@@ -126,16 +126,16 @@
 - [ ] **OC-08**: Map Claude Code allowed tools to OpenCode `permission.bash` patterns (e.g., `"git *": "allow"`)
 - [ ] **OC-09**: Map Claude Code denied tools to OpenCode `permission` deny patterns
 - [ ] **OC-10**: Translate env var references in MCP `headers` to OpenCode `{env:VAR_NAME}` syntax instead of `${VAR_NAME}`
-- [ ] **OC-11**: Avoid skill duplication: skip symlinks for skills that OpenCode will natively discover from `.claude/skills/` — only sync skills not already in Claude Code's directories
+- [ ] **OC-11**: Avoid skill duplication: skip symlinks for skills that OpenCode will natively discover from `.claude/skills/` -- only sync skills not already in Claude Code's directories
 
 ### Settings Preservation
 - [ ] **PRES-01**: When writing settings.json (Gemini) or config.toml (Codex), preserve existing hooks and other non-synced fields instead of clobbering them
 
 ## v3 Requirements (Deferred)
 
-- [ ] Bidirectional sync (target → Claude Code) with conflict detection
+- [ ] Bidirectional sync (target -> Claude Code) with conflict detection
 - [ ] 3-way merge strategies instead of overwrite
-- [ ] Semantic agent → skill conversion (extract tools, adapt permissions intelligently)
+- [ ] Semantic agent -> skill conversion (extract tools, adapt permissions intelligently)
 - [ ] AI-assisted conflict resolution via Claude API
 - [ ] Drift reports with scheduled diffs
 - [ ] Team sharing via git (version-controlled sync rules)
@@ -144,15 +144,15 @@
 
 ## Out of Scope
 
-- GUI/TUI dashboard — stay CLI-focused, provide JSON output for external tools
-- Support for non-AI CLIs — chezmoi exists for general dotfiles
-- Cloud sync (Dropbox, Drive) — security risk with API keys in configs
-- Full bidirectional auto-merge — impossible to avoid conflicts safely
-- Real-time collaborative editing — OT complexity out of scope
+- GUI/TUI dashboard -- stay CLI-focused, provide JSON output for external tools
+- Support for non-AI CLIs -- chezmoi exists for general dotfiles
+- Cloud sync (Dropbox, Drive) -- security risk with API keys in configs
+- Full bidirectional auto-merge -- impossible to avoid conflicts safely
+- Real-time collaborative editing -- OT complexity out of scope
 
 ## Traceability
 
-### v0.0.1 (Phases 1-8) — Complete
+### v0.0.1 (Phases 1-8) -- Complete
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
@@ -168,9 +168,9 @@
 | PKG-01..03 | Phase 7 | Complete |
 | MULTI-01..10 | Phase 8 | Complete |
 
-**v0.0.1 Coverage:** 54/54 requirements — delivered 2026-02-15
+**v0.0.1 Coverage:** 54/54 requirements -- delivered 2026-02-15
 
-### v0.0.2 (Phases 9-11) — Complete
+### v0.0.2 (Phases 9-11) -- Complete
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
@@ -180,33 +180,33 @@
 | ENV-01..03 | Phase 10 | Complete |
 | STATE-01..03 | Phase 11 | Complete |
 
-**v0.0.2 Coverage:** 19/19 requirements — delivered 2026-02-15
+**v0.0.2 Coverage:** 19/19 requirements -- delivered 2026-02-15
 
-### v0.1.1 (Phases TBD) — Active
+### v0.1.1 (Phases 12-14) -- Active
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| RULES-01 | TBD | Pending |
-| RULES-02 | TBD | Pending |
-| RULES-03 | TBD | Pending |
-| RULES-04 | TBD | Pending |
-| CDX-07 | TBD | Pending |
-| CDX-08 | TBD | Pending |
-| CDX-09 | TBD | Pending |
-| GMN-07 | TBD | Pending |
-| GMN-08 | TBD | Pending |
-| GMN-09 | TBD | Pending |
-| GMN-10 | TBD | Pending |
-| GMN-11 | TBD | Pending |
-| GMN-12 | TBD | Pending |
-| OC-07 | TBD | Pending |
-| OC-08 | TBD | Pending |
-| OC-09 | TBD | Pending |
-| OC-10 | TBD | Pending |
-| OC-11 | TBD | Pending |
-| PRES-01 | TBD | Pending |
+| RULES-01 | Phase 12 | Pending |
+| RULES-02 | Phase 12 | Pending |
+| RULES-03 | Phase 12 | Pending |
+| RULES-04 | Phase 12 | Pending |
+| CDX-07 | Phase 12 | Pending |
+| CDX-08 | Phase 12 | Pending |
+| GMN-10 | Phase 12 | Pending |
+| OC-07 | Phase 12 | Pending |
+| OC-08 | Phase 12 | Pending |
+| OC-09 | Phase 12 | Pending |
+| GMN-07 | Phase 13 | Pending |
+| GMN-08 | Phase 13 | Pending |
+| GMN-09 | Phase 13 | Pending |
+| GMN-11 | Phase 13 | Pending |
+| GMN-12 | Phase 13 | Pending |
+| CDX-09 | Phase 14 | Pending |
+| OC-10 | Phase 14 | Pending |
+| OC-11 | Phase 14 | Pending |
+| PRES-01 | Phase 14 | Pending |
 
-**v0.1.1 Coverage:** 0/19 requirements — in progress
+**v0.1.1 Coverage:** 19/19 requirements mapped -- in progress
 
 ---
 
