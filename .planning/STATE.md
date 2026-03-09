@@ -11,13 +11,13 @@
 ## Current Position
 
 **Milestone:** v0.1.1
-**Phase:** 13 - Gemini Native Format Migration
-**Plan:** 02 of 02 complete
-**Status:** Phase 13 complete
+**Phase:** 14 - Cross-Adapter Polish
+**Plan:** 01 of 02 complete
+**Status:** In progress
 
 **Progress:**
-[███████░░░] 71%
-v0.0.1: Complete (8 phases) | v0.0.2: Complete (3 phases) | v0.1.1: 2/3 phases complete (12, 13)
+[█████████░] 86%
+v0.0.1: Complete (8 phases) | v0.0.2: Complete (3 phases) | v0.1.1: 2/3 phases complete (12, 13) + 14 in progress
 
 ---
 
@@ -79,6 +79,7 @@ None yet (all phases use proxy verification).
 - **13-01:** MCP passthrough uses explicit allowlist of 4 fields (trust, includeTools, excludeTools, cwd)
 - **13-02:** Cleanup gated on zero failures across all three native syncs (safety constraint)
 - **13-02:** sync_all override calls cleanup automatically; _write_subsection retained as legacy
+- **14-01:** cwd field added after args array in TOML output order; reused VAR_PATTERN for header translation; translation only in sync_mcp() remote branch
 
 ### v0.1.1 Research Findings
 - **Claude Code:** New `.claude/rules/` directory with YAML frontmatter path-scoping (HIGH priority gap)
@@ -90,6 +91,7 @@ None yet (all phases use proxy verification).
 None.
 
 ### Recent Changes
+- **2026-03-09:** Phase 14 Plan 01 complete -- cwd TOML passthrough (CDX-09) + OpenCode header env var translation (OC-10)
 - **2026-03-09:** Phase 13 complete -- native format migration + stale subsection cleanup + 66-check verification
 - **2026-03-09:** Phase 13 Plan 02 complete -- stale GEMINI.md cleanup + end-to-end verification (66 checks)
 - **2026-03-09:** Phase 13 Plan 01 complete -- Gemini native format migration (skills, agents, commands, MCP fields)
@@ -105,16 +107,16 @@ None.
 ## Session Continuity
 
 ### What Just Happened
-Completed Phase 13 Plan 02 -- Added stale GEMINI.md subsection cleanup and end-to-end verification. Phase 13 is now fully complete.
+Completed Phase 14 Plan 01 -- Added cwd field passthrough to Codex TOML formatter and OpenCode header env var translation (${VAR} to {env:VAR}).
 
 ### What's Next
-Proceed to Phase 14 (Cross-Adapter Polish).
+Continue with Phase 14 Plan 02 (OC-11 skill dedup and PRES-01 config preservation).
 
 ### Context for Next Session
-Phase 13 complete. Gemini adapter writes native files (.gemini/skills/, .gemini/agents/, .gemini/commands/) and automatically cleans stale subsections from GEMINI.md after sync_all. Cleanup is safety-gated (only runs if all native writes succeed). 66-check end-to-end verification script covers all 5 Phase 13 requirements. _write_subsection retained as legacy. Phase 12 regression tests still pass.
+Phase 14 Plan 01 complete. toml_writer.py format_mcp_server_toml() now emits cwd field. env_translator.py has translate_env_vars_for_opencode_headers() that converts ${VAR} to {env:VAR} and strips defaults with warnings. OpenCode adapter sync_mcp() applies header translation for remote servers. sync_mcp_scoped() inherits via delegation. No regressions in existing TOML formatting.
 
 ---
 
 *Last updated: 2026-03-09*
-*Session: Phase 13 Plan 02 execution*
-*Stopped at: Completed 13-02-PLAN.md*
+*Session: Phase 14 Plan 01 execution*
+*Stopped at: Completed 14-01-PLAN.md*
