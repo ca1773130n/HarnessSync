@@ -101,6 +101,11 @@ class OpenCodeAdapter(AdapterBase):
         # Replace or append managed section
         final_content = self._replace_managed_section(existing_content, managed_section)
 
+        # Append per-harness override content (from .harness-sync/overrides/opencode.md)
+        override = self.get_override_content()
+        if override:
+            final_content = final_content.rstrip() + f"\n\n{override}\n"
+
         # Write AGENTS.md
         self._write_agents_md(final_content)
 

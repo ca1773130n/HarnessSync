@@ -1,0 +1,160 @@
+from __future__ import annotations
+
+"""
+/sync-parity slash command implementation.
+
+Produces a structured report of every Claude Code feature in use (MCP servers,
+skills, rules, agents, commands) with a per-target compatibility score and
+specific gaps. Helps users understand what they give up when working in a
+non-Claude harness.
+"""
+
+import os
+import sys
+import shlex
+import argparse
+
+PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, PLUGIN_ROOT)
+
+from pathlib import Path
+from src.source_reader import SourceReader
+from src.adapters import AdapterRegistry
+
+
+# Per-target feature support matrix
+# Value: "full" | "partial" | "none" | "via-translation"
+_SUPPORT_MATRIX: dict[str, dict[str, str]] = {
+    "codex": {
+        "rules": "full",
+        "skills": "full",
+        "agents": "partial",   # converted to SKILL.md format, some fields dropped
+        "commands": "partial", # converted to SKILL.md format
+        "mcp": "partial",      # stdio supported; SSE/HTTP limited
+        "settings": "partial", # permission model differs
+    },
+    "gemini": {
+        "rules": "full",
+        "skills": "full",
+        "agents": "partial",   # native agent format, CC fields dropped
+        "commands": "partial", # converted to TOML
+        "mcp": "full",         # JSON mcpServers format
+        "settings": "partial", # tools.exclude / tools.allowed mapping
+    },
+    "opencode": {
+        "rules": "full",
+        "skills": "full",
+        "agents": "partial",   # symlinked, not converted
+        "commands": "partial", # symlinked
+        "mcp": "partial",      # type-discriminated local/remote only
+        "settings": "partial", # per-tool permission entries
+    },
+}
+
+# Capability descriptions for "partial" support
+_GAPS: dict[str, dict[str, str]] = {
+    "codex": {
+        "agents": "CC fields (color, tools allowlist) are dropped; role body is preserved",
+        "commands": "Converted to SKILL.md; $ARGUMENTS becomes [user-provided arguments]",
+        "mcp": "SSE/HTTP transports may not be supported; env vars translated",
+        "settings": "Approval policy mapped; no equivalent for tool-level allow/deny lists",
+    },
+    "gemini": {
+        "agents": "name/description/role preserved; color and tool allowlist dropped",
+        "commands": "Converted to .gemini/commands/*.toml; $ARGUMENTS adapted",
+        "settings": "tools.exclude/tools.allowed used; no native bash-restriction equivalent",
+    },
+    "opencode": {
+        "agents": "Symlinked verbatim — CC-specific frontmatter visible in OpenCode",
+        "commands": "Symlinked verbatim — $ARGUMENTS may appear literally in OpenCode",
+        "mcp": "type: local (stdio) and type: remote (URL) only; env vars adapted",
+        "settings": "per-tool permission (singular) with allow/ask/deny values",
+    },
+}
+
+
+def _score(support: dict[str, str]) -> float:
+    """Compute a 0–100 compatibility score for a target."""
+    weights = {"full": 1.0, "partial": 0.6, "via-translation": 0.4, "none": 0.0}
+    total = sum(weights.get(v, 0) for v in support.values())
+    return round(100 * total / max(len(support), 1), 1)
+
+
+def _format_report(source_data: dict, targets: list[str]) -> str:
+    """Build the parity report string."""
+    lines: list[str] = ["HarnessSync Feature Parity Report", "=" * 60, ""]
+
+    # Feature inventory
+    rules = source_data.get("rules", "")
+    rules_count = len(rules.splitlines()) if isinstance(rules, str) else sum(
+        len(r.get("content", "").splitlines()) for r in (rules or []) if isinstance(r, dict)
+    )
+    skills_count = len(source_data.get("skills", {}))
+    agents_count = len(source_data.get("agents", {}))
+    commands_count = len(source_data.get("commands", {}))
+    mcp_count = len(source_data.get("mcp_servers", {}))
+
+    lines.append("Source inventory (Claude Code):")
+    lines.append(f"  Rules:    {rules_count} lines")
+    lines.append(f"  Skills:   {skills_count}")
+    lines.append(f"  Agents:   {agents_count}")
+    lines.append(f"  Commands: {commands_count}")
+    lines.append(f"  MCP:      {mcp_count} servers")
+    lines.append("")
+
+    # Per-target parity
+    lines.append("Per-Target Compatibility:")
+    lines.append("-" * 60)
+
+    for target in sorted(targets):
+        support = _SUPPORT_MATRIX.get(target, {})
+        score = _score(support)
+        gaps = _GAPS.get(target, {})
+
+        lines.append(f"\n[{target.upper()}]  Score: {score}/100")
+        for feature in ["rules", "skills", "agents", "commands", "mcp", "settings"]:
+            status = support.get(feature, "?")
+            icon = {"full": "✓", "partial": "~", "none": "✗", "via-translation": "~"}.get(status, "?")
+            gap_note = f"  — {gaps[feature]}" if feature in gaps else ""
+            lines.append(f"  {icon} {feature:<10} [{status}]{gap_note}")
+
+    lines.append("")
+    lines.append("Legend: ✓ full  ~ partial  ✗ not supported")
+    lines.append("")
+    lines.append(
+        "Tip: Use <!-- sync:exclude --> tags in CLAUDE.md to skip CC-only rules,\n"
+        "     or <!-- sync:codex-only --> to restrict content to specific harnesses."
+    )
+
+    return "\n".join(lines)
+
+
+def main() -> None:
+    """Entry point for /sync-parity command."""
+    args_string = " ".join(sys.argv[1:])
+    try:
+        tokens = shlex.split(args_string) if args_string.strip() else []
+    except ValueError:
+        tokens = []
+
+    parser = argparse.ArgumentParser(
+        prog="sync-parity",
+        description="Feature parity report across harness targets"
+    )
+    parser.add_argument("--scope", choices=["user", "project", "all"], default="all")
+
+    try:
+        args = parser.parse_args(tokens)
+    except SystemExit:
+        return
+
+    project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
+    reader = SourceReader(scope=args.scope, project_dir=project_dir)
+    source_data = reader.discover_all()
+
+    targets = AdapterRegistry.list_targets()
+    print(_format_report(source_data, targets))
+
+
+if __name__ == "__main__":
+    main()

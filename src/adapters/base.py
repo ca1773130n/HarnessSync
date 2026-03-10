@@ -145,6 +145,24 @@ class AdapterBase(ABC):
         """
         pass
 
+    def get_override_content(self) -> str:
+        """Read per-harness override content from .harness-sync/overrides/<target>.md.
+
+        Override files let users append harness-specific instructions to the
+        synced config without polluting CLAUDE.md. Content is appended after
+        the HarnessSync-managed section in the target file.
+
+        Returns:
+            Override content string, or empty string if no override file exists.
+        """
+        override_path = self.project_dir / ".harness-sync" / "overrides" / f"{self.target_name}.md"
+        if override_path.is_file():
+            try:
+                return override_path.read_text(encoding="utf-8").strip()
+            except OSError:
+                pass
+        return ""
+
     @staticmethod
     def adapt_command_content(content: str) -> str:
         """Adapt Claude Code command content for use in other targets.

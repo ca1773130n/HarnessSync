@@ -102,6 +102,11 @@ class CodexAdapter(AdapterBase):
         # Replace or append managed section
         final_content = self._replace_managed_section(existing_content, managed_section)
 
+        # Append per-harness override content (from .harness-sync/overrides/codex.md)
+        override = self.get_override_content()
+        if override:
+            final_content = final_content.rstrip() + f"\n\n{override}\n"
+
         # Write AGENTS.md
         self._write_agents_md(final_content)
 
@@ -190,6 +195,13 @@ class CodexAdapter(AdapterBase):
                     result.skipped += 1
                     result.skipped_files.append(f"{agent_name}: no role content")
                     continue
+
+                # Translate CC-specific tool references for Codex
+                try:
+                    from src.skill_translator import translate_skill_content
+                    instructions = translate_skill_content(instructions, self.target_name)
+                except Exception:
+                    pass
 
                 # Format as SKILL.md
                 skill_content = self._format_skill_md(name, description, instructions)

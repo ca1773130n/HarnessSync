@@ -93,6 +93,11 @@ class GeminiAdapter(AdapterBase):
         # Replace or append managed section
         final_content = self._replace_managed_section(existing_content, managed_section)
 
+        # Append per-harness override content (from .harness-sync/overrides/gemini.md)
+        override = self.get_override_content()
+        if override:
+            final_content = final_content.rstrip() + f"\n\n{override}\n"
+
         # Write GEMINI.md
         self._write_gemini_md(final_content)
 
@@ -137,6 +142,13 @@ class GeminiAdapter(AdapterBase):
                     result.skipped += 1
                     result.skipped_files.append(f"{name}: missing name or description in frontmatter")
                     continue
+
+                # Translate CC-specific tool references for Gemini
+                try:
+                    from src.skill_translator import translate_skill_content
+                    content = translate_skill_content(content, self.target_name)
+                except Exception:
+                    pass  # Translation failure should not abort the sync
 
                 # Write to native discovery path
                 target_dir = self.project_dir / ".gemini" / "skills" / name

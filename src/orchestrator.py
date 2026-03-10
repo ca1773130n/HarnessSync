@@ -14,12 +14,15 @@ from pathlib import Path
 from src.adapters import AdapterRegistry
 from src.adapters.result import SyncResult
 from src.backup_manager import BackupManager, BackupContext
+from src.changelog_manager import ChangelogManager
 from src.compatibility_reporter import CompatibilityReporter
+from src.config_linter import ConfigLinter
 from src.conflict_detector import ConflictDetector
 from src.diff_formatter import DiffFormatter
 from src.secret_detector import SecretDetector
 from src.source_reader import SourceReader
 from src.state_manager import StateManager
+from src.sync_filter import filter_rules_for_target, has_sync_tags
 from src.symlink_cleaner import SymlinkCleaner
 from src.utils.hashing import hash_file_sha256
 from src.utils.logger import Logger
@@ -130,6 +133,17 @@ class SyncOrchestrator:
         except ImportError as e:
             self.logger.warn(f"SecretDetector unavailable: {e}")
 
+        # --- PRE-SYNC: CONFIG LINTING ---
+        try:
+            linter = ConfigLinter()
+            lint_errors = linter.lint(source_data, self.project_dir, self.cc_home)
+            if lint_errors:
+                self.logger.warn("Config linter found issues:")
+                for err in lint_errors:
+                    self.logger.warn(f"  {err}")
+        except Exception as e:
+            self.logger.warn(f"Config linter failed: {e}")
+
         # --- PRE-SYNC: CONFLICT DETECTION ---
         # Run conflict detection (non-blocking, informational)
         conflicts = {}
@@ -155,6 +169,12 @@ class SyncOrchestrator:
             except ImportError as e:
                 self.logger.warn(f"BackupManager unavailable: {e}")
 
+        # Detect if any rules have sync tags (used for per-target filtering)
+        _rules_have_tags = any(
+            has_sync_tags(r.get('content', '')) for r in adapter_data.get('rules', [])
+            if isinstance(r, dict)
+        )
+
         # --- SYNC: EXECUTE ADAPTERS (wrapped in BackupContext if available) ---
         for target in targets:
             adapter = AdapterRegistry.get_adapter(target, self.project_dir)
@@ -162,12 +182,18 @@ class SyncOrchestrator:
             if self.dry_run:
                 results[target] = self._preview_sync(adapter, adapter_data)
             else:
+                # Build target-specific data (applying sync tag filtering)
+                target_data = dict(adapter_data)
+                if _rules_have_tags:
+                    target_data['rules'] = [
+                        {**r, 'content': filter_rules_for_target(r.get('content', ''), target)}
+                        for r in adapter_data.get('rules', [])
+                        if isinstance(r, dict)
+                    ]
+
                 # Sync with backup/rollback protection
                 try:
-                    # TODO: Implement backup of target files before sync
-                    # For now, just run adapter sync without backup context
-                    # Full backup integration would require identifying target output files
-                    target_results = adapter.sync_all(adapter_data)
+                    target_results = adapter.sync_all(target_data)
                     results[target] = target_results
                 except Exception as e:
                     self.logger.error(f"{target}: sync failed: {e}")
@@ -202,6 +228,21 @@ class SyncOrchestrator:
         if not self.dry_run:
             self._update_state(results, reader, source_data)
 
+        # --- POST-SYNC: CHANGELOG ---
+        if not self.dry_run:
+            try:
+                changelog = ChangelogManager(self.project_dir)
+                changelog.record(results, scope=self.scope, account=self.account)
+            except Exception as e:
+                self.logger.warn(f"Changelog update failed: {e}")
+
+        # --- POST-SYNC: WEBHOOK NOTIFICATION ---
+        if not self.dry_run:
+            try:
+                self._send_webhook(results)
+            except Exception as e:
+                self.logger.warn(f"Webhook notification failed: {e}")
+
         # --- POST-SYNC: BACKUP RETENTION CLEANUP (skip in dry-run) ---
         if not self.dry_run and backup_manager:
             try:
@@ -215,6 +256,56 @@ class SyncOrchestrator:
             results['_conflicts'] = conflicts
 
         return results
+
+    def _send_webhook(self, results: dict) -> None:
+        """POST sync summary to configured webhook URL (if set).
+
+        Reads HARNESSSYNC_WEBHOOK_URL from environment. Fires and forgets —
+        network errors are logged but never block the sync.
+
+        Args:
+            results: Sync results dict from sync_all()
+        """
+        import json
+        import os
+        import urllib.request
+
+        webhook_url = os.environ.get("HARNESSSYNC_WEBHOOK_URL", "").strip()
+        if not webhook_url:
+            return
+
+        summary: dict[str, dict] = {}
+        for target, target_results in results.items():
+            if target.startswith("_") or not isinstance(target_results, dict):
+                continue
+            synced = skipped = failed = 0
+            for config_type, r in target_results.items():
+                if isinstance(r, SyncResult):
+                    synced += r.synced
+                    skipped += r.skipped
+                    failed += r.failed
+            summary[target] = {"synced": synced, "skipped": skipped, "failed": failed}
+
+        payload = {
+            "event": "sync_complete",
+            "account": self.account,
+            "scope": self.scope,
+            "timestamp": datetime.now().isoformat(),
+            "targets": summary,
+        }
+        body = json.dumps(payload).encode("utf-8")
+
+        try:
+            req = urllib.request.Request(
+                webhook_url,
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5):
+                pass
+        except Exception as exc:
+            self.logger.warn(f"Webhook POST failed: {exc}")
 
     def sync_all_accounts(self) -> dict:
         """Sync all configured accounts sequentially.

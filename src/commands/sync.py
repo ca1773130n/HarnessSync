@@ -17,11 +17,29 @@ import time
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PLUGIN_ROOT)
 
+import subprocess
 from pathlib import Path
 from src.orchestrator import SyncOrchestrator
 from src.lock import sync_lock, should_debounce, LOCK_FILE_DEFAULT
 from src.state_manager import StateManager
 from src.adapters.result import SyncResult
+
+
+def _detect_git_root(cwd: Path) -> Path | None:
+    """Return git repository root for cwd, or None if not inside a git repo."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            cwd=str(cwd),
+            timeout=3,
+        )
+        if result.returncode == 0:
+            return Path(result.stdout.strip())
+    except Exception:
+        pass
+    return None
 
 
 def format_results_table(results: dict, account: str = None) -> str:
@@ -117,6 +135,11 @@ def main():
         default=None,
         help="Sync specific account (default: all accounts or v1 behavior)"
     )
+    parser.add_argument(
+        "--no-interactive",
+        action="store_true",
+        help="Skip interactive conflict resolution (always overwrite)"
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -133,7 +156,35 @@ def main():
     try:
         with sync_lock(LOCK_FILE_DEFAULT):
             start_time = time.time()
-            project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
+            cwd = Path(os.getcwd())
+            project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR", cwd))
+
+            # --- PROJECT-AWARE SCOPE AUTO-DETECTION ---
+            # When inside a git repo and no explicit scope was given (default="all"),
+            # inform the user that project-level configs are included.
+            git_root = _detect_git_root(project_dir)
+            if git_root and git_root != project_dir:
+                # CLAUDE_PROJECT_DIR is set but differs from git root — use git root
+                # only if CLAUDE_PROJECT_DIR was not explicitly provided
+                if "CLAUDE_PROJECT_DIR" not in os.environ:
+                    project_dir = git_root
+
+            # --- PRE-SYNC: INTERACTIVE CONFLICT RESOLUTION ---
+            if not args.dry_run and not args.no_interactive:
+                import sys
+                if sys.stdin.isatty():
+                    try:
+                        from src.conflict_detector import ConflictDetector
+                        cd = ConflictDetector()
+                        conflicts = cd.check_all()
+                        if any(conflicts.values()):
+                            resolutions = cd.resolve_interactive(conflicts)
+                            if resolutions:
+                                os.environ["HARNESSSYNC_KEEP_FILES"] = ",".join(
+                                    fp for fp, action in resolutions.items() if action == "keep"
+                                )
+                    except Exception:
+                        pass  # Conflict resolution failure should not block sync
 
             if args.account:
                 # Sync specific account

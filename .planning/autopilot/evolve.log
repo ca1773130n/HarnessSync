@@ -1,0 +1,8 @@
+[2026-03-10T23:22:48.342Z] Starting iteration 1
+[2026-03-10T23:25:48.373Z] Discovered 35 new + 0 carried-over = 35 total items, 1 groups, selected 1
+[2026-03-10T23:25:48.373Z] Capped batch from 35 to 30 items (max 30)
+[2026-03-10T23:25:48.373Z] Batch-executing 1 groups (30 items) in one subprocess
+[2026-03-10T23:38:03.068Z] Read iteration feedback: 8 decisions, 5 patterns, 5 takeaways
+[2026-03-10T23:38:03.107Z] Batch execute completed (code changes detected)
+[2026-03-10T23:38:03.107Z] Running single review for all 1 groups
+[2026-03-10T23:39:33.152Z] Batch review completed

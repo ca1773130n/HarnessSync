@@ -106,6 +106,75 @@ class ConflictDetector:
 
         return result
 
+    def resolve_interactive(self, conflicts: dict[str, list[dict]]) -> dict[str, str]:
+        """Prompt the user to resolve each conflict interactively.
+
+        For each conflicted file, asks whether to keep local modifications or
+        accept the incoming sync (overwrite). Works only when stdin is a TTY;
+        falls back to an empty dict (overwrite all) in non-interactive contexts.
+
+        Args:
+            conflicts: Dict from check_all() mapping target -> conflict list.
+
+        Returns:
+            Dict mapping file_path -> "keep" | "accept".
+            Files absent from the returned dict default to "accept" (overwrite).
+        """
+        import sys
+
+        if not sys.stdin.isatty():
+            return {}
+
+        resolutions: dict[str, str] = {}
+        all_conflicts: list[dict] = [
+            c for target_conflicts in conflicts.values() for c in target_conflicts
+        ]
+
+        if not all_conflicts:
+            return resolutions
+
+        print(f"\nHarnessSync detected {len(all_conflicts)} conflict(s) — local modifications "
+              "exist that would be overwritten.")
+
+        for conflict in all_conflicts:
+            file_path = conflict["file_path"]
+            target_name = conflict.get("target_name", "?")
+            note = conflict.get("note", "")
+
+            print(f"\n{'=' * 60}")
+            print(f"File:   {file_path}")
+            print(f"Target: {target_name}")
+            if note == "deleted":
+                print("Status: deleted after last sync")
+            else:
+                stored = conflict.get("stored_hash", "")[:12]
+                current = conflict.get("current_hash", "")[:12]
+                print(f"Status: modified  ({stored}... → {current}...)")
+
+            print()
+            print("  k) Keep local  — skip overwriting this file")
+            print("  a) Accept sync — allow HarnessSync to overwrite")
+
+            while True:
+                try:
+                    choice = input("  Choice [k/a]: ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    print("\nResolution cancelled — defaulting to accept all remaining.")
+                    return resolutions
+
+                if choice in ("k", "keep"):
+                    resolutions[file_path] = "keep"
+                    print(f"  → Keeping local: {file_path}")
+                    break
+                elif choice in ("a", "accept"):
+                    resolutions[file_path] = "accept"
+                    print(f"  → Will overwrite: {file_path}")
+                    break
+                else:
+                    print("  Enter 'k' to keep local or 'a' to accept sync.")
+
+        return resolutions
+
     def format_warnings(self, conflicts: dict[str, list[dict]]) -> str:
         """
         Format conflict warnings for user output.
