@@ -54,3 +54,30 @@
 
 *Archive created: 2026-02-15*
 
+
+## v0.1.1: Target CLI Modernization (Shipped: 2026-03-10)
+
+**Delivered:** All three adapters modernized to match latest CLI versions (Codex v0.112, Gemini v0.32, OpenCode v1.2.22). Claude Code rules directory discovery added.
+
+**Phases completed:** 12-14 (7 plans total)
+**Verification:** 273+ checks passed (100% rate)
+**Deferred:** 6 validations pending live CLI testing (DEFER-12-01/02, DEFER-13-01/02, DEFER-14-01/02)
+
+### What Shipped
+1. **Critical Fixes** -- Codex `on-failure` -> `on-request`, `codex.toml` -> `config.toml`, Gemini `allowedTools`/`blockedTools` -> `tools.allowed`/`tools.exclude` (v2), OpenCode `permissions.mode` -> granular `permission` with per-tool allow/ask/deny
+2. **Rules Discovery** -- SourceReader discovers `.claude/rules/*.md` (user + project scope) with recursive subdirectory walking and YAML frontmatter path-scoping
+3. **Gemini Native Formats** -- Skills sync to `.gemini/skills/<name>/SKILL.md`, agents to `.gemini/agents/<name>.md`, commands to `.gemini/commands/<name>.toml` with `$ARGUMENTS` -> `{{args}}` mapping
+4. **MCP Field Passthrough** -- `trust`, `includeTools`, `excludeTools`, `cwd` fields passed through to Gemini and Codex configs when present
+5. **OpenCode Modernization** -- Env var headers use `{env:VAR_NAME}` syntax, skill dedup avoids double-loading from `.claude/skills/`
+6. **Config Preservation** -- Codex preserves non-managed TOML sections (`[agents]`, `[profiles]`, `[features]`), Gemini preserves non-synced JSON sections through dict-merge
+
+### Key Stats
+- 19 v0.1.1 requirements delivered (100%)
+- 3 phases, 7 plans
+- 4 source files modified (source_reader.py, codex.py, gemini.py, opencode.py) + integration tests
+- Research: 4 CLI documentation audits (Claude Code, Codex, Gemini, OpenCode)
+
+---
+
+*Archive created: 2026-03-10*
+

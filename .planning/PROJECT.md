@@ -15,9 +15,9 @@ Evolved from **cc2all** — a standalone Python sync script. HarnessSync elevate
 ## Problem
 
 AI developers use multiple coding harnesses (Claude Code, Codex, Gemini CLI, OpenCode, etc.). Each has its own config format:
-- Claude Code: `CLAUDE.md`, `.claude/skills/`, `.mcp.json`, `settings.json`
-- Codex: `AGENTS.md`, `.codex/skills/`, `config.toml`
-- Gemini: `GEMINI.md`, `settings.json`
+- Claude Code: `CLAUDE.md`, `.claude/skills/`, `.claude/rules/`, `.mcp.json`, `settings.json`
+- Codex: `AGENTS.md`, `.agents/skills/`, `config.toml`
+- Gemini: `GEMINI.md`, `.gemini/skills/`, `.gemini/agents/`, `.gemini/commands/`, `settings.json`
 - OpenCode: `AGENTS.md`, `.opencode/skills/`, `opencode.json`
 
 Maintaining these in parallel is tedious, error-prone, and leads to settings drift — permission models, env vars, and allowed tools differ across CLIs, causing inconsistent behavior.
@@ -95,18 +95,18 @@ Claude Code Plugin (HarnessSync)
 - V **Env var translation** — ${VAR} and ${VAR:-default} translation per target format — v0.0.2
 - V **Plugin drift detection** — Version tracking, MCP count changes, add/remove detection — v0.0.2
 - V **Marketplace packaging** — .claude-plugin structure, marketplace.json, install.sh — v0.0.1
+- V **Rules directory discovery** — `.claude/rules/*.md` with recursive walking and YAML frontmatter path-scoping — v0.1.1
+- V **Codex config modernization** — `config.toml` filename, `on-request` approval policy, MCP `cwd` passthrough — v0.1.1
+- V **Gemini native formats** — Skills to SKILL.md, agents to .md, commands to .toml instead of inlining in GEMINI.md — v0.1.1
+- V **Gemini settings v2** — `tools.allowed`/`tools.exclude` instead of deprecated v1 keys — v0.1.1
+- V **OpenCode permission rewrite** — Granular `permission` (singular) with per-tool allow/ask/deny — v0.1.1
+- V **OpenCode env var syntax** — `{env:VAR_NAME}` in MCP headers, skill dedup vs `.claude/skills/` — v0.1.1
+- V **Config preservation** — Non-synced fields preserved in Codex TOML and Gemini JSON during writes — v0.1.1
+- V **MCP field passthrough** — `trust`, `includeTools`, `excludeTools`, `cwd` forwarded to targets — v0.1.1
 
-### Active — v0.1.1: Target CLI Modernization
+### Active
 
-Goal: Update adapters to reflect the latest versions of Claude Code, Codex CLI, Gemini CLI, and OpenCode. These tools are evolving rapidly — new config formats, new features, changed directory structures. HarnessSync must keep pace.
-
-- [ ] Audit current adapter output against latest CLI versions
-- [ ] Update Codex adapter for latest Codex CLI features and config format
-- [ ] Update Gemini adapter for latest Gemini CLI features and config format
-- [ ] Update OpenCode adapter for latest OpenCode features and config format
-- [ ] Update SourceReader for any new Claude Code config types or locations
-- [ ] Fix plugin agent/command discovery (done in pre-milestone hotfixes)
-- [ ] Fix YAML frontmatter generation for Codex SKILL.md (done in pre-milestone hotfixes)
+No active milestone. Ready for next milestone planning.
 
 ### Deferred
 
@@ -126,8 +126,9 @@ Goal: Update adapters to reflect the latest versions of Claude Code, Codex CLI, 
 
 - **v0.0.1** — Core Plugin + Multi-Account (2026-02-15): 8 phases, 24 plans, 57 requirements
 - **v0.0.2** — Plugin & MCP Scope Sync (2026-02-15): 3 phases, 7 plans, 19 requirements
+- **v0.1.1** — Target CLI Modernization (2026-03-10): 3 phases, 7 plans, 19 requirements
 
 See `.planning/MILESTONES.md` for full history.
 
 ---
-*Last updated: 2026-02-15 — v0.0.2 milestone complete*
+*Last updated: 2026-03-10 — v0.1.1 milestone complete*

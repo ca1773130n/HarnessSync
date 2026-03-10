@@ -13,7 +13,7 @@
 **Milestone:** v0.1.1
 **Phase:** 14 - Cross-Adapter Polish
 **Plan:** 02 of 02 complete
-**Status:** Phase complete
+**Status:** v0.1.1 milestone complete
 
 **Progress:**
 [██████████] 100%
