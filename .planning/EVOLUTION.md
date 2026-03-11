@@ -1149,3 +1149,74 @@ _2026-03-11T04:17:08.477Z_
 - Several items (11, 12, 15, 17, 22, 25) were skipped because they either already had complete implementations or would require external API integrations (Slack, Teams webhooks) that go beyond local code changes.
 
 ---
+## Iteration 18
+_2026-03-11T04:38:50.004Z_
+
+### Items Attempted
+
+- **Bidirectional Sync (Pull from Other Harnesses)** — pass
+- **Conflict Resolution Wizard** — pass
+- **Named Sync Profiles (Work / Personal / OSS)** — pass
+- **Secrets Scrubber Pre-Sync** — pass
+- **One-Click Harness Onboarding** — pass
+- **Auto-Detect Newly Installed Harnesses** — pass
+- **Cloud Config Backup & Restore** — pass
+- **New Machine Bootstrap Command** — pass
+- **Config Inheritance (Base + Project Overrides)** — pass
+- **PR-Gated Sync (Review Before Propagating)** — pass
+- **CI/CD Sync Validation Action** — pass
+- **Capability Gap Advisor** — pass
+- **Auto Sync Changelog** — pass
+- **MCP Server Discovery & One-Click Install** — pass
+- **MCP Reachability Continuous Monitor** — pass
+- **Config Bloat & Dead Weight Analyzer** — pass
+- **Rule Effectiveness Scoring** — pass
+- **Environment-Specific Config Overrides** — pass
+- **Cross-Harness Skill Equivalence Tester** — pass
+- **Remote Machine Sync via SSH** — pass
+- **Undo History with Time-Travel** — pass
+- **Fine-Grained Section Tagging (Skip/Force per Harness)** — pass
+- **Auto Config Documentation Generator** — pass
+- **Plugin Portability Report** — pass
+- **Sync Policy Engine (Not Just Schedules)** — pass
+- **Harness Version Compatibility Checker** — pass
+- **AI-Assisted Format Translation for Unmappable Settings** — pass
+- **Community Config Template Library** — pass
+- **Drift Alerting & Notifications** — pass
+- **Config Dependency Visualizer** — pass
+- **Harness A/B Config Testing** — pass
+- **Import & Uplift from Other Harnesses** — pass
+- **Sync Metrics & Success Rate Telemetry (Local)** — pass
+- **Natural Language Config Queries** — pass
+- **Harness Retirement Assistant** — pass
+
+### Decisions Made
+
+- Shannon entropy (ENTROPY_THRESHOLD=4.5 bits/char, ENTROPY_MIN_LENGTH=20) in SecretDetector: chose these thresholds to match TruffleHog's calibration — base64-encoded secrets average 5.5 bits/char while English prose averages 4.0, giving headroom to separate signal from noise.
+- High-entropy detection upgrades confidence from 'medium' to 'high' when keyword AND entropy both fire, giving consumers a prioritization signal without changing the blocking behavior.
+- CloudBackupExporter uses only stdlib (urllib.request, zipfile, json) — no boto3/requests dependency — to keep the module self-contained and installable without extras.
+- sync_bootstrap.py wraps harness detection, config restoration (archive or Gist), dry-run sync, and validation into a 4-step flow numbered [1/4]…[4/4] so users have clear progress feedback during a slow new-machine setup.
+- @env: tag implemented as inline heading annotation (## Section @env:production) rather than standalone block-opener to avoid the ambiguity of 'when does an @env block close?' — headings provide natural section boundaries, matching how sync_filter already handles harness blocks.
+- filter_rules_for_env also supports explicit <!-- env:X --> ... <!-- /env:X --> comment blocks for multi-paragraph env sections that don't align with heading boundaries.
+- RemoteSync uses system ssh/scp (stdlib subprocess) instead of paramiko — avoids a non-trivial dependency, works wherever OpenSSH is installed, and lets users leverage existing SSH agent/key setup.
+- detect_drift() in sync_import.py strips HarnessSync-managed sections before comparing CLAUDE.md to the target — otherwise every HarnessSync-generated section would show as a false divergence.
+- DriftWatcher.notify param adds OS notifications as an opt-in flag rather than default — desktop notifications are intrusive and users should explicitly enable them; the cooldown threshold prevents spam.
+- make_notifying_alert_callback uses a per-(target, file) cooldown dict to prevent the same file triggering a new OS notification on every poll cycle while it remains modified.
+
+### Patterns Discovered
+
+- Most substantial modules already existed — the codebase is quite mature. Many items in the 30-item list were already partially or fully implemented in prior evolution iterations.
+- The codebase consistently uses `from __future__ import annotations` and stdlib-only imports in core modules — new modules must follow this pattern for Python 3.9 compat.
+- Alert callbacks in DriftWatcher follow a Callable[[DriftAlert], None] factory pattern — new behavior (notifications, logging) is added by wrapping rather than subclassing.
+- The sync_filter.py state machine pattern (active_tag, harness_target) is replicated for env filtering — consistent approach but the state grows with each new filter type.
+- Test coverage focuses on adapter behavior and phase integration, not unit tests for new utility modules — new code like entropy analysis and env filtering was tested inline during development.
+
+### Takeaways
+
+- Items 2, 3, 5, 6, 9-17, 19, 21, 22, 24-28, 30 already had real module implementations from prior iterations — this project is in a late-stage polish/enhancement phase rather than greenfield.
+- The @env: heading-annotation design is more ergonomic than explicit open/close tags for typical CLAUDE.md content because sections naturally map to headings.
+- Shannon entropy alone generates too many false positives on non-secret high-entropy strings (UUIDs, hashes in log lines) — combining with keyword matching significantly improves precision.
+- The backup/restore architecture already supports local snapshots well; the main gap was cloud export, which was straightforward to add with urllib.request.
+- SSH-based remote sync is inherently fragile (network errors, host key verification, timeout) — the design uses best-effort semantics and never raises on individual file failures to avoid blocking the broader sync flow.
+
+---
