@@ -437,16 +437,29 @@ class SyncOrchestrator:
         return filtered
 
     def _send_webhook(self, results: dict) -> None:
-        """POST sync summary to configured webhook URL (if set).
+        """Dispatch configured webhooks and scripts via WebhookNotifier.
 
-        Reads HARNESSSYNC_WEBHOOK_URL from environment. Fires and forgets —
-        network errors are logged but never block the sync.
+        Delegates to ``WebhookNotifier`` (which reads ~/.harnesssync/webhooks.json)
+        for full webhook/script support. Also honours the legacy env-var
+        ``HARNESSSYNC_WEBHOOK_URL`` for backward compatibility.
+
+        Network/script errors are logged but never block the sync.
 
         Args:
             results: Sync results dict from sync_all()
         """
-        import json
         import os
+
+        # Full webhook notifier (reads webhooks.json config)
+        try:
+            from src.webhook_notifier import WebhookNotifier
+            notifier = WebhookNotifier(logger=self.logger)
+            notifier.notify(results, project_dir=self.project_dir, dry_run=self.dry_run)
+        except Exception as exc:
+            self.logger.warn(f"WebhookNotifier failed: {exc}")
+
+        # Legacy single-URL support via environment variable
+        import json
         import urllib.request
 
         webhook_url = os.environ.get("HARNESSSYNC_WEBHOOK_URL", "").strip()
@@ -484,7 +497,7 @@ class SyncOrchestrator:
             with urllib.request.urlopen(req, timeout=5):
                 pass
         except Exception as exc:
-            self.logger.warn(f"Webhook POST failed: {exc}")
+            self.logger.warn(f"Legacy webhook POST failed: {exc}")
 
     def sync_all_accounts(self) -> dict:
         """Sync all configured accounts sequentially.

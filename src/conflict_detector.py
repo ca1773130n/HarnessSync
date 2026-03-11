@@ -5,14 +5,39 @@ Conflict detection via SHA256 hash comparison.
 
 Detects manual config edits that would be overwritten by sync operations.
 Uses hmac.compare_digest() for secure hash comparison to prevent timing attacks.
+
+Three-way diff (item 11):
+When a conflict is detected, ``three_way_diff()`` generates a structured
+three-column diff:
+  - LEFT  = Claude Code source (what HarnessSync would write)
+  - BASE  = Last-synced version (the common ancestor stored as hash)
+  - RIGHT = Current target file (what the user manually edited)
+
+Users can then choose per-block: keep theirs / use synced / merge.
+The ``resolve_three_way_interactive()`` method presents this UI on a TTY.
 """
 
+import difflib
 import hmac
 from pathlib import Path
 
 from src.state_manager import StateManager
 from src.utils.hashing import hash_file_sha256
 from src.utils.logger import Logger
+
+
+def _build_merge_template(source: str, current: str, label: str) -> str:
+    """Build a conflict merge template with git-style conflict markers."""
+    return (
+        f"<<<<<<< SYNC SOURCE (HarnessSync would write this)\n"
+        f"{source}"
+        f"=======\n"
+        f"{current}"
+        f">>>>>>> CURRENT ({label})\n"
+        f"\n"
+        f"# Edit the content above: remove the conflict markers and keep what you want.\n"
+        f"# Save and close the editor to apply your resolution.\n"
+    )
 
 
 class ConflictDetector:
@@ -174,6 +199,160 @@ class ConflictDetector:
                     print("  Enter 'k' to keep local or 'a' to accept sync.")
 
         return resolutions
+
+    def three_way_diff(
+        self,
+        source_content: str,
+        conflict: dict,
+        base_content: str | None = None,
+    ) -> dict:
+        """Generate a three-way diff for a conflicted file.
+
+        Produces a structured comparison of:
+          - source: What HarnessSync would write (from Claude Code)
+          - base:   Last-synced content (the common ancestor, if available)
+          - current: What's in the target file right now (manually edited)
+
+        Args:
+            source_content: The content HarnessSync would write.
+            conflict: A conflict dict from ``check()`` (contains file_path).
+            base_content: The last-synced content. If None, treated as empty
+                          (simulates no common ancestor).
+
+        Returns:
+            Dict with keys:
+              - file_path: Conflicted file path
+              - source_lines: Lines of what sync would write
+              - base_lines: Lines of last-synced version (or [])
+              - current_lines: Lines of current file
+              - unified_source_vs_current: Unified diff source↔current
+              - unified_base_vs_current: Unified diff base↔current
+              - unified_base_vs_source: Unified diff base↔source
+              - has_real_conflict: True if current ≠ source
+        """
+        file_path = conflict.get("file_path", "")
+        fp = Path(file_path)
+
+        current_content = ""
+        if fp.exists():
+            try:
+                current_content = fp.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+
+        base_content = base_content or ""
+
+        source_lines = source_content.splitlines(keepends=True)
+        base_lines = base_content.splitlines(keepends=True)
+        current_lines = current_content.splitlines(keepends=True)
+
+        def _udiff(a: list[str], b: list[str], fromfile: str, tofile: str) -> str:
+            return "".join(difflib.unified_diff(a, b, fromfile=fromfile, tofile=tofile, lineterm="\n"))
+
+        return {
+            "file_path": file_path,
+            "source_lines": source_lines,
+            "base_lines": base_lines,
+            "current_lines": current_lines,
+            "unified_source_vs_current": _udiff(source_lines, current_lines, "sync-source", "current"),
+            "unified_base_vs_current": _udiff(base_lines, current_lines, "last-synced", "current"),
+            "unified_base_vs_source": _udiff(base_lines, source_lines, "last-synced", "sync-source"),
+            "has_real_conflict": source_content != current_content,
+        }
+
+    def resolve_three_way_interactive(
+        self,
+        conflict: dict,
+        three_way: dict,
+    ) -> tuple[str, str]:
+        """Present three-way diff in terminal and ask user to resolve.
+
+        Shows the diff between (last-synced → current) and (last-synced → source)
+        and offers per-file choices:
+          s) Use synced  — accept HarnessSync's version
+          k) Keep theirs — preserve the manual edit
+          e) Edit manually — write a temp file and open $EDITOR
+
+        Args:
+            conflict: Conflict dict from ``check()``.
+            three_way: Three-way diff dict from ``three_way_diff()``.
+
+        Returns:
+            Tuple of (resolution: "synced" | "keep" | "manual", final_content: str).
+        """
+        import os
+        import subprocess
+        import sys
+        import tempfile
+
+        file_path = three_way["file_path"]
+        source_lines = three_way["source_lines"]
+        current_lines = three_way["current_lines"]
+        diff_source_vs_current = three_way["unified_source_vs_current"]
+        diff_base_vs_current = three_way["unified_base_vs_current"]
+
+        print(f"\n{'=' * 70}")
+        print(f"THREE-WAY CONFLICT: {file_path}")
+        print(f"{'=' * 70}")
+
+        print("\n[ Changes: last-synced → manual edits (what YOU changed) ]")
+        if diff_base_vs_current.strip():
+            print(diff_base_vs_current[:3000])
+        else:
+            print("  (no diff from base)")
+
+        print("\n[ Changes: last-synced → sync-source (what HARNESSSYNC would write) ]")
+        if three_way["unified_base_vs_source"].strip():
+            print(three_way["unified_base_vs_source"][:3000])
+        else:
+            print("  (no diff from base)")
+
+        print("\nChoices:")
+        print("  s) Use synced  — overwrite with HarnessSync version")
+        print("  k) Keep theirs — preserve your manual edits, skip sync for this file")
+        print("  e) Edit        — open a merge in $EDITOR (requires EDITOR env var)")
+
+        while True:
+            try:
+                choice = input("\n  Choice [s/k/e]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print("\nCancelled — defaulting to 'keep'.")
+                return "keep", "".join(current_lines)
+
+            if choice in ("s", "synced"):
+                return "synced", "".join(source_lines)
+
+            elif choice in ("k", "keep"):
+                return "keep", "".join(current_lines)
+
+            elif choice in ("e", "edit"):
+                editor = os.environ.get("EDITOR", "vi")
+                # Write merge template to temp file
+                merge_content = _build_merge_template(
+                    "".join(source_lines), "".join(current_lines), file_path
+                )
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".md", delete=False, encoding="utf-8"
+                ) as tf:
+                    tf.write(merge_content)
+                    tmp_path = tf.name
+
+                try:
+                    subprocess.run([editor, tmp_path], check=False)
+                    final = Path(tmp_path).read_text(encoding="utf-8")
+                except Exception as e:
+                    print(f"  Editor failed: {e}. Defaulting to keep.")
+                    final = "".join(current_lines)
+                finally:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+
+                return "manual", final
+
+            else:
+                print("  Enter 's', 'k', or 'e'.")
 
     def format_warnings(self, conflicts: dict[str, list[dict]]) -> str:
         """

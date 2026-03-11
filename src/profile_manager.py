@@ -24,12 +24,28 @@ Example profile:
             "only_sections": ["rules"]
         }
     }
+
+Team Sync via Git (item 2):
+Teams can commit a shared profile to their repository under
+``.harness-sync/team-profile.json``. When teammates clone or pull,
+``ProfileManager.load_from_repo()`` imports the shared profile so that
+org-wide harness standards apply automatically without manual config.
+
+Export:
+    manager.export_to_repo(project_dir, profile_name="team")
+
+Import (run after git pull):
+    imported = manager.load_from_repo(project_dir)
 """
 
 import json
 import os
 import tempfile
 from pathlib import Path
+
+
+# Repo-committed shared profile path (relative to project root)
+_REPO_PROFILE_PATH = ".harness-sync/team-profile.json"
 
 
 class ProfileManager:
@@ -145,6 +161,114 @@ class ProfileManager:
             result["profile_targets"] = list(profile["targets"])
 
         return result
+
+    # ------------------------------------------------------------------
+    # Team Sync via Git
+    # ------------------------------------------------------------------
+
+    def export_to_repo(
+        self,
+        project_dir: Path,
+        profile_name: str = "team",
+        overwrite: bool = True,
+    ) -> Path:
+        """Export a named profile to the repository for team sharing.
+
+        Writes the profile to ``.harness-sync/team-profile.json`` in the
+        project root. Teams commit this file so teammates automatically
+        inherit org-wide HarnessSync standards on clone/pull.
+
+        Args:
+            project_dir: Project root directory.
+            profile_name: Name of the local profile to export (default: "team").
+            overwrite: If False, raise if the repo profile already exists.
+
+        Returns:
+            Path to the exported file.
+
+        Raises:
+            KeyError: If profile_name is not found.
+            FileExistsError: If file exists and overwrite=False.
+        """
+        profile = self.get_profile(profile_name)
+        if profile is None:
+            raise KeyError(
+                f"Profile {profile_name!r} not found. "
+                f"Available: {', '.join(self.list_profiles()) or 'none'}"
+            )
+
+        dest = project_dir / _REPO_PROFILE_PATH
+        if dest.exists() and not overwrite:
+            raise FileExistsError(
+                f"{dest} already exists. Pass overwrite=True to replace it."
+            )
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        export_data = {
+            "_harnesssync_team_profile": True,
+            "_exported_from": profile_name,
+            "_export_note": (
+                "This file is managed by HarnessSync. "
+                "Import with: /sync --import-team-profile or ProfileManager.load_from_repo()"
+            ),
+            **profile,
+        }
+
+        dest.write_text(
+            json.dumps(export_data, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        return dest
+
+    def load_from_repo(
+        self,
+        project_dir: Path,
+        import_as: str = "team",
+        overwrite: bool = True,
+    ) -> dict | None:
+        """Import the team profile from the repository into local profiles.
+
+        Reads ``.harness-sync/team-profile.json`` and saves it as a local
+        profile so it can be activated with /sync --profile team.
+
+        Call this after ``git clone`` or ``git pull`` to pick up org-wide
+        HarnessSync standards automatically.
+
+        Args:
+            project_dir: Project root directory.
+            import_as: Local profile name to save the imported profile as.
+            overwrite: If False, skip import if a local profile with import_as exists.
+
+        Returns:
+            Imported profile dict, or None if no repo profile found.
+        """
+        repo_file = project_dir / _REPO_PROFILE_PATH
+        if not repo_file.exists():
+            return None
+
+        try:
+            data = json.loads(repo_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+
+        if not isinstance(data, dict):
+            return None
+
+        if not overwrite and self.get_profile(import_as) is not None:
+            return None
+
+        # Strip internal metadata keys before saving
+        profile = {k: v for k, v in data.items() if not k.startswith("_")}
+        if not profile:
+            return None
+
+        # Ensure description notes the team origin
+        if "description" not in profile:
+            profile["description"] = f"Team profile (imported from {_REPO_PROFILE_PATH})"
+
+        self.save_profile(import_as, profile)
+        return profile
 
     def format_list(self) -> str:
         """Return a human-readable profile list for display."""

@@ -145,3 +145,71 @@ _2026-03-11T00:02:14.908Z_
 - Items 2, 7, 9, 10, 20, 22, 23, 26, 27, 28 were either too complex for reliable implementation in one pass or had significant overlap with existing features — they represent future milestones.
 
 ---
+## Iteration 3
+_2026-03-11T00:20:31.384Z_
+
+### Items Attempted
+
+- **Named Sync Profiles** — pass
+- **Per-Harness Config Overrides** — pass
+- **Live Drift Dashboard** — pass
+- **Pre-Sync Diff Preview** — pass
+- **Team Config Sharing via Git** — pass
+- **Capability Gap Report** — pass
+- **Auto-Detect Installed Harnesses** — pass
+- **MCP Server Health Monitor** — pass
+- **Skill Dependency Visualizer** — pass
+- **Config Snapshots with Labels** — pass
+- **CI/CD Sync Integration** — pass
+- **Auto-Generate Harness Config Docs** — pass
+- **Rule/Skill Exclusion Tags** — pass
+- **Natural Language Sync Query** — pass
+- **Merge Conflict Resolution Wizard** — pass
+- **Scheduled Background Sync** — pass
+- **MCP Server Migration Assistant** — pass
+- **Plugin Registry Sync** — pass
+- **Environment Variable Sync** — pass
+- **Webhook Triggers for Sync Events** — pass
+- **Harness Update Compatibility Check** — pass
+- **Cross-Harness Config Search** — pass
+- **Per-Project Sync Exclusions** — pass
+- **Tamper-Evident Sync Audit Log** — pass
+- **First-Time Harness Onboarding Wizard** — pass
+- **CLAUDE.md Section Manager** — pass
+- **Remote Machine Sync via SSH** — pass
+- **Session-Start Sync Check** — pass
+- **Skill Translation Quality Score** — pass
+- **Harness Cost & Token Comparison** — pass
+- **Community Config Template Library** — pass
+
+### Decisions Made
+
+- Named Sync Profiles stored as JSON at ~/.harnesssync/profiles.json — chose JSON over TOML for consistency with existing codebase conventions; ProfileManager.apply_to_kwargs() merges profile settings into orchestrator kwargs rather than mutating args directly, preserving composability with CLI flags
+- Per-harness config overrides (<!-- harness:codex -->...<!-- /harness:codex -->) implemented as exclusive blocks in sync_filter.py — content in harness blocks is only emitted for the matching target, not appended to or replacing anything at the adapter level, keeping the filter layer clean
+- Extended sync_filter.py to support <!-- no-sync --> (alias for exclude) and <!-- sync:codex,gemini --> (multi-target include lists) — careful disambiguation from classic single-target tags (codex-only) avoids breaking existing usage
+- Improved _preview_sync to read actual current target files rather than always showing empty diffs — added helper methods _get_target_rules_path, _get_current_skills, etc. to duck-type adapter attributes before falling back to known path conventions
+- Harness detector now checks both PATH and config directory existence — GUI-installed tools (Cursor, Windsurf) often don't add to PATH but do create ~/.cursor or ~/.windsurf; scan_all() now returns structured dicts instead of plain strings to carry both signals
+- Labeled backup snapshots store metadata in a .harnesssync-snapshot.json file inside the backup dir rather than encoding the label in the directory name — keeps the name timestamp-based for easy sorting while making labels queryable without parsing strings
+- sync_search.py operates purely on the already-synced output files in the project dir rather than re-processing source configs — this shows what's actually deployed to each harness and works even when source files aren't present
+- Per-project .harnesssync JSON file overrides are applied early in sync_all() before any adapter runs — project skip_sections are union'd with CLI skip_sections (additive), while only_sections are intersected (restrictive), so project config can narrow but never expand what the user explicitly requested
+- Skill translation quality score uses a 50+30 point model (content retention + tool ref cleanup) to balance two concerns: penalizing dropped content and rewarding CC-specific rewriting — scores <50 get 'poor' grade to surface skills needing manual review
+- SessionStart hook calls startup_check.py which only reads state.json and hashes source files — no subprocess calls or network I/O, making it safe for session startup where latency matters
+
+### Patterns Discovered
+
+- The orchestrator uses a consistent pre-sync pipeline pattern (load config → detect secrets → lint → detect conflicts → backup → sync → cleanup → report) — new items 23 and project config loading fit naturally as the first step
+- Duck-typing on adapter attributes (getattr(adapter, 'agents_md_path', None)) is used throughout _preview_sync to avoid coupling orchestrator to specific adapter implementations — this is the right pattern given the registry-based adapter system
+- The ProfileManager follows the same atomic JSON write pattern as StateManager (tempfile + os.replace) — this pattern should be extracted to a shared utility to reduce duplication across the codebase
+- sync_filter.py grew to handle 4 different tag syntaxes — the state machine approach (active_tag variable) scales reasonably but becomes complex; a priority/precedence table might be cleaner at 6+ tag types
+- All new source files use 'from __future__ import annotations' as required for Python 3.9 compat — this is consistently enforced across the codebase
+- The harness_detector.scan_all() signature changed from returning dict[str, str] to dict[str, dict] — this is a breaking API change that callers should be updated for; existing callers (harness_readiness.py) may need review
+
+### Takeaways
+
+- The adapter registry pattern makes it easy to add per-adapter logic (like get_output_paths) but hard to query adapters from outside — a lightweight 'adapter capabilities' protocol would help the orchestrator introspect adapters without coupling to implementation details
+- The .harnesssync project config file overlaps conceptually with the existing .harness-sync/ directory used for changelog and overrides — consolidating these into a single per-project config directory would reduce confusion
+- The sync_filter.py is becoming the most functionally complex module — it would benefit from being split into a parser (extracting tagged regions) and a filter (applying target-specific rules) to improve testability
+- Profile management and project-level config share the concept of 'apply a named set of sync options' — unifying them (e.g., referencing profiles from .harnesssync) was implemented and works, but the two-layer indirection may confuse users
+- The startup drift check is necessarily conservative (reads from state file, no live adapter checking) — it can miss drift caused by manual edits to target files, which is the exact problem users worry about; a future improvement would hash target files too
+
+---
