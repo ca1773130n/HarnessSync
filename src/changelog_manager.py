@@ -221,6 +221,122 @@ class ChangelogManager:
 
         return "\n".join(lines)
 
+    def export_json(self, output_path: Path | None = None) -> str:
+        """Export sync history as machine-queryable JSON.
+
+        Each entry in the output array represents one sync run with fields:
+          timestamp, scope, account, targets (list of target summaries).
+
+        Args:
+            output_path: If provided, write JSON to this file in addition to returning it.
+
+        Returns:
+            JSON string of the full sync history.
+        """
+        import json as _json
+
+        content = self.read()
+        entries: list[dict] = []
+
+        if content:
+            # Parse entries from Markdown
+            entry_pattern = re.compile(
+                r"^## (\S+)\s*(?:account=(\S+))?\s*scope=(\S+)", re.MULTILINE
+            )
+            target_pattern = re.compile(
+                r"^- \*\*(\w+)\*\*\s+([✓✗])\s+synced=(\d+)\s+skipped=(\d+)\s+failed=(\d+)",
+                re.MULTILINE,
+            )
+            blocked_pattern = re.compile(r"^- \*\*BLOCKED\*\*: (.+)$", re.MULTILINE)
+
+            # Split into per-entry blocks
+            sections = re.split(r"(?=^## \d{4}-\d{2}-\d{2})", content, flags=re.MULTILINE)
+            for section in sections:
+                section = section.strip()
+                if not section:
+                    continue
+                header_m = entry_pattern.search(section)
+                if not header_m:
+                    continue
+
+                entry: dict = {
+                    "timestamp": header_m.group(1),
+                    "account": header_m.group(2),
+                    "scope": header_m.group(3),
+                    "blocked": False,
+                    "targets": [],
+                }
+
+                blocked_m = blocked_pattern.search(section)
+                if blocked_m:
+                    entry["blocked"] = True
+                    entry["block_reason"] = blocked_m.group(1)
+                else:
+                    for tm in target_pattern.finditer(section):
+                        entry["targets"].append(
+                            {
+                                "target": tm.group(1),
+                                "status": "success" if tm.group(2) == "✓" else "failed",
+                                "synced": int(tm.group(3)),
+                                "skipped": int(tm.group(4)),
+                                "failed": int(tm.group(5)),
+                            }
+                        )
+
+                entries.append(entry)
+
+        result = _json.dumps({"sync_history": entries}, indent=2, ensure_ascii=False)
+
+        if output_path is not None:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(result, encoding="utf-8")
+
+        return result
+
+    def export_csv(self, output_path: Path | None = None) -> str:
+        """Export sync history as CSV for spreadsheet analysis.
+
+        Columns: timestamp, account, scope, target, status, synced, skipped, failed
+
+        Args:
+            output_path: If provided, write CSV to this file in addition to returning it.
+
+        Returns:
+            CSV string of the full sync history.
+        """
+        import csv as _csv
+        import io as _io
+
+        buf = _io.StringIO()
+        writer = _csv.writer(buf)
+        writer.writerow(["timestamp", "account", "scope", "target", "status", "synced", "skipped", "failed"])
+
+        import json as _json
+        raw = self.export_json()
+        data = _json.loads(raw)
+
+        for entry in data.get("sync_history", []):
+            ts = entry.get("timestamp", "")
+            account = entry.get("account") or ""
+            scope = entry.get("scope", "")
+            if entry.get("blocked"):
+                writer.writerow([ts, account, scope, "BLOCKED", "blocked", 0, 0, 0])
+            else:
+                for t in entry.get("targets", []):
+                    writer.writerow([
+                        ts, account, scope,
+                        t["target"], t["status"],
+                        t["synced"], t["skipped"], t["failed"],
+                    ])
+
+        result = buf.getvalue()
+
+        if output_path is not None:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(result, encoding="utf-8")
+
+        return result
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------

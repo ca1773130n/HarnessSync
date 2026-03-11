@@ -331,6 +331,90 @@ def generate_degraded_variant(content: str, skill_name: str, target_name: str) -
 # Private helpers
 # ---------------------------------------------------------------------------
 
+def inject_agent_translation_hints(
+    agent_content: str,
+    agent_name: str,
+    target_name: str,
+) -> str:
+    """Inject comment blocks explaining Claude Code capability gaps into agent content.
+
+    When an agent uses CC-specific tools or APIs that don't exist in the target
+    harness, this function prepends a structured hint block explaining what's
+    missing and suggesting manual workarounds. Silent missing features are worse
+    than documented ones.
+
+    Args:
+        agent_content: The agent's markdown content.
+        agent_name: Name of the agent (for the hint header).
+        target_name: Target harness name.
+
+    Returns:
+        Agent content with translation hints prepended (if any gaps detected).
+    """
+    if not agent_content.strip():
+        return agent_content
+
+    gaps: list[str] = []
+
+    # Detect MCP tool call references
+    mcp_matches = re.findall(r"mcp__(\w+)__(\w+)", agent_content)
+    for server, tool in mcp_matches:
+        gaps.append(
+            f"MCP tool `mcp__{server}__{tool}` — requires '{server}' MCP server "
+            f"(not available in {target_name}). "
+            f"Workaround: invoke the equivalent API manually or via a shell command."
+        )
+
+    # Detect Agent tool sub-dispatch
+    if re.search(r"\bAgent\b.*\btool\b|\bsub.?agent\b|\bdispatch.*agent\b", agent_content, re.I):
+        gaps.append(
+            f"Sub-agent dispatch — Claude Code's Agent tool is not available in {target_name}. "
+            f"Workaround: break the task into sequential prompts or use separate harness sessions."
+        )
+
+    # Detect hook event references
+    hook_events = re.findall(
+        r"\b(PreToolUse|PostToolUse|UserPromptSubmit|SessionStart|SessionEnd|SubagentStop)\b",
+        agent_content,
+    )
+    if hook_events:
+        unique_hooks = sorted(set(hook_events))
+        gaps.append(
+            f"Hook events ({', '.join(unique_hooks)}) — {target_name} has no hook system. "
+            f"Workaround: replicate lifecycle behavior using git hooks or shell wrappers."
+        )
+
+    # Detect TodoWrite / TodoRead references
+    if re.search(r"\bTodoWrite\b|\bTodoRead\b", agent_content):
+        gaps.append(
+            f"TodoWrite/TodoRead — Claude Code task tracking is not available in {target_name}. "
+            f"Workaround: use a plain text TODO file or issue tracker."
+        )
+
+    # Detect CLAUDE_PLUGIN_ROOT or plugin path references
+    if re.search(r"CLAUDE_PLUGIN_ROOT|\$CLAUDE_\w+", agent_content):
+        gaps.append(
+            f"Claude Code plugin environment variables — not available in {target_name}. "
+            f"Workaround: use hardcoded paths or standard environment variables instead."
+        )
+
+    if not gaps:
+        return agent_content
+
+    # Build the hint block
+    hint_lines = [
+        f"<!-- HarnessSync: Agent Translation Hints for '{agent_name}' in {target_name} -->",
+        f"<!-- This agent uses {len(gaps)} Claude Code feature(s) not available in {target_name}. -->",
+        "<!--",
+    ]
+    for i, gap in enumerate(gaps, 1):
+        hint_lines.append(f"  {i}. {gap}")
+    hint_lines.append("-->")
+    hint_lines.append("")
+
+    return "\n".join(hint_lines) + agent_content
+
+
 def _strip_frontmatter_keys(content: str, keys_to_remove: set[str]) -> str:
     """Remove specific keys from YAML frontmatter while preserving the rest.
 

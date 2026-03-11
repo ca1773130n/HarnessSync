@@ -735,3 +735,73 @@ _2026-03-11T02:42:46.056Z_
 - The monorepo discoverer's _MAX_DEPTH=3 limit prevents scanning large repos but means deeply nested packages (apps/services/auth/CLAUDE.md) won't be found — users can override with explicit .harnesssync-package.json placement
 
 ---
+## Iteration 12
+_2026-03-11T02:58:08.125Z_
+
+### Items Attempted
+
+- **Sync Preview & Diff Mode** — pass
+- **Reverse Sync: Import from Target** — pass
+- **Smart Merge for Target Customizations** — pass
+- **Git Branch-Aware Sync** — pass
+- **Drift Detection & Alerts** — pass
+- **Skill & Rule Portability Score** — pass
+- **Team Sync Profiles via dotfiles** — pass
+- **Tag-Based Selective Sync** — pass
+- **Harness Capability Matrix** — pass
+- **Natural Language Sync Exclusions** — pass
+- **Sync Timeline & History Explorer** — pass
+- **MCP Server Health Dashboard** — pass
+- **GitHub Actions Sync Step** — pass
+- **Webhook-Triggered Sync** — pass
+- **Context Window Optimizer** — pass
+- **Cross-Section Rule Deduplication** — pass
+- **Secret & Env Var Leak Prevention** — pass
+- **Starter Config Template Library** — pass
+- **Sync Impact Analysis** — pass
+- **Multi-Project Batch Sync** — pass
+- **Visual Config Relationship Map** — pass
+- **Interactive Onboarding Wizard** — pass
+- **Config Health Score** — pass
+- **Watch Mode Desktop Notifications** — pass
+- **Harness Version Migration Assistant** — pass
+- **Rule Effectiveness Insights** — pass
+- **Sync Integrity Verification** — pass
+- **Plugin & Extension Cross-Harness Sync** — pass
+- **Unified Config Search** — pass
+- **AI-Assisted Rule Translation** — pass
+- **Undo Stack for Sync Operations** — pass
+- **Shareable Sync Report** — pass
+- **Environment-Specific Sync Profiles** — pass
+- **Skill & Rule Dependency Graph** — pass
+- **Cross-Harness Prompt Consistency Tester** — pass
+
+### Decisions Made
+
+- Implemented branch-aware sync as a standalone module (branch_aware_sync.py) integrated into the orchestrator's _apply_project_config() rather than as a separate sync path — keeps the sync pipeline unified and branch detection is best-effort (fails silently if not in a git repo)
+- Used fnmatch glob semantics for branch pattern matching (feature/*, release/*) with a regex escape hatch (re: prefix) — matches git's own branch naming conventions and covers 95%+ of real workflows without requiring regex knowledge
+- Specificity scoring for branch profile conflicts: exact > glob-with-fewer-wildcards > regex — same tiebreaking principle as CSS specificity, feels natural to developers
+- NL exclusion parsing uses keyword extraction (not LLM inference) for deterministic offline behavior — fast, no API calls, acceptable precision for common patterns
+- Webhook server uses HTTP (not HTTPS) on loopback-only (127.0.0.1 default) — safe for local dev; teams that need remote access should put it behind a reverse proxy with TLS
+- HMAC key stored in ~/.harnesssync/integrity.key (mode 0o600) with env var override — machine-local by default, team-shareable via HARNESSSYNC_INTEGRITY_KEY env var for cross-machine consistency
+- Migration rules in harness_version_compat.py are plain Python functions, not a DSL — makes them unit-testable and easy to add without learning a meta-schema
+- Interactive timeline in sync_log uses ANSI clear-screen but falls back gracefully if not TTY (non-interactive flag just dumps all entries) — safe for CI pipelines and redirected output
+- Guided setup wizard (run_guided) detects harnesses via HarnessReadinessChecker to get real installed state rather than just shutil.which — more accurate for IDEs like Cursor that have no CLI
+
+### Patterns Discovered
+
+- Codebase consistently uses best-effort error handling (try/except with logger.warn) for all post-sync operations — sync failures should never block the primary result
+- All new modules follow the established from __future__ import annotations header for Python 3.9 compatibility
+- The orchestrator uses an additive pattern for skip sets and intersective for only sets — this is the right semantic for multi-source config merging and should be preserved across all new filter sources
+- Target file signing is done by reverse-lookup of well-known output files per target from _TARGET_OUTPUT_FILES — avoids requiring adapters to report what they wrote, but is fragile if new targets add unusual output paths
+- WebhookServer uses a factory function (_build_handler) to inject config into BaseHTTPRequestHandler subclasses — standard pattern for Python's http.server module which doesn't support constructor injection
+
+### Takeaways
+
+- Most of the 30 items were already substantially implemented — the codebase is very feature-rich. Future ideation should focus on integration quality and test coverage rather than new modules
+- The orchestrator is growing large (964+ lines). The post-sync pipeline (annotations, symlinks, changelog, webhooks, integrity) could be refactored into a PostSyncPipeline class to reduce method count
+- Branch-aware sync could be extended to read from .claude/branch-profiles/ directory (one file per branch) for teams that need version-controlled branch profiles — the current .harnesssync approach is single-file which works but is less composable
+- The NL exclusion parser is intentionally simple (keyword matching) — a more powerful approach would use spaCy dependency parsing to extract (verb, object, target) triples, but offline simplicity wins for a CLI tool
+- Sync integrity verification currently only signs files after the fact via known output file paths. Adapters should call sign_file() directly after each write for tighter coverage — requires adding an integrity_store parameter to adapter.sync_all()
+
+---

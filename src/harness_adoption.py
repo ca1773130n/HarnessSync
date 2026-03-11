@@ -48,6 +48,70 @@ _CHANGELOG_TARGET_RE = re.compile(r"\*\*Target:\*\*\s*(\w+)", re.IGNORECASE)
 _CHANGELOG_DATE_RE = re.compile(r"^#{1,3}\s+(\d{4}-\d{2}-\d{2})", re.MULTILINE)
 
 
+# Quick-start snippets shown after a successful first sync to a harness.
+# Provides the user with an immediate "try it" command to validate the sync.
+_QUICK_START_SNIPPETS: dict[str, list[str]] = {
+    "codex": [
+        "Your Codex is now configured with HarnessSync!",
+        "  Try: codex --help",
+        "  Run your first agent: codex run <agent-name>",
+        "  Or start an interactive session: codex chat",
+    ],
+    "gemini": [
+        "Your Gemini CLI is now configured with HarnessSync!",
+        "  Try: gemini --help",
+        "  Run an agent: gemini run <agent-name>",
+        "  Or start a chat: gemini",
+    ],
+    "opencode": [
+        "Your OpenCode is now configured with HarnessSync!",
+        "  Try: opencode --help",
+        "  Start coding: opencode",
+        "  List available agents: opencode agents",
+    ],
+    "cursor": [
+        "Your Cursor rules are now synced by HarnessSync!",
+        "  Open Cursor and check .cursor/rules/ for your synced rules.",
+        "  Try Cursor's Composer (Ctrl+Shift+I) to use your synced skills.",
+        "  To verify: ls .cursor/rules/",
+    ],
+    "aider": [
+        "Your Aider configuration is now synced by HarnessSync!",
+        "  Try: aider --help",
+        "  Start a session: aider",
+        "  Your conventions are in CONVENTIONS.md — aider reads it automatically.",
+    ],
+    "windsurf": [
+        "Your Windsurf is now configured with HarnessSync!",
+        "  Open Windsurf and check .windsurfrules for your synced rules.",
+        "  Windsurf reads .windsurfrules automatically at session start.",
+    ],
+}
+
+
+def get_quick_start_nudge(target: str, is_first_sync: bool = False) -> str | None:
+    """Return a quick-start nudge string for a newly synced harness.
+
+    Shows the user an actionable 'try it now' snippet immediately after a
+    successful first sync, reducing the gap between 'sync succeeded' and
+    'user actually using the new harness.'
+
+    Args:
+        target: Target harness name.
+        is_first_sync: If True, always show the nudge. If False, only show
+                       for targets that appear to not have been used yet.
+
+    Returns:
+        Quick-start text string, or None if no nudge available for this target.
+    """
+    snippet_lines = _QUICK_START_SNIPPETS.get(target)
+    if not snippet_lines:
+        return None
+
+    lines = ["", "─" * 50] + snippet_lines + ["─" * 50]
+    return "\n".join(lines)
+
+
 class HarnessAdoptionReport:
     """Per-harness adoption metrics."""
 

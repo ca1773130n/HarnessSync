@@ -4,8 +4,15 @@ from __future__ import annotations
 /sync-rollback slash command implementation.
 
 Lists available sync backups and restores a target to a previous state.
+
+Time-travel rollback extensions:
+  --timestamp YYYY-MM-DD or YYYY-MM-DDTHH:MM  restore the most recent backup
+      taken on or before the given timestamp
+  --before-commit <sha>  restore the backup taken before a specific git commit
+      (requires git history in the project)
 """
 
+import datetime
 import os
 import sys
 import shlex
@@ -20,6 +27,100 @@ sys.path.insert(0, PLUGIN_ROOT)
 
 
 BACKUP_ROOT = Path.home() / ".harnesssync" / "backups"
+
+
+def _find_backup_by_timestamp(backups: list[Path], timestamp_str: str) -> Path | None:
+    """Find the most recent backup on or before the given timestamp string.
+
+    Args:
+        backups: Sorted list of backup dirs (newest first).
+        timestamp_str: Timestamp like "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM".
+
+    Returns:
+        Matching backup Path, or None if none found.
+    """
+    # Parse the requested cutoff timestamp
+    cutoff: datetime.datetime | None = None
+    for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%d"):
+        try:
+            cutoff = datetime.datetime.strptime(timestamp_str, fmt)
+            break
+        except ValueError:
+            continue
+
+    if cutoff is None:
+        print(
+            f"Unrecognized timestamp format: '{timestamp_str}'. "
+            "Use YYYY-MM-DD or YYYY-MM-DDTHH:MM.",
+            file=sys.stderr,
+        )
+        return None
+
+    cutoff_ts = cutoff.timestamp()
+
+    # backups are sorted newest-first; find the first one whose mtime <= cutoff
+    for backup_dir in backups:
+        try:
+            mtime = backup_dir.stat().st_mtime
+        except OSError:
+            continue
+        if mtime <= cutoff_ts:
+            dt = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+            print(f"Selected backup: {backup_dir.name} ({dt})")
+            return backup_dir
+
+    return None
+
+
+def _find_backup_before_commit(
+    backups: list[Path], commit_sha: str, project_dir: Path
+) -> Path | None:
+    """Find the most recent backup taken before the given git commit timestamp.
+
+    Args:
+        backups: Sorted backup dirs (newest first).
+        commit_sha: Git commit SHA (full or short).
+        project_dir: Project root (used to run git commands).
+
+    Returns:
+        Matching backup Path, or None if not found.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%ct", commit_sha],
+            capture_output=True,
+            text=True,
+            cwd=str(project_dir),
+            timeout=5,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            print(
+                f"Could not resolve commit '{commit_sha}': {result.stderr.strip()}",
+                file=sys.stderr,
+            )
+            return None
+        commit_ts = float(result.stdout.strip())
+    except (OSError, subprocess.TimeoutExpired, ValueError) as e:
+        print(f"Git error: {e}", file=sys.stderr)
+        return None
+
+    dt_commit = datetime.datetime.fromtimestamp(commit_ts).strftime("%Y-%m-%d %H:%M:%S")
+    print(f"Commit {commit_sha[:8]} was at {dt_commit} — looking for backup just before that...")
+
+    # Find the most recent backup that predates the commit
+    for backup_dir in backups:
+        try:
+            mtime = backup_dir.stat().st_mtime
+        except OSError:
+            continue
+        if mtime < commit_ts:
+            dt = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+            print(f"Selected backup: {backup_dir.name} ({dt})")
+            return backup_dir
+
+    return None
 
 
 def _list_backups_for_target(target: str) -> list[Path]:
@@ -101,6 +202,26 @@ def main() -> None:
         default=None,
         help="Filter --list to backups with this label, or find backup by label for restore.",
     )
+    parser.add_argument(
+        "--timestamp",
+        type=str,
+        default=None,
+        help=(
+            "Restore the most recent backup on or before this timestamp. "
+            "Formats: YYYY-MM-DD or YYYY-MM-DDTHH:MM. "
+            "Example: --timestamp 2025-03-10 or --timestamp '2025-03-10T14:30'"
+        ),
+    )
+    parser.add_argument(
+        "--before-commit",
+        type=str,
+        default=None,
+        help=(
+            "Restore the backup taken before a specific git commit SHA. "
+            "Uses git log to find the commit timestamp then selects the nearest backup. "
+            "Example: --before-commit abc1234"
+        ),
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -129,7 +250,6 @@ def main() -> None:
                 print(f"No backups found with label '{args.label}'.")
                 return
 
-        import datetime
         print("Available Sync Backups (newest first)")
         print("=" * 60)
         current_target = None
@@ -162,6 +282,22 @@ def main() -> None:
         if not backup_dir:
             print(f"Backup '{args.backup}' not found for target '{target}'.")
             print("Run /sync-rollback --list to see available backups.")
+            return
+    elif args.timestamp:
+        # Time-travel: find backup on or before given timestamp
+        backup_dir = _find_backup_by_timestamp(backups, args.timestamp)
+        if backup_dir is None:
+            print(f"No backup found for target '{target}' at or before '{args.timestamp}'.")
+            print("Run /sync-rollback --list to see available backups with their timestamps.")
+            return
+    elif args.before_commit:
+        # Time-travel: find backup taken before a specific git commit
+        backup_dir = _find_backup_before_commit(backups, args.before_commit, project_dir)
+        if backup_dir is None:
+            print(
+                f"Could not find a backup for target '{target}' before commit '{args.before_commit}'. "
+                "Ensure git history is available and the commit SHA is valid."
+            )
             return
     elif args.label:
         # Find most recent backup with matching label

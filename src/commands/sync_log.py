@@ -65,6 +65,20 @@ def main() -> None:
         default=None,
         help="Project directory (default: cwd)",
     )
+    parser.add_argument(
+        "--export-json",
+        type=str,
+        default=None,
+        metavar="OUTPUT_FILE",
+        help="Export full sync history as machine-queryable JSON to OUTPUT_FILE",
+    )
+    parser.add_argument(
+        "--export-csv",
+        type=str,
+        default=None,
+        metavar="OUTPUT_FILE",
+        help="Export full sync history as CSV (for spreadsheet analysis) to OUTPUT_FILE",
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -73,6 +87,25 @@ def main() -> None:
 
     project_dir = Path(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
     changelog = ChangelogManager(project_dir)
+
+    # Handle export modes before other actions
+    if getattr(args, "export_json", None):
+        output_path = Path(args.export_json)
+        result = changelog.export_json(output_path=output_path)
+        if args.export_json == "-":
+            print(result)
+        else:
+            print(f"Sync history exported as JSON to: {output_path}")
+        return
+
+    if getattr(args, "export_csv", None):
+        output_path = Path(args.export_csv)
+        result = changelog.export_csv(output_path=output_path)
+        if args.export_csv == "-":
+            print(result)
+        else:
+            print(f"Sync history exported as CSV to: {output_path}")
+        return
 
     if args.clear:
         log_path = project_dir / ".harness-sync" / "changelog.md"

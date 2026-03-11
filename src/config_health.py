@@ -242,3 +242,104 @@ def _score_bar(score: int, width: int = 20) -> str:
     """Generate an ASCII progress bar for a score 0-100."""
     filled = int(score / 100 * width)
     return "[" + "█" * filled + "░" * (width - filled) + "]"
+
+
+def get_drift_analytics(state_manager, targets: list[str] | None = None) -> dict:
+    """Compute drift frequency and age analytics for all configured targets.
+
+    Tracks how often each target drifts from source and how long between syncs.
+    Surfaces insights like "Your Codex config is 3 weeks out of date."
+
+    Args:
+        state_manager: StateManager instance for reading last-sync data.
+        targets: List of targets to check. If None, checks all known targets.
+
+    Returns:
+        Dict with:
+            per_target: {target -> {days_since_sync, drift_level, is_stale}}
+            stale_targets: list of targets with significant drift
+            insights: list of human-readable insight strings
+    """
+    import time as _time
+
+    if targets is None:
+        targets = [
+            "codex", "gemini", "opencode", "cursor", "aider", "windsurf",
+        ]
+
+    now = _time.time()
+    STALE_DAYS = 14  # 2 weeks without sync = stale
+    WARN_DAYS = 7    # 1 week = worth a mention
+
+    per_target: dict[str, dict] = {}
+    stale_targets: list[str] = []
+    insights: list[str] = []
+
+    for target in targets:
+        status = state_manager.get_target_status(target) or {}
+        last_sync_ts = status.get("last_sync_time")
+
+        if last_sync_ts is None:
+            days = None
+            drift_level = "unknown"
+            is_stale = False  # Never synced — not "stale", just "not started"
+        else:
+            days = (now - last_sync_ts) / 86400
+            if days > STALE_DAYS:
+                drift_level = "high"
+                is_stale = True
+                stale_targets.append(target)
+            elif days > WARN_DAYS:
+                drift_level = "medium"
+                is_stale = False
+            else:
+                drift_level = "low"
+                is_stale = False
+
+        per_target[target] = {
+            "days_since_sync": round(days, 1) if days is not None else None,
+            "drift_level": drift_level,
+            "is_stale": is_stale,
+            "last_sync_time": last_sync_ts,
+        }
+
+    # Build human-readable insights
+    if stale_targets:
+        for t in stale_targets:
+            days = per_target[t]["days_since_sync"]
+            if days is not None:
+                insights.append(
+                    f"Your {t} config is {int(days)} day(s) out of date. "
+                    f"Run /sync --target {t} to update it."
+                )
+
+    never_synced = [t for t in targets if per_target[t]["days_since_sync"] is None]
+    if never_synced:
+        insights.append(
+            f"{len(never_synced)} target(s) have never been synced: "
+            + ", ".join(never_synced)
+            + ". Run /sync to initialize them."
+        )
+
+    warn_targets = [
+        t for t in targets
+        if per_target[t]["drift_level"] == "medium"
+    ]
+    if warn_targets:
+        insights.append(
+            f"{len(warn_targets)} target(s) are approaching staleness (> {WARN_DAYS} days): "
+            + ", ".join(warn_targets)
+        )
+
+    if not insights:
+        active = [t for t in targets if per_target[t]["days_since_sync"] is not None]
+        if active:
+            insights.append(
+                f"All {len(active)} active target(s) synced within the last {WARN_DAYS} days."
+            )
+
+    return {
+        "per_target": per_target,
+        "stale_targets": stale_targets,
+        "insights": insights,
+    }
