@@ -1,0 +1,304 @@
+from __future__ import annotations
+
+"""Rule usage and effectiveness tracker (item 14).
+
+Instruments hooks to track which rules and skills are referenced in tool
+calls across sessions. Surfaces a /sync-analytics report showing which
+rules are frequently triggered versus never used.
+
+Architecture:
+- Usage events are appended to ~/.harnesssync/rule-usage.jsonl (one JSON
+  per line for append-friendly writes without parsing the full file)
+- RuleUsageTracker.record() appends an event
+- RuleUsageTracker.analytics() parses the log and aggregates counts
+- RuleUsageTracker.format_report() formats for human display
+
+Event schema:
+    {
+        "ts": "2024-01-01T10:00:00",   # ISO 8601 timestamp
+        "rule": "section-heading",      # rule/skill name or pattern matched
+        "context": "tool_call",         # event context
+        "session_id": "abc123"          # opaque session identifier
+    }
+"""
+
+import json
+import os
+import re
+import time
+import uuid
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+from typing import Any
+
+
+# Default usage log location
+_DEFAULT_LOG_FILE = Path.home() / ".harnesssync" / "rule-usage.jsonl"
+
+# Maximum log file size before rotation (5 MB)
+_MAX_LOG_SIZE_BYTES = 5 * 1024 * 1024
+
+# Session ID for this process (stable within a session)
+_SESSION_ID = uuid.uuid4().hex[:8]
+
+
+@dataclass
+class RuleUsageEvent:
+    """A single rule reference event."""
+    ts: str
+    rule: str
+    context: str
+    session_id: str = _SESSION_ID
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    def to_json(self) -> str:
+        d = {"ts": self.ts, "rule": self.rule, "context": self.context,
+             "session_id": self.session_id}
+        if self.extra:
+            d.update(self.extra)
+        return json.dumps(d, ensure_ascii=False)
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "RuleUsageEvent":
+        extra = {k: v for k, v in d.items()
+                 if k not in ("ts", "rule", "context", "session_id")}
+        return cls(
+            ts=d.get("ts", ""),
+            rule=d.get("rule", ""),
+            context=d.get("context", ""),
+            session_id=d.get("session_id", ""),
+            extra=extra,
+        )
+
+
+@dataclass
+class RuleUsageSummary:
+    """Aggregated statistics for a single rule/skill."""
+    rule: str
+    total_uses: int = 0
+    sessions: int = 0
+    last_used: str = ""
+    first_used: str = ""
+
+
+class RuleUsageTracker:
+    """Tracks and reports rule/skill usage across Claude Code sessions.
+
+    Thread-safe via append-only writes to a JSONL file. Reading parses
+    the entire log; writing appends a single line (no lock needed for
+    standard POSIX filesystems where single writes < PIPE_BUF are atomic).
+    """
+
+    def __init__(self, log_file: Path | None = None):
+        self._log_file = log_file or _DEFAULT_LOG_FILE
+
+    # ------------------------------------------------------------------
+    # Recording
+    # ------------------------------------------------------------------
+
+    def record(self, rule: str, context: str = "unknown", extra: dict | None = None) -> None:
+        """Record a single rule reference event.
+
+        Args:
+            rule: Name/identifier of the rule or skill referenced.
+            context: Context in which the rule was triggered
+                     (e.g. "tool_call", "user_prompt", "hook").
+            extra: Optional additional metadata to store.
+        """
+        self._rotate_if_needed()
+        event = RuleUsageEvent(
+            ts=datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
+            rule=rule,
+            context=context,
+            extra=extra or {},
+        )
+        self._log_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._log_file, "a", encoding="utf-8") as fh:
+            fh.write(event.to_json() + "\n")
+
+    def record_from_text(self, text: str, known_rules: list[str], context: str = "tool_call") -> int:
+        """Scan text for known rule references and record matches.
+
+        Useful in PostToolUse hooks that receive tool input/output text
+        and want to log which rules were implicitly referenced.
+
+        Args:
+            text: Text to scan (e.g. AI response, tool call content).
+            known_rules: List of rule/skill names to detect.
+            context: Event context label.
+
+        Returns:
+            Number of unique rule references detected.
+        """
+        detected = 0
+        text_lower = text.lower()
+        for rule in known_rules:
+            if rule.lower() in text_lower:
+                self.record(rule, context=context)
+                detected += 1
+        return detected
+
+    # ------------------------------------------------------------------
+    # Analytics
+    # ------------------------------------------------------------------
+
+    def load_events(self, days: int = 30) -> list[RuleUsageEvent]:
+        """Load events from the log, optionally filtering to last N days.
+
+        Args:
+            days: Only return events within this many days. 0 = all time.
+
+        Returns:
+            List of RuleUsageEvent objects.
+        """
+        if not self._log_file.exists():
+            return []
+
+        cutoff: datetime | None = None
+        if days > 0:
+            cutoff = datetime.now(tz=timezone.utc) - timedelta(days=days)
+
+        events: list[RuleUsageEvent] = []
+        with open(self._log_file, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line)
+                    ev = RuleUsageEvent.from_dict(d)
+                    if cutoff and ev.ts:
+                        try:
+                            ev_dt = datetime.fromisoformat(ev.ts)
+                            if ev_dt.tzinfo is None:
+                                ev_dt = ev_dt.replace(tzinfo=timezone.utc)
+                            if ev_dt < cutoff:
+                                continue
+                        except ValueError:
+                            pass
+                    events.append(ev)
+                except json.JSONDecodeError:
+                    continue
+
+        return events
+
+    def analytics(self, days: int = 30) -> dict[str, RuleUsageSummary]:
+        """Compute per-rule aggregated statistics.
+
+        Args:
+            days: Analyse events from the last N days (0 = all time).
+
+        Returns:
+            Dict mapping rule name → RuleUsageSummary.
+        """
+        events = self.load_events(days=days)
+
+        # Group by rule
+        by_rule: dict[str, list[RuleUsageEvent]] = defaultdict(list)
+        for ev in events:
+            if ev.rule:
+                by_rule[ev.rule].append(ev)
+
+        summaries: dict[str, RuleUsageSummary] = {}
+        for rule, rule_events in by_rule.items():
+            sessions = {ev.session_id for ev in rule_events if ev.session_id}
+            timestamps = sorted(ev.ts for ev in rule_events if ev.ts)
+            summaries[rule] = RuleUsageSummary(
+                rule=rule,
+                total_uses=len(rule_events),
+                sessions=len(sessions),
+                first_used=timestamps[0] if timestamps else "",
+                last_used=timestamps[-1] if timestamps else "",
+            )
+
+        return summaries
+
+    def find_unused_rules(self, known_rules: list[str], days: int = 30) -> list[str]:
+        """Return rules from known_rules that have zero recorded uses.
+
+        Args:
+            known_rules: List of all rule names to check.
+            days: Look-back window in days.
+
+        Returns:
+            Sorted list of rule names with zero recorded uses.
+        """
+        used = set(self.analytics(days=days).keys())
+        return sorted(r for r in known_rules if r not in used)
+
+    def format_report(
+        self,
+        known_rules: list[str] | None = None,
+        days: int = 30,
+        top_n: int = 20,
+    ) -> str:
+        """Format analytics as a human-readable report.
+
+        Args:
+            known_rules: If provided, also shows unused rules.
+            days: Look-back window in days.
+            top_n: Show top N most-used rules.
+
+        Returns:
+            Formatted report string.
+        """
+        summaries = self.analytics(days=days)
+        window_label = f"last {days} days" if days > 0 else "all time"
+
+        lines = [
+            "Rule Usage Analytics",
+            "=" * 50,
+            f"Window: {window_label}",
+            f"Tracked rules: {len(summaries)}",
+            "",
+        ]
+
+        if not summaries:
+            lines.append("No usage data found. Run some sessions with rule tracking enabled.")
+            return "\n".join(lines)
+
+        # Sort by usage count descending
+        ranked = sorted(summaries.values(), key=lambda s: s.total_uses, reverse=True)
+
+        lines.append(f"{'Rule':<40} {'Uses':>6}  {'Sessions':>8}  {'Last Used'}")
+        lines.append("-" * 75)
+        for s in ranked[:top_n]:
+            last = s.last_used[:10] if s.last_used else "—"
+            lines.append(f"  {s.rule:<38} {s.total_uses:>6}  {s.sessions:>8}  {last}")
+
+        if len(ranked) > top_n:
+            lines.append(f"  ... and {len(ranked) - top_n} more rules")
+
+        if known_rules:
+            unused = self.find_unused_rules(known_rules, days=days)
+            if unused:
+                lines.append(f"\nNever-used rules ({len(unused)}) — consider pruning:")
+                for rule in unused[:15]:
+                    lines.append(f"  - {rule}")
+                if len(unused) > 15:
+                    lines.append(f"  ... and {len(unused) - 15} more")
+
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Maintenance
+    # ------------------------------------------------------------------
+
+    def _rotate_if_needed(self) -> None:
+        """Rotate log file if it exceeds _MAX_LOG_SIZE_BYTES."""
+        if not self._log_file.exists():
+            return
+        if self._log_file.stat().st_size < _MAX_LOG_SIZE_BYTES:
+            return
+        rotated = self._log_file.with_suffix(".jsonl.1")
+        try:
+            self._log_file.rename(rotated)
+        except OSError:
+            pass
+
+    def clear(self) -> None:
+        """Delete the usage log (for testing or fresh start)."""
+        if self._log_file.exists():
+            self._log_file.unlink()

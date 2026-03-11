@@ -586,6 +586,36 @@ class SyncOrchestrator:
             except Exception as _ie:
                 self.logger.warn(f"Integrity signing failed: {_ie}")
 
+        # --- POST-SYNC: CONFIG VERIFICATION (item 28) ---
+        if not self.dry_run:
+            try:
+                from src.post_sync_verifier import PostSyncVerifier
+                verifier = PostSyncVerifier(project_dir=self.project_dir)
+                verify_result = verifier.verify_all_targets(results)
+                if verify_result.issues:
+                    results["_post_sync_verify"] = {
+                        "ok": verify_result.ok,
+                        "error_count": verify_result.error_count,
+                        "warning_count": verify_result.warning_count,
+                        "issues": [
+                            {"target": i.target, "file": i.file_path,
+                             "severity": i.severity, "message": i.message}
+                            for i in verify_result.issues
+                        ],
+                    }
+                    if verify_result.error_count:
+                        self.logger.warn(
+                            f"Post-sync verification: {verify_result.error_count} error(s) "
+                            f"in written config files. Run /sync again or check output files."
+                        )
+                    for issue in verify_result.issues:
+                        self.logger.warn(
+                            f"  [{issue.severity.upper()}] {issue.target}: "
+                            f"{issue.file_path} — {issue.message}"
+                        )
+            except Exception as _ve:
+                self.logger.warn(f"Post-sync verification failed: {_ve}")
+
         # Add conflicts to results if any were found
         if any(conflicts.values()):
             results['_conflicts'] = conflicts

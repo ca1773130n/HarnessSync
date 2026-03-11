@@ -445,3 +445,161 @@ def _strip_frontmatter_keys(content: str, keys_to_remove: set[str]) -> str:
     else:
         # All frontmatter removed — drop the delimiters too
         return body.lstrip("\n")
+
+
+# ---------------------------------------------------------------------------
+# AI-Powered Rule Translation (item 4)
+# ---------------------------------------------------------------------------
+
+# Rules with no structural equivalent in the target harness need semantic
+# rewriting rather than literal text copying or silently being dropped.
+# This function calls the Anthropic Claude API to produce an equivalent
+# rule rewrite in the target harness's idiom.
+
+_AI_TRANSLATION_SYSTEM_PROMPT = """You are an expert in AI coding assistant configuration.
+Your task is to translate a rule or instruction written for Claude Code (claude.ai)
+into a semantically equivalent version suitable for {target_harness}.
+
+Key constraints:
+- Preserve the intent and semantics of the original rule exactly
+- Rewrite any Claude Code-specific syntax or tool references into the target's idiom
+- If the target has no equivalent concept, produce a plain-text instruction that
+  guides the AI model to approximate the behavior manually
+- Do not add commentary or explanation — output only the translated rule text
+- Keep the same heading level and markdown structure where possible
+- Target harness: {target_harness}
+
+Target harness characteristics:
+{target_characteristics}"""
+
+_TARGET_CHARACTERISTICS: dict[str, str] = {
+    "codex": "OpenAI Codex CLI. Uses AGENTS.md for rules. No tool-call XML. Plain markdown instructions only.",
+    "gemini": "Google Gemini CLI. Uses GEMINI.md. No Claude-specific tool names. Plain markdown instructions.",
+    "opencode": "OpenCode CLI. Uses opencode.json + markdown rule files. No Claude-specific constructs.",
+    "cursor": "Cursor IDE AI. Uses .cursor/rules/*.mdc files with YAML frontmatter. No Claude tool names.",
+    "aider": "Aider (command-line AI). Uses CONVENTIONS.md. Plain text instructions, no frontmatter.",
+    "windsurf": "Windsurf IDE AI. Uses .windsurfrules. Plain markdown, no Claude-specific tool names.",
+    "cline": "Cline VS Code AI. Uses .clinerules. Plain markdown instructions.",
+}
+
+
+def ai_translate_rule(
+    rule_content: str,
+    target_name: str,
+    api_key: str | None = None,
+    model: str = "claude-haiku-4-5-20251001",
+    timeout: float = 15.0,
+) -> str | None:
+    """Use Claude API to semantically translate a rule to a target harness.
+
+    Falls back to None (caller should use regular translation) if:
+    - anthropic package is not installed
+    - API key is not available
+    - The API call fails
+
+    Args:
+        rule_content: Original rule text (markdown, possibly with frontmatter).
+        target_name: Target harness name (codex, gemini, etc.)
+        api_key: Anthropic API key. Reads ANTHROPIC_API_KEY env var if not provided.
+        model: Claude model ID to use for translation.
+        timeout: HTTP request timeout in seconds.
+
+    Returns:
+        Translated rule content string, or None if unavailable/failed.
+    """
+    import os
+
+    resolved_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+    if not resolved_key:
+        return None
+
+    characteristics = _TARGET_CHARACTERISTICS.get(
+        target_name,
+        f"{target_name} AI coding assistant. No Claude Code-specific constructs.",
+    )
+
+    system = _AI_TRANSLATION_SYSTEM_PROMPT.format(
+        target_harness=target_name,
+        target_characteristics=characteristics,
+    )
+
+    user_message = (
+        f"Translate the following Claude Code rule for {target_name}:\n\n"
+        f"```\n{rule_content}\n```\n\n"
+        f"Output only the translated rule text, no explanation."
+    )
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=resolved_key)
+        response = client.messages.create(
+            model=model,
+            max_tokens=2048,
+            system=system,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        translated = response.content[0].text.strip()
+        # Strip wrapping ``` if the model added code fences around the result
+        if translated.startswith("```") and translated.endswith("```"):
+            inner = translated[3:]
+            first_newline = inner.find("\n")
+            if first_newline != -1:
+                translated = inner[first_newline + 1:-3].strip()
+        return translated
+    except ImportError:
+        pass  # anthropic not installed
+    except Exception:
+        pass  # API error — fall back to regex translation
+
+    return None
+
+
+def translate_rule_with_ai_fallback(
+    content: str,
+    target_name: str,
+    api_key: str | None = None,
+    use_ai: bool = True,
+) -> tuple[str, bool]:
+    """Translate rule content, using AI for semantically complex rules.
+
+    For rules that still contain Claude Code-specific constructs after
+    regex translation, attempts an AI-powered semantic rewrite via the
+    Claude API. Falls back to regex translation if AI is unavailable.
+
+    Args:
+        content: Raw rule content.
+        target_name: Target harness name.
+        api_key: Optional Anthropic API key.
+        use_ai: If True, attempt AI translation for complex rules.
+
+    Returns:
+        Tuple of (translated_content, used_ai) where used_ai indicates
+        whether the AI path was actually used.
+    """
+    # First pass: regex-based translation
+    regex_translated = translate_skill_content(content, target_name)
+
+    # Check if CC-specific constructs remain after regex translation
+    _CC_TOOL_PATTERN = re.compile(
+        r"\b(" + "|".join(re.escape(t) for t in _CC_TOOLS) + r")\b",
+        re.IGNORECASE,
+    )
+    _HOOK_PATTERN = re.compile(
+        r"\b(PreToolUse|PostToolUse|UserPromptSubmit|SessionStart|SessionEnd|mcp__\w+__\w+)\b"
+    )
+
+    has_cc_constructs = bool(
+        _CC_TOOL_PATTERN.search(regex_translated)
+        or _HOOK_PATTERN.search(regex_translated)
+        or "$CLAUDE_PLUGIN_ROOT" in regex_translated
+    )
+
+    if not (use_ai and has_cc_constructs):
+        return regex_translated, False
+
+    # Attempt AI-powered translation
+    ai_result = ai_translate_rule(regex_translated, target_name, api_key=api_key)
+    if ai_result:
+        return ai_result, True
+
+    return regex_translated, False

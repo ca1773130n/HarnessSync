@@ -1,10 +1,18 @@
 from __future__ import annotations
 
-"""Git post-commit hook installer for auto-sync.
+"""Git hook installer for auto-sync (items 14 and 15).
 
 Installs a post-commit hook that triggers HarnessSync whenever CLAUDE.md,
-.claude/, or .mcp.json changes in a commit. Config changes are always tied
-to code — this makes sync automatic as part of the developer's git workflow.
+.claude/, or .mcp.json changes in a commit, and optionally a pre-commit hook
+that syncs and stages the updated target files (AGENTS.md, GEMINI.md, etc.)
+in the same commit.
+
+Pre-commit hook (item 15):
+When --pre-commit is used, the pre-commit hook:
+1. Detects staged changes to CLAUDE.md / .claude/ / .mcp.json
+2. Runs HarnessSync synchronously (blocking, not in background)
+3. Stages the updated target files (AGENTS.md, GEMINI.md, etc.)
+   so they are included in the same commit automatically.
 """
 
 import stat
@@ -67,6 +75,72 @@ exit 0
 """
 
 HARNESSSYNC_MARKER = "# harnesssync-hook-v1"
+
+# Pre-commit hook: syncs synchronously and stages target files in the same commit
+PRE_COMMIT_HOOK_TEMPLATE = """\
+#!/bin/sh
+# HarnessSync pre-commit hook
+# Syncs harness configs and stages updated target files automatically
+# Installed by: /sync-git-hook install --pre-commit
+# Remove with: /sync-git-hook uninstall --pre-commit
+
+HARNESSSYNC_PRE_MARKER="# harnesssync-pre-commit-v1"
+$HARNESSSYNC_PRE_MARKER
+
+# Check if any trigger files are staged
+staged=$(git diff --cached --name-only 2>/dev/null)
+
+triggers=0
+for pattern in CLAUDE.md .claude/ .mcp.json .harness-sync/; do
+    if echo "$staged" | grep -q "^$pattern"; then
+        triggers=1
+        break
+    fi
+done
+
+if [ "$triggers" -eq 0 ]; then
+    exit 0
+fi
+
+# Find HarnessSync plugin root
+if [ -n "$CLAUDE_PLUGIN_ROOT" ]; then
+    HS_ROOT="$CLAUDE_PLUGIN_ROOT"
+elif [ -f "$HOME/.claude/plugins/harness-sync/src/commands/sync.py" ]; then
+    HS_ROOT="$HOME/.claude/plugins/harness-sync"
+else
+    # Not installed — skip silently
+    exit 0
+fi
+
+PY=$(command -v python3 || command -v python)
+if [ -z "$PY" ]; then
+    exit 0
+fi
+
+# Run sync synchronously (blocking — ensures files are ready before commit)
+echo "HarnessSync: syncing harness configs..."
+if ! "$PY" "$HS_ROOT/src/commands/sync.py" --scope all 2>&1; then
+    echo "HarnessSync: sync failed; continuing commit without auto-stage." >&2
+    exit 0
+fi
+
+# Stage known target config files if they were updated by sync
+TARGET_FILES="AGENTS.md GEMINI.md opencode.json codex.toml .cursor/mcp.json .windsurf/rules .aider.conf.yml CONVENTIONS.md"
+staged_count=0
+for f in $TARGET_FILES; do
+    if [ -f "$f" ]; then
+        git add "$f" 2>/dev/null && staged_count=$((staged_count + 1))
+    fi
+done
+
+if [ "$staged_count" -gt 0 ]; then
+    echo "HarnessSync: staged $staged_count updated harness config file(s)."
+fi
+
+exit 0
+"""
+
+PRE_COMMIT_MARKER = "# harnesssync-pre-commit-v1"
 
 
 def find_git_dir(start: Path) -> Path | None:
@@ -178,6 +252,89 @@ def is_hook_installed(project_dir: Path) -> bool:
     if not hook_path.exists():
         return False
     return HARNESSSYNC_MARKER in hook_path.read_text(encoding="utf-8")
+
+
+def install_pre_commit_hook(project_dir: Path) -> tuple[bool, str]:
+    """Install pre-commit hook that syncs and auto-stages target files.
+
+    The pre-commit hook runs synchronously before a commit completes,
+    syncs harness configs, and stages the updated target files so they
+    are included in the same commit.
+
+    Args:
+        project_dir: Project directory to start searching for git repo
+
+    Returns:
+        (success, message) tuple
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False, "Not inside a git repository"
+
+    hooks_dir = git_dir / "hooks"
+    hooks_dir.mkdir(exist_ok=True)
+
+    hook_path = hooks_dir / "pre-commit"
+
+    if hook_path.exists():
+        existing = hook_path.read_text(encoding="utf-8")
+        if PRE_COMMIT_MARKER in existing:
+            return True, f"Pre-commit hook already installed at {hook_path}"
+        with open(hook_path, "a", encoding="utf-8") as f:
+            f.write("\n" + PRE_COMMIT_HOOK_TEMPLATE)
+        _make_executable(hook_path)
+        return True, f"HarnessSync pre-commit hook appended to existing hook at {hook_path}"
+
+    hook_path.write_text(PRE_COMMIT_HOOK_TEMPLATE, encoding="utf-8")
+    _make_executable(hook_path)
+    return True, f"Pre-commit hook installed at {hook_path}"
+
+
+def uninstall_pre_commit_hook(project_dir: Path) -> tuple[bool, str]:
+    """Remove HarnessSync section from the pre-commit hook.
+
+    Args:
+        project_dir: Project directory to search for git repo
+
+    Returns:
+        (success, message) tuple
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False, "Not inside a git repository"
+
+    hook_path = git_dir / "hooks" / "pre-commit"
+    if not hook_path.exists():
+        return True, "No pre-commit hook found (nothing to remove)"
+
+    content = hook_path.read_text(encoding="utf-8")
+    if PRE_COMMIT_MARKER not in content:
+        return True, "HarnessSync hook not found in pre-commit hook"
+
+    lines = content.splitlines(keepends=True)
+    non_hs_lines = [
+        line for line in lines
+        if PRE_COMMIT_MARKER not in line and not line.strip().startswith("# HarnessSync pre-commit")
+    ]
+    new_content = "".join(non_hs_lines).strip()
+
+    if not new_content or new_content == "#!/bin/sh":
+        hook_path.unlink()
+        return True, f"Pre-commit hook removed from {hook_path}"
+    else:
+        hook_path.write_text(new_content + "\n", encoding="utf-8")
+        return True, f"HarnessSync section removed from pre-commit hook at {hook_path}"
+
+
+def is_pre_commit_hook_installed(project_dir: Path) -> bool:
+    """Check if HarnessSync pre-commit hook is installed."""
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False
+    hook_path = git_dir / "hooks" / "pre-commit"
+    if not hook_path.exists():
+        return False
+    return PRE_COMMIT_MARKER in hook_path.read_text(encoding="utf-8")
 
 
 def _make_executable(path: Path) -> None:
