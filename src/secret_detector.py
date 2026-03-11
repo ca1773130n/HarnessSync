@@ -137,6 +137,52 @@ class SecretDetector:
                 })
         return detections
 
+    def scan_config_files(
+        self,
+        project_dir,
+        extra_files: list | None = None,
+    ) -> list[dict]:
+        """Scan all relevant config files in a project for inline secrets.
+
+        Called automatically before every sync operation. Checks CLAUDE.md,
+        CLAUDE.local.md, and any extra files provided. Returns detections from
+        all scanned files merged into a single list.
+
+        CRITICAL: Never logs or displays actual secret values.
+
+        Args:
+            project_dir: Path to project root directory.
+            extra_files: Additional file paths (absolute) to scan.
+
+        Returns:
+            Merged list of detection dicts from all scanned files.
+        """
+        from pathlib import Path
+
+        project_dir = Path(project_dir)
+        default_files = [
+            project_dir / "CLAUDE.md",
+            project_dir / "CLAUDE.local.md",
+            project_dir / ".claude" / "settings.json",
+            project_dir / ".mcp.json",
+        ]
+        paths = list(default_files)
+        if extra_files:
+            paths.extend(Path(p) for p in extra_files)
+
+        all_detections: list[dict] = []
+        for path in paths:
+            if not path.exists():
+                continue
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            hits = self.scan_content(content, source_label=path.name)
+            all_detections.extend(hits)
+
+        return all_detections
+
     def scan_mcp_env(self, mcp_servers: dict) -> list[dict]:
         """
         Extract and scan environment variables from MCP server configs.

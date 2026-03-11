@@ -522,6 +522,115 @@ class CompatibilityReporter:
         lines.append("")
         return "\n".join(lines)
 
+    def feature_gap_report(self, results: dict, source_config: dict | None = None) -> str:
+        """Generate a post-sync Harness Capability Gap Report.
+
+        Shows exactly which Claude Code features have no equivalent in each target,
+        with item counts. Example output:
+
+            GEMINI: 3 agent(s) had tool capabilities dropped (no agent-tools support)
+            CODEX: MCP servers skipped (1 server) — codex uses agents.json instead
+
+        Args:
+            results: Dict from orchestrator mapping target -> {config_type: SyncResult}.
+            source_config: Optional raw source config dict for richer gap analysis.
+
+        Returns:
+            Formatted gap report string. Empty string if no gaps found.
+        """
+        # Known per-target capability gaps (static knowledge)
+        # Maps target -> {config_type -> human-readable limitation}
+        _KNOWN_GAPS: dict[str, dict[str, str]] = {
+            "gemini": {
+                "agents": "no agent-tool bindings (agent tools are dropped)",
+                "commands": "slash commands converted to plain GEMINI.md instructions",
+                "settings": "allowedTools / deniedTools map to tools.allowed / tools.exclude",
+            },
+            "codex": {
+                "mcp": "MCP servers written to agents.json, not natively executed",
+                "commands": "slash commands have no direct Codex equivalent",
+                "skills": "skills inlined into AGENTS.md (no separate skill files)",
+            },
+            "opencode": {
+                "agents": "agents written as OpenCode project files",
+                "commands": "commands have no direct OpenCode equivalent",
+            },
+            "cursor": {
+                "mcp": "MCP config written to .cursor/mcp.json",
+                "agents": "agents inlined as .mdc rules (no separate agent files)",
+                "skills": "skills inlined as rule blocks",
+            },
+            "aider": {
+                "mcp": "MCP servers not supported by aider",
+                "agents": "agents have no aider equivalent — skipped",
+                "settings": "only base rules synced (allowedTools not supported)",
+                "skills": "skills have no aider equivalent — skipped",
+            },
+            "windsurf": {
+                "mcp": "MCP servers not supported in .windsurfrules",
+                "agents": "agents inlined as windsurf rules",
+                "skills": "skills inlined as rule blocks",
+            },
+        }
+
+        lines: list[str] = []
+
+        for target_name, target_results in results.items():
+            if target_name.startswith("_") or not isinstance(target_results, dict):
+                continue
+
+            target_gaps = _KNOWN_GAPS.get(target_name, {})
+            target_lines: list[str] = []
+
+            for config_type, result in target_results.items():
+                if not isinstance(result, SyncResult):
+                    continue
+
+                # Items that failed or were fully skipped = capability gap
+                total_items = result.synced + result.adapted + result.failed + result.skipped
+                if total_items == 0:
+                    continue
+
+                failed_count = getattr(result, "failed", 0)
+                adapted_count = getattr(result, "adapted", 0)
+                skipped_count = getattr(result, "skipped", 0)
+                synced_count = getattr(result, "synced", 0)
+
+                if failed_count > 0 and synced_count == 0 and adapted_count == 0:
+                    limitation = target_gaps.get(config_type, "no equivalent in target")
+                    target_lines.append(
+                        f"  ✗ {config_type}: {failed_count} item(s) dropped — {limitation}"
+                    )
+                elif adapted_count > 0:
+                    limitation = target_gaps.get(config_type, "")
+                    note = f" — {limitation}" if limitation else " (format translated)"
+                    target_lines.append(
+                        f"  ~ {config_type}: {adapted_count} item(s) approximated{note}"
+                    )
+                elif skipped_count == total_items and total_items > 0:
+                    limitation = target_gaps.get(config_type, "no equivalent in target")
+                    target_lines.append(
+                        f"  · {config_type}: {skipped_count} item(s) skipped — {limitation}"
+                    )
+
+            # Add any known gaps for this target even if nothing was synced
+            for config_type, limitation in target_gaps.items():
+                if config_type not in target_results:
+                    target_lines.append(
+                        f"  · {config_type}: not synced — {limitation}"
+                    )
+
+            if target_lines:
+                lines.append(f"\n{target_name.upper()} Capability Gaps:")
+                lines.extend(target_lines)
+
+        if not lines:
+            return ""
+
+        header = "\nHarness Capability Gap Report"
+        footer = "\nRun /sync-matrix for a full feature compatibility matrix."
+        return header + "\n" + "\n".join(lines) + footer
+
     def has_issues(self, report: dict) -> bool:
         """
         Check if report contains adapted or failed items.

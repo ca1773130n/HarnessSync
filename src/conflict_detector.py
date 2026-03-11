@@ -354,6 +354,157 @@ class ConflictDetector:
             else:
                 print("  Enter 's', 'k', or 'e'.")
 
+    def section_conflicts(
+        self,
+        source_content: str,
+        conflict: dict,
+    ) -> list[dict]:
+        """Detect which individual Markdown sections conflict between source and target.
+
+        Instead of treating the whole file as a single conflict, break it into
+        sections and return only the sections that differ. Enables per-section
+        resolution ('keep this section from target, use sync for that one').
+
+        Args:
+            source_content: What HarnessSync would write (from Claude Code).
+            conflict: Conflict dict from ``check()`` (contains file_path).
+
+        Returns:
+            List of section-conflict dicts with keys:
+              - heading: Section heading text
+              - source_body: Section body from sync source
+              - current_body: Section body from current file ('' if section absent)
+              - status: "added" | "removed" | "modified" | "identical"
+        """
+        import re
+
+        _SECTION_RE = re.compile(r"^(#{1,3}\s+.+)$", re.MULTILINE)
+
+        file_path = Path(conflict.get("file_path", ""))
+        current_content = ""
+        if file_path.exists():
+            try:
+                current_content = file_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+
+        def _split_sections(text: str) -> dict[str, str]:
+            matches = list(_SECTION_RE.finditer(text))
+            sections: dict[str, str] = {}
+            for i, m in enumerate(matches):
+                heading = m.group(1).strip()
+                start = m.end()
+                end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+                sections[heading] = text[start:end].strip()
+            return sections
+
+        source_sections = _split_sections(source_content)
+        current_sections = _split_sections(current_content)
+        all_headings = sorted(set(source_sections) | set(current_sections))
+
+        result = []
+        for heading in all_headings:
+            src_body = source_sections.get(heading)
+            cur_body = current_sections.get(heading)
+
+            if src_body is not None and cur_body is None:
+                status = "added"
+            elif src_body is None and cur_body is not None:
+                status = "removed"
+            elif src_body != cur_body:
+                status = "modified"
+            else:
+                status = "identical"
+
+            if status != "identical":
+                result.append({
+                    "heading": heading,
+                    "source_body": src_body or "",
+                    "current_body": cur_body or "",
+                    "status": status,
+                    "file_path": str(file_path),
+                })
+
+        return result
+
+    def resolve_section_interactive(
+        self,
+        section_conflicts: list[dict],
+    ) -> dict[str, str]:
+        """Present per-section conflicts and ask user to choose resolution for each.
+
+        Args:
+            section_conflicts: List from ``section_conflicts()``.
+
+        Returns:
+            Dict mapping section heading -> "source" | "keep" | "skip".
+            "source" = use HarnessSync version, "keep" = preserve current.
+        """
+        import sys
+
+        if not sys.stdin.isatty():
+            return {}
+
+        resolutions: dict[str, str] = {}
+        total = len(section_conflicts)
+        if total == 0:
+            return resolutions
+
+        print(f"\n{total} section(s) differ — resolve each:")
+
+        for i, sc in enumerate(section_conflicts, start=1):
+            heading = sc["heading"]
+            status = sc["status"]
+            print(f"\n[{i}/{total}] {heading}  ({status})")
+
+            if status == "added":
+                print("  This section exists in sync source but NOT in current file.")
+                print("  a) Add it   k) Keep current (skip this section)")
+                prompt = "  Choice [a/k]: "
+                yes_choice, no_choice = "a", "k"
+                yes_resolution, no_resolution = "source", "keep"
+            elif status == "removed":
+                print("  This section exists in current file but NOT in sync source.")
+                print("  r) Remove it (use sync source)   k) Keep current")
+                prompt = "  Choice [r/k]: "
+                yes_choice, no_choice = "r", "k"
+                yes_resolution, no_resolution = "source", "keep"
+            else:
+                # modified — show brief diff
+                import difflib
+                diff = difflib.unified_diff(
+                    sc["current_body"].splitlines(keepends=True),
+                    sc["source_body"].splitlines(keepends=True),
+                    fromfile="current",
+                    tofile="sync-source",
+                    lineterm="\n",
+                )
+                diff_text = "".join(list(diff)[:20])
+                if diff_text:
+                    print(diff_text[:800])
+                print("  s) Use sync source   k) Keep current")
+                prompt = "  Choice [s/k]: "
+                yes_choice, no_choice = "s", "k"
+                yes_resolution, no_resolution = "source", "keep"
+
+            while True:
+                try:
+                    choice = input(prompt).strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    print("\nCancelled — keeping remaining sections.")
+                    return resolutions
+
+                if choice in (yes_choice, "yes", "y"):
+                    resolutions[heading] = yes_resolution
+                    break
+                elif choice in (no_choice, "keep", "k"):
+                    resolutions[heading] = no_resolution
+                    break
+                else:
+                    print(f"  Enter '{yes_choice}' or '{no_choice}'.")
+
+        return resolutions
+
     def format_warnings(self, conflicts: dict[str, list[dict]]) -> str:
         """
         Format conflict warnings for user output.
