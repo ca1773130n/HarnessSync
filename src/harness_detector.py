@@ -10,9 +10,16 @@ Detection strategy (item 7):
 1. PATH scan: check if the CLI executable is in PATH
 2. Config-dir scan: check if the harness config directory exists on disk
    (catches harnesses installed as GUI apps that don't add to PATH)
+
+Version detection (item 27):
+Version strings are obtained by running ``<executable> --version`` (or the
+harness-specific flag) and parsing the first line of stdout. A short timeout
+prevents long hangs on slow CLIs. Results are cached per process lifetime.
 """
 
+import re
 import shutil
+import subprocess
 from pathlib import Path
 
 # Known AI coding CLI executables mapped to their canonical names
@@ -130,3 +137,122 @@ def scan_all() -> dict[str, dict]:
             }
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Version Detection (Item 27 — Auto-Discovery of Installed Harnesses)
+# ---------------------------------------------------------------------------
+
+# Per-harness version flag overrides (default is --version)
+_VERSION_FLAGS: dict[str, list[str]] = {
+    "aider": ["--version"],
+    "gemini": ["--version"],
+    "codex": ["--version"],
+    "opencode": ["--version"],
+    "cursor": ["--version"],
+    "windsurf": ["--version"],
+    "continue": ["--version"],
+    "cody": ["version"],
+}
+
+# Timeout (seconds) when probing version
+_VERSION_TIMEOUT = 3
+
+# Regex to extract a semver-like string from version output
+_SEMVER_RE = re.compile(r"(\d+\.\d+[\.\d+]*)", re.ASCII)
+
+# Simple in-process cache: executable_path -> version string
+_version_cache: dict[str, str] = {}
+
+
+def detect_version(canonical: str, executable: str | None = None) -> str | None:
+    """Detect the installed version of a harness CLI.
+
+    Runs ``<executable> --version`` (or the harness-specific flag) and
+    extracts the first semver-looking string from stdout/stderr. Results are
+    cached for the lifetime of the process.
+
+    Args:
+        canonical: Canonical harness name (e.g. "codex").
+        executable: Full path to the executable. If None, looked up via PATH.
+
+    Returns:
+        Version string (e.g. "1.2.3") or None if unavailable / timed out.
+    """
+    exe = executable or shutil.which(canonical) or shutil.which(f"{canonical}-cli")
+    if not exe:
+        return None
+
+    if exe in _version_cache:
+        return _version_cache[exe]
+
+    flags = _VERSION_FLAGS.get(canonical, ["--version"])
+    cmd = [exe] + flags
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=_VERSION_TIMEOUT,
+        )
+        output = (result.stdout + result.stderr).strip()
+        m = _SEMVER_RE.search(output)
+        version = m.group(1) if m else None
+    except (subprocess.TimeoutExpired, OSError, FileNotFoundError):
+        version = None
+
+    _version_cache[exe] = version  # type: ignore[assignment]
+    return version
+
+
+def scan_all_with_versions() -> dict[str, dict]:
+    """Scan for all known AI coding CLIs and include their version strings.
+
+    Extends :func:`scan_all` by adding a ``version`` key to each entry.
+    Version detection is best-effort: ``None`` if the CLI is a GUI app or
+    the ``--version`` flag is not supported.
+
+    Returns:
+        Dict mapping canonical harness name -> detection info dict:
+        {
+            "in_path": bool,
+            "config_dir": bool,
+            "executable": str|None,
+            "version": str|None   # e.g. "1.5.2"
+        }
+    """
+    detected = scan_all()
+    for canonical, info in detected.items():
+        info["version"] = detect_version(canonical, executable=info.get("executable"))
+    return detected
+
+
+def format_detection_report(detected: dict[str, dict]) -> str:
+    """Format a human-readable detection report.
+
+    Args:
+        detected: Output of :func:`scan_all_with_versions`.
+
+    Returns:
+        Formatted string listing each discovered harness with version and
+        detection method.
+    """
+    if not detected:
+        return "No AI coding harnesses detected on this system."
+
+    lines = [f"Detected {len(detected)} AI coding harness(es):", ""]
+    for name in sorted(detected):
+        info = detected[name]
+        version = info.get("version") or "unknown version"
+        methods: list[str] = []
+        if info.get("in_path"):
+            methods.append("PATH")
+        if info.get("config_dir"):
+            methods.append("config dir")
+        method_str = ", ".join(methods) or "unknown"
+        exe = info.get("executable") or ""
+        exe_part = f" ({exe})" if exe else ""
+        lines.append(f"  {name:<14} v{version:<12} via {method_str}{exe_part}")
+
+    return "\n".join(lines)

@@ -302,4 +302,82 @@ class HarnessOverride:
             if settings:
                 lines.append(f"  settings: {', '.join(sorted(settings.keys()))}")
 
+            model = cfg.get("model")
+            if model:
+                lines.append(f"  model pin: {model}")
+
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Model Pinning (Item 4 — Per-Harness Override Layer)
+    # ------------------------------------------------------------------
+    #
+    # Allow pinning a specific model to a harness, independent of whatever
+    # model Claude Code is using.  The pinned model is stored as a top-level
+    # ``"model"`` key in the override JSON and surfaced via
+    # ``apply_model_override()`` so adapters can inject it into their
+    # settings output.
+
+    def pin_model(self, harness: str, model: str) -> None:
+        """Pin a specific model for a harness override.
+
+        When a model is pinned the adapter will always configure that model
+        for this harness, regardless of what Claude Code's own settings say.
+        This is useful when different harnesses have different strengths and
+        you want consistent, deliberate model selection per tool.
+
+        Example override JSON after pinning::
+
+            {
+              "model": "o3",
+              "description": "Codex always uses o3 for higher accuracy"
+            }
+
+        Args:
+            harness: Target harness name (e.g. "codex").
+            model: Model identifier to pin (e.g. "o3", "claude-opus-4-6",
+                   "gemini-2.0-flash").
+        """
+        override = self.load(harness)
+        override["model"] = model
+        self.save(harness, override)
+
+    def unpin_model(self, harness: str) -> bool:
+        """Remove the pinned model for a harness.
+
+        Returns:
+            True if a model was pinned and removed, False if nothing was pinned.
+        """
+        override = self.load(harness)
+        if "model" not in override:
+            return False
+        del override["model"]
+        self.save(harness, override)
+        return True
+
+    def get_pinned_model(self, harness: str) -> str | None:
+        """Return the pinned model for a harness, or None if not pinned."""
+        return self.load(harness).get("model")
+
+    def apply_model_override(self, synced_settings: dict, harness: str) -> dict:
+        """Inject the pinned model into synced settings if one is configured.
+
+        The pinned model is stored under the key ``"model"`` in the returned
+        settings dict.  Adapters that support model selection (Codex, Gemini,
+        OpenCode) should call this after ``apply_settings_override()`` so the
+        model pin takes highest priority.
+
+        Args:
+            synced_settings: Settings dict already processed by sync.
+            harness: Target harness name.
+
+        Returns:
+            Settings dict with ``"model"`` key set to the pinned model, or
+            the original dict unchanged if no model is pinned.
+        """
+        model = self.get_pinned_model(harness)
+        if not model:
+            return synced_settings
+        merged = dict(synced_settings)
+        merged["model"] = model
+        return merged

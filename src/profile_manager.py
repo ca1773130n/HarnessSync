@@ -652,3 +652,123 @@ class ProfileManager:
 
         self.save_profile(import_as, profile)
         return profile
+
+    # ------------------------------------------------------------------
+    # CWD-based auto-activation (Item 26 — Project-Scoped Sync Profiles)
+    # ------------------------------------------------------------------
+
+    def auto_activate_from_cwd(
+        self,
+        cwd: Path | None = None,
+    ) -> str | None:
+        """Return the profile name that should activate for the given directory.
+
+        Users can attach a profile to one or more path prefixes in a special
+        ``__cwd_rules__`` entry inside ``profiles.json``::
+
+            {
+              "__cwd_rules__": [
+                {"path_prefix": "/work/acme", "profile": "work"},
+                {"path_prefix": "/home/user/personal", "profile": "minimal"}
+              ],
+              "work": { ... },
+              "minimal": { ... }
+            }
+
+        The *longest matching* prefix wins, so
+        ``/work/acme/projectA`` matches the ``work`` rule even if a shorter
+        ``/work`` rule also exists.
+
+        Args:
+            cwd: Directory to test (defaults to current working directory).
+
+        Returns:
+            Profile name to activate, or ``None`` if no rule matches.
+        """
+        resolve_cwd = (cwd or Path.cwd()).resolve()
+        profiles = self._load()
+        rules = profiles.get("__cwd_rules__", [])
+        if not isinstance(rules, list):
+            return None
+
+        best_match: str | None = None
+        best_len = -1
+
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            prefix_str = rule.get("path_prefix", "")
+            profile_name = rule.get("profile", "")
+            if not prefix_str or not profile_name:
+                continue
+            try:
+                prefix = Path(prefix_str).expanduser().resolve()
+            except (OSError, ValueError):
+                continue
+
+            # Check if cwd is inside this prefix
+            try:
+                resolve_cwd.relative_to(prefix)
+            except ValueError:
+                continue  # Not a match
+
+            prefix_len = len(str(prefix))
+            if prefix_len > best_len:
+                best_len = prefix_len
+                best_match = profile_name
+
+        return best_match
+
+    def add_cwd_rule(self, path_prefix: str, profile_name: str) -> None:
+        """Associate a directory prefix with a profile for auto-activation.
+
+        Args:
+            path_prefix: Absolute directory path (or prefix) to match.
+                         Tilde (~) is supported.
+            profile_name: Profile to activate when CWD is inside this prefix.
+
+        Raises:
+            ValueError: If profile_name does not exist in the profiles store.
+        """
+        profiles = self._load()
+        if profile_name not in profiles and profile_name != "__cwd_rules__":
+            raise ValueError(f"Profile {profile_name!r} does not exist")
+
+        rules: list[dict] = []
+        existing = profiles.get("__cwd_rules__", [])
+        if isinstance(existing, list):
+            rules = list(existing)
+
+        # Remove any existing rule for this prefix before re-adding
+        rules = [
+            r for r in rules
+            if not (isinstance(r, dict) and r.get("path_prefix") == path_prefix)
+        ]
+        rules.append({"path_prefix": path_prefix, "profile": profile_name})
+        profiles["__cwd_rules__"] = rules
+        self._save(profiles)
+
+    def remove_cwd_rule(self, path_prefix: str) -> bool:
+        """Remove the CWD rule for a given path prefix.
+
+        Args:
+            path_prefix: The path prefix to remove.
+
+        Returns:
+            True if a rule was removed, False if no matching rule was found.
+        """
+        profiles = self._load()
+        rules = profiles.get("__cwd_rules__", [])
+        if not isinstance(rules, list):
+            return False
+
+        new_rules = [
+            r for r in rules
+            if not (isinstance(r, dict) and r.get("path_prefix") == path_prefix)
+        ]
+        if len(new_rules) == len(rules):
+            return False  # Nothing removed
+
+        profiles["__cwd_rules__"] = new_rules
+        self._save(profiles)
+        return True

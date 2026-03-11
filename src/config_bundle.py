@@ -27,8 +27,10 @@ Bundle format (JSON):
 """
 
 import getpass
+import io
 import json
 import socket
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -190,6 +192,116 @@ class ConfigBundle:
                 f"(created {bundle.get('created_at', '?')[:10]}). "
                 "Run /sync to apply to all harnesses."
             )
+
+        return messages
+
+    def export_zip(
+        self,
+        output_path: Path | None = None,
+        include_mcp: bool = True,
+        redact_secrets: bool = True,
+    ) -> bytes:
+        """Export config bundle as a .harness.zip archive.
+
+        The zip contains individual files at their relative paths plus a
+        ``bundle.json`` manifest with metadata. Teammates can import with
+        ``ConfigBundle.import_zip()``.
+
+        Args:
+            output_path: If provided, write the zip file here (should end with
+                         ``.harness.zip``).
+            include_mcp: Include MCP server configs (env values redacted).
+            redact_secrets: Redact sensitive env var values (default: True).
+
+        Returns:
+            Raw zip bytes (also written to output_path if provided).
+        """
+        bundle = self.export(include_mcp=include_mcp, redact_secrets=redact_secrets)
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            # Write each config file at its natural relative path
+            for rel, content in bundle.get("files", {}).items():
+                zf.writestr(rel, content.encode("utf-8"))
+
+            # Write MCP config as a separate JSON if present
+            if bundle.get("mcp_servers"):
+                mcp_content = json.dumps(
+                    {"mcpServers": bundle["mcp_servers"]}, indent=2, ensure_ascii=False
+                )
+                zf.writestr(".harness-sync/mcp-servers.json", mcp_content.encode("utf-8"))
+
+            # Write the full JSON manifest for programmatic import
+            manifest = {k: v for k, v in bundle.items() if k != "files"}
+            manifest["file_list"] = list(bundle.get("files", {}).keys())
+            zf.writestr(
+                "bundle.json",
+                json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8"),
+            )
+
+        zip_bytes = buf.getvalue()
+
+        if output_path:
+            output_path.write_bytes(zip_bytes)
+
+        return zip_bytes
+
+    def import_zip(
+        self,
+        zip_source: bytes | Path,
+        dry_run: bool = False,
+        overwrite: bool = False,
+    ) -> list[str]:
+        """Import a .harness.zip bundle into the project directory.
+
+        Args:
+            zip_source: Raw zip bytes or path to a .harness.zip file.
+            dry_run: If True, report what would be written without writing.
+            overwrite: If False, skip files that already exist.
+
+        Returns:
+            List of result messages (one per file).
+        """
+        if isinstance(zip_source, Path):
+            zip_source = zip_source.read_bytes()
+
+        messages: list[str] = []
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(zip_source))
+        except zipfile.BadZipFile as exc:
+            return [f"Error: not a valid zip archive ({exc})"]
+
+        with zf:
+            names = zf.namelist()
+            # Skip the manifest file
+            file_names = [n for n in names if n != "bundle.json"]
+
+            for rel in file_names:
+                # Skip MCP servers file — handled separately
+                if rel == ".harness-sync/mcp-servers.json":
+                    continue
+                target_path = self.project_dir / rel
+                action = "would write" if dry_run else "written"
+
+                if target_path.exists() and not overwrite:
+                    messages.append(f"Skipped {rel} (already exists — use --overwrite to replace)")
+                    continue
+
+                if dry_run:
+                    info = zf.getinfo(rel)
+                    messages.append(f"[dry-run] {action}: {rel} ({info.file_size:,} bytes)")
+                    continue
+
+                try:
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    data = zf.read(rel)
+                    target_path.write_bytes(data)
+                    messages.append(f"{action}: {rel}")
+                except OSError as e:
+                    messages.append(f"Error writing {rel}: {e}")
+
+        if not dry_run and file_names:
+            messages.append("\nBundle imported. Run /sync to apply to all harnesses.")
 
         return messages
 

@@ -1008,3 +1008,72 @@ _2026-03-11T03:46:25.750Z_
 - sync_status.py is the most natural integration point for proactive user notifications — users already run it to check state, so capability upgrade suggestions belong here
 
 ---
+## Iteration 16
+_2026-03-11T04:01:17.453Z_
+
+### Items Attempted
+
+- **Conflict Resolution Wizard** — pass
+- **Harness Capability Gap Report** — pass
+- **Team Config Broadcast** — pass
+- **Harness Hot-Swap Mode** — pass
+- **Bidirectional Sync (Pull Mode)** — pass
+- **Sync Preview / Dry Run** — pass
+- **MCP Reachability Dashboard** — pass
+- **Auto-Sync on Git Commit** — pass
+- **Plugin/Extension Propagation** — pass
+- **Drift Alerts (Push Notifications)** — pass
+- **Semantic Rule Translation** — pass
+- **Sync Time Machine** — pass
+- **Harness Behavior Benchmark** — pass
+- **One-Click New Harness Onboarding** — pass
+- **Project-Scoped Sync Profiles** — pass
+- **Skill Compatibility Matrix** — pass
+- **Real-Time Config Linting** — pass
+- **Secret Scrubbing Before Sync** — pass
+- **Harness Regression Guard** — pass
+- **CI/CD Sync Action** — pass
+- **MCP Server Discovery & Sync** — pass
+- **Sync Cost Estimator** — pass
+- **Multi-Project Sync Sweep** — pass
+- **Harness Config Importer** — pass
+- **Sync Event Webhooks** — pass
+- **Harness-Agnostic Rule Format** — pass
+- **One-Command Rollback** — pass
+- **Config Share Link** — pass
+- **Team Role-Based Sync Scoping** — pass
+- **Harness Latency Comparison** — pass
+- **Auto-Detect Newly Installed Harnesses** — pass
+- **Config Complexity Score** — pass
+- **Harness-Specific Skill Variants** — pass
+
+### Decisions Made
+
+- Created RegressionGuard (item 19) as a standalone module rather than embedding in orchestrator — keeps pre-sync safety check reusable and independently testable. Uses section-level and rule-level diff to detect removals, not just file-level hash changes.
+- Implemented HarnessLatencyBenchmarker (item 30) as a pure measurement utility that shells out to each harness CLI — avoids SDK dependencies and works with any future harness by just adding an entry to _HARNESS_CLI dict.
+- Built HarnessRuleDSL (item 26) with optional PyYAML and a fallback simple key-value parser so it works in Python 3.9 without yaml installed. Uses fenced ```harness-rule blocks embedded in CLAUDE.md to avoid a separate config file.
+- TeamBroadcast (item 3) clones the shared repo to a tempdir, writes the bundle, and pushes — avoids modifying the user's local git state. Secrets are redacted from MCP env vars before bundling.
+- Added section_conflicts() and resolve_section_interactive() to ConflictDetector (item 1) for per-section resolution — users can keep one section from target and accept another from source, rather than all-or-nothing per file.
+- Added feature_gap_report() to CompatibilityReporter (item 2) using a static knowledge base of per-target limitations, cross-referenced against actual SyncResult failed/adapted/skipped counts for specific item counts in output.
+- Added scan_config_files() to SecretDetector (item 18) that scans CLAUDE.md, CLAUDE.local.md, settings.json, and .mcp.json by default — gives orchestrator a single call to check all config files before sync.
+- Added pull_mode() and find_unique_rules() to sync_import.py (item 5) for bidirectional sync — detects bullet-point rules in target that don't exist in CLAUDE.md and proposes them as additions, with optional interactive confirmation.
+- sync_hotswap.py (item 4) tries iTerm2 first on macOS then falls back to Terminal.app, and tries multiple Linux terminal emulators — makes the command work across the most common developer environments without configuration.
+- Used getattr() with defaults for SyncResult fields in feature_gap_report() to be robust against field name changes in the adapter result dataclass.
+
+### Patterns Discovered
+
+- SyncResult uses 'synced_files'/'skipped_files'/'failed_files' list fields, not 'files' — new code accessing these must use the correct field names or getattr() with defaults.
+- All src/*.py files start with 'from __future__ import annotations' for Python 3.9 type hint compatibility — this must appear exactly once at the top of the file.
+- Commands in src/commands/ use a consistent pattern: PLUGIN_ROOT setup, argparse main(), then if __name__ == '__main__': main() — new commands should follow this structure.
+- The project has a SecretDetector with scan() for env vars, scan_content() for inline text, and now scan_config_files() for project files — three distinct scan surfaces with separate methods.
+- Many features already existed as modules (config_time_machine, drift_watcher, skill_translator, etc.) — iteration-16 focused on genuinely missing modules and meaningful enhancements to existing ones.
+
+### Takeaways
+
+- The codebase is very mature — 15+ iterations of evolution have covered most of the feature surface. Future iterations should focus on integration (wiring existing modules together), testing, and polish rather than new standalone modules.
+- The RegressionGuard pattern (compare proposed output against current on-disk state before writing) is a safety primitive that the orchestrator should call by default, not just on user request.
+- Harness-agnostic DSL (item 26) is architecturally interesting but requires authoring discipline — users must write rules in the DSL format to get the benefit. Should be surfaced via config linter hints.
+- The latency benchmarker depends on harnesses being installed and responsive, making it inherently integration-test territory — unit tests would need heavy mocking. Current implementation is most useful as a manual diagnostic tool.
+- Team broadcast via git is the right mechanism for team config sharing, but requires the shared repo to be accessible from both push and pull sides — document this prerequisite clearly in the command help text.
+
+---

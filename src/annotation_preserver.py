@@ -303,3 +303,110 @@ class AnnotationPreserver:
                 restored[target] = count
 
         return restored
+
+
+# ---------------------------------------------------------------------------
+# Rule Provenance Tracking (Item 13)
+# ---------------------------------------------------------------------------
+#
+# Embeds a provenance comment into each synced rule block so that developers
+# who open AGENTS.md / GEMINI.md / etc. can see exactly which source section
+# produced each rule and when it was last synced.
+#
+# Format (HTML comment, invisible in rendered Markdown):
+#   <!-- hs:provenance source="CLAUDE.md §Rules" synced="2026-03-11" -->
+#
+# The comment is injected immediately after the HarnessSync managed-block
+# opening marker so it appears at the top of every synced section.
+
+_PROVENANCE_RE = re.compile(
+    r"<!--\s*hs:provenance[^>]*-->",
+    re.IGNORECASE,
+)
+
+
+def build_provenance_comment(
+    source_file: str,
+    section: str | None = None,
+    sync_date: str | None = None,
+) -> str:
+    """Build a provenance HTML comment for embedding in synced content.
+
+    Args:
+        source_file: Basename of the source file (e.g. "CLAUDE.md").
+        section: Optional section heading or identifier (e.g. "§Rules").
+        sync_date: ISO date string (defaults to today: YYYY-MM-DD).
+
+    Returns:
+        Single-line HTML comment string ending with newline.
+    """
+    from datetime import date as _date
+
+    date_str = sync_date or _date.today().isoformat()
+    src = source_file
+    if section:
+        src = f"{source_file} {section}"
+    return f'<!-- hs:provenance source="{src}" synced="{date_str}" -->\n'
+
+
+def inject_provenance(
+    content: str,
+    source_file: str,
+    section: str | None = None,
+    sync_date: str | None = None,
+) -> str:
+    """Inject or update a provenance comment into synced managed content.
+
+    Inserts the provenance comment immediately after the HarnessSync managed-
+    block opening marker (``<!-- Managed by HarnessSync -->``). If a
+    provenance comment already exists it is updated in-place, so repeated
+    syncs don't accumulate duplicate comments.
+
+    Args:
+        content: Full text of the target harness file.
+        source_file: Basename of the source file (e.g. "CLAUDE.md").
+        section: Optional section label (e.g. "§Rules").
+        sync_date: Override date (defaults to today).
+
+    Returns:
+        Modified content string with provenance comment injected/updated.
+        Returns original content unchanged if the managed-block marker is
+        absent (non-managed files are not modified).
+    """
+    if MANAGED_START not in content:
+        return content
+
+    provenance = build_provenance_comment(source_file, section, sync_date)
+
+    # Remove any existing provenance comments first (update-in-place)
+    content = _PROVENANCE_RE.sub("", content)
+
+    # Inject immediately after the opening managed marker line
+    insert_after = MANAGED_START + "\n"
+    if insert_after in content:
+        content = content.replace(insert_after, insert_after + provenance, 1)
+    else:
+        # Fallback: marker without trailing newline
+        content = content.replace(MANAGED_START, MANAGED_START + "\n" + provenance, 1)
+
+    return content
+
+
+def extract_provenance(content: str) -> dict | None:
+    """Extract provenance metadata from a target harness file.
+
+    Args:
+        content: Full text of the target harness file.
+
+    Returns:
+        Dict with keys ``source`` and ``synced`` if a provenance comment is
+        found, otherwise None.
+    """
+    m = re.search(
+        r'<!--\s*hs:provenance\s+source="([^"]+)"\s+synced="([^"]+)"\s*-->',
+        content,
+        re.IGNORECASE,
+    )
+    if not m:
+        return None
+    return {"source": m.group(1), "synced": m.group(2)}

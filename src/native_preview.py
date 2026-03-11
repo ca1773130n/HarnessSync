@@ -353,3 +353,163 @@ def get_all_native_previews(
         )
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Structured Preview Summary & Confirmation Prompt (Item 3)
+# ---------------------------------------------------------------------------
+#
+# Before executing a sync, callers can use ``build_sync_preview()`` to get a
+# structured description of every file that *would* be created, modified, or
+# deleted, then call ``confirm_sync()`` to present a human-readable summary
+# and ask the user to confirm before proceeding.
+
+
+def build_sync_preview(
+    preview_all: dict[str, dict[str, str]],
+    project_dir: "Path | None" = None,
+) -> list[dict]:
+    """Build a structured list of file-level change descriptors for a sync.
+
+    Compares the preview output against files currently on disk to classify
+    each target file as ``created``, ``modified``, or ``unchanged``.
+
+    Args:
+        preview_all: Output of :func:`preview_all_harnesses`.
+        project_dir: Project root used to resolve relative paths on disk.
+                     Pass ``None`` to skip on-disk comparison (all shown as
+                     ``created``).
+
+    Returns:
+        List of change dicts, each with keys:
+          - harness: str — target harness name
+          - file_path: str — relative file path within the project
+          - status: "created" | "modified" | "unchanged"
+          - lines: int — number of lines in the new content
+          - size_bytes: int — byte size of the new content
+    """
+    changes: list[dict] = []
+
+    for harness, files in sorted(preview_all.items()):
+        for rel_path, new_content in sorted(files.items()):
+            if not new_content:
+                continue
+
+            encoded = new_content.encode("utf-8", errors="replace")
+            lines = new_content.count("\n") + 1
+            size = len(encoded)
+
+            status = "created"
+            if project_dir is not None:
+                disk_path = project_dir / rel_path
+                if disk_path.is_file():
+                    try:
+                        existing = disk_path.read_text(encoding="utf-8", errors="replace")
+                        status = "unchanged" if existing == new_content else "modified"
+                    except OSError:
+                        status = "modified"
+
+            changes.append({
+                "harness": harness,
+                "file_path": rel_path,
+                "status": status,
+                "lines": lines,
+                "size_bytes": size,
+            })
+
+    return changes
+
+
+def format_sync_preview(changes: list[dict]) -> str:
+    """Format a structured sync preview as a human-readable string.
+
+    Groups changes by harness and uses symbols to indicate status:
+      + created   ~ modified   = unchanged
+
+    Args:
+        changes: Output of :func:`build_sync_preview`.
+
+    Returns:
+        Formatted preview string.
+    """
+    if not changes:
+        return "Nothing to sync — no target files would be written."
+
+    by_harness: dict[str, list[dict]] = {}
+    for c in changes:
+        by_harness.setdefault(c["harness"], []).append(c)
+
+    status_symbol = {"created": "+", "modified": "~", "unchanged": "="}
+    total_by_status: dict[str, int] = {"created": 0, "modified": 0, "unchanged": 0}
+
+    lines: list[str] = ["Sync Preview", "=" * 60, ""]
+
+    for harness in sorted(by_harness):
+        harness_changes = by_harness[harness]
+        lines.append(f"  {harness.upper()}")
+        for c in harness_changes:
+            sym = status_symbol.get(c["status"], "?")
+            total_by_status[c["status"]] = total_by_status.get(c["status"], 0) + 1
+            lines.append(
+                f"    {sym} {c['file_path']}  ({c['lines']} lines, "
+                f"{c['size_bytes']:,} bytes)"
+            )
+        lines.append("")
+
+    summary_parts = []
+    if total_by_status["created"]:
+        summary_parts.append(f"{total_by_status['created']} to create")
+    if total_by_status["modified"]:
+        summary_parts.append(f"{total_by_status['modified']} to modify")
+    if total_by_status["unchanged"]:
+        summary_parts.append(f"{total_by_status['unchanged']} unchanged")
+
+    lines.append("Summary: " + ", ".join(summary_parts) if summary_parts else "No changes")
+    lines.append("=" * 60)
+
+    return "\n".join(lines)
+
+
+def confirm_sync(
+    changes: list[dict],
+    force: bool = False,
+) -> bool:
+    """Show a preview of pending changes and ask the user to confirm.
+
+    When ``force=True`` or stdin is not a TTY (non-interactive / CI), skips
+    the prompt and returns ``True`` (proceed).
+
+    Args:
+        changes: Output of :func:`build_sync_preview`.
+        force: If True, skip the confirmation prompt and return True.
+
+    Returns:
+        True if the user confirmed (or force=True), False if cancelled.
+    """
+    import sys
+
+    print(format_sync_preview(changes))
+
+    # Count actionable changes
+    actionable = [c for c in changes if c["status"] in ("created", "modified")]
+    if not actionable:
+        print("No files would be changed — nothing to confirm.")
+        return True
+
+    if force or not sys.stdin.isatty():
+        return True
+
+    print(f"\n{len(actionable)} file(s) would be written.")
+    while True:
+        try:
+            choice = input("Proceed with sync? [y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\nSync cancelled.")
+            return False
+
+        if choice in ("y", "yes"):
+            return True
+        if choice in ("n", "no"):
+            print("Sync cancelled.")
+            return False
+        print("Enter 'y' to proceed or 'n' to cancel.")

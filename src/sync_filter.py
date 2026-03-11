@@ -19,6 +19,15 @@ Allows users to annotate CLAUDE.md sections with sync control tags:
     <!-- harness:codex -->         — content visible only to codex (override block)
     <!-- /harness:codex -->        — close harness override block
 
+  Inline skip annotations (item 9 — Smart Section Tagging):
+    <!-- harness:skip=gemini -->          — skip THIS LINE for gemini only
+    <!-- harness:skip=gemini,aider -->    — skip THIS LINE for gemini and aider
+    <!-- harness:only=codex -->           — include THIS LINE only in codex
+    <!-- harness:only=codex,opencode --> — include THIS LINE only in listed targets
+
+  Unlike block-style harness: tags, inline skip/only annotations apply only
+  to the line they appear on (or the section heading line if placed after ##).
+
 Untagged content is included in all targets (default passthrough).
 """
 
@@ -40,6 +49,7 @@ _MULTI_TARGET_TAG_RE = re.compile(
 )
 
 # Harness override open/close: <!-- harness:codex --> / <!-- /harness:codex -->
+# NOTE: These must be checked AFTER skip/only inline tags to avoid false matches.
 _HARNESS_OPEN_RE = re.compile(
     r"<!--\s*harness:([a-z0-9_-]+)\s*-->",
     re.IGNORECASE,
@@ -48,6 +58,25 @@ _HARNESS_CLOSE_RE = re.compile(
     r"<!--\s*/harness:([a-z0-9_-]+)\s*-->",
     re.IGNORECASE,
 )
+
+# Inline skip annotation: <!-- harness:skip=gemini,aider --> on a single line
+# Skips (drops) the line for any target in the list.
+_HARNESS_SKIP_RE = re.compile(
+    r"<!--\s*harness:skip=([a-z0-9,\s_-]+)\s*-->",
+    re.IGNORECASE,
+)
+
+# Inline only annotation: <!-- harness:only=codex,opencode --> on a single line
+# Includes the line ONLY for targets in the list; drops it for all others.
+_HARNESS_ONLY_RE = re.compile(
+    r"<!--\s*harness:only=([a-z0-9,\s_-]+)\s*-->",
+    re.IGNORECASE,
+)
+
+
+def _parse_target_list(targets_str: str) -> set[str]:
+    """Parse a comma-separated target list string into a normalised set."""
+    return {t.strip().lower() for t in targets_str.split(",") if t.strip()}
 
 
 def filter_rules_for_target(content: str, target_name: str) -> str:
@@ -59,6 +88,8 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
     3. New <!-- sync:codex,gemini --> multi-target include lists
     4. New <!-- harness:X -->...<!-- /harness:X --> override blocks
        (content only visible to target X)
+    5. Inline <!-- harness:skip=X,Y --> — drops THIS line for listed targets
+    6. Inline <!-- harness:only=X,Y --> — keeps THIS line only for listed targets
 
     Args:
         content: Raw rules text (e.g. CLAUDE.md contents).
@@ -132,6 +163,31 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
                 active_tag = f"targets:{','.join(sorted(targets))}"
                 continue
 
+        # --- Inline harness:skip=X annotation — applies to this line only ---
+        # Must be checked BEFORE harness_open so "harness:skip=gemini" doesn't
+        # get confused with the block-opening "harness:gemini".
+        skip_m = _HARNESS_SKIP_RE.search(line)
+        if skip_m:
+            skip_targets = _parse_target_list(skip_m.group(1))
+            if target_lower in skip_targets:
+                continue  # Drop this line for the listed targets
+            # Strip the annotation tag itself from the emitted line
+            cleaned = _HARNESS_SKIP_RE.sub("", line).rstrip()
+            if cleaned.strip():
+                output.append(cleaned + ("\n" if line.endswith("\n") else ""))
+            continue
+
+        # --- Inline harness:only=X annotation — applies to this line only ---
+        only_m = _HARNESS_ONLY_RE.search(line)
+        if only_m:
+            only_targets = _parse_target_list(only_m.group(1))
+            if target_lower in only_targets:
+                # Emit line with annotation stripped
+                cleaned = _HARNESS_ONLY_RE.sub("", line).rstrip()
+                if cleaned.strip():
+                    output.append(cleaned + ("\n" if line.endswith("\n") else ""))
+            continue  # Always consumed — other targets don't see this line
+
         # --- Emit based on active_tag ---
         if active_tag is None:
             output.append(line)
@@ -174,6 +230,9 @@ def has_sync_tags(content: str) -> bool:
         targets = {t.strip().lower() for t in targets_str.split(",") if t.strip()}
         if targets and not any(t.endswith("-only") or t in ("exclude", "end") for t in targets):
             return True
+    # Inline harness:skip / harness:only annotations
+    if _HARNESS_SKIP_RE.search(content) or _HARNESS_ONLY_RE.search(content):
+        return True
     return False
 
 
