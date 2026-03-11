@@ -9,16 +9,27 @@ its content into CLAUDE.md — the reverse of the normal sync direction.
 Lets users who start in another tool migrate their existing configuration
 into Claude Code without losing months of accumulated rules.
 
+Bidirectional sync (item 1):
+When another harness config has been edited directly, /sync-import --reconcile
+detects the drift between CLAUDE.md and the target harness config and surfaces
+a summary of sections that differ. This prevents silent data loss when target
+configs get edited and then overwritten on the next /sync.
+
 Usage:
     /sync-import --from cursor [--file PATH] [--dry-run]
     /sync-import --from aider [--file PATH] [--dry-run]
     /sync-import --from codex [--file PATH] [--dry-run]
     /sync-import --from gemini [--file PATH] [--dry-run]
+    /sync-import --from codex --reconcile [--dry-run]
+    /sync-import --from codex --pull-mode [--interactive]
 
 Options:
     --from HARNESS    Source harness to import from (cursor/aider/codex/gemini)
     --file PATH       Specific file to import (auto-detected if omitted)
     --dry-run         Preview what would be added without writing
+    --pull-mode       Find rules in target that don't exist in CLAUDE.md
+    --reconcile       Detect drift and show a diff (bidirectional sync mode)
+    --interactive     With --pull-mode: ask before adding each proposed rule
     --project-dir     Project directory (default: cwd)
 """
 
@@ -390,6 +401,193 @@ def pull_mode(
     return messages
 
 
+def detect_drift(
+    harness: str,
+    project_dir: Path,
+    file_path: Path | None = None,
+) -> dict:
+    """Detect drift between CLAUDE.md and a target harness config (item 1).
+
+    Compares the content of CLAUDE.md against the target harness file to
+    surface sections that exist in one but not the other, or sections that
+    have diverged. This is the bidirectional drift detection that prevents
+    silent data loss.
+
+    Args:
+        harness: Target harness to compare against.
+        project_dir: Project root directory.
+        file_path: Specific target file (auto-detected if None).
+
+    Returns:
+        Dict with keys:
+            - harness: Harness name
+            - source_file: Path to the target harness file checked
+            - source_only: Sections only in CLAUDE.md (would be lost on next pull)
+            - target_only: Sections only in the target (would be overwritten on sync)
+            - diverged: Sections present in both but with different content
+            - identical: Count of sections that match
+            - drift_detected: True if any difference found
+    """
+    import difflib
+
+    _SECTION_RE = re.compile(r"^#{1,3}\s+(.+?)(?:\s+#+)?$", re.MULTILINE)
+
+    def _split_by_heading(text: str) -> dict[str, str]:
+        matches = list(_SECTION_RE.finditer(text))
+        sections: dict[str, str] = {}
+        for i, m in enumerate(matches):
+            heading = m.group(0).strip()
+            start = m.end()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            sections[heading] = text[start:end].strip()
+        return sections
+
+    claude_md = project_dir / "CLAUDE.md"
+    source_text = ""
+    if claude_md.exists():
+        source_text = claude_md.read_text(encoding="utf-8", errors="replace")
+
+    # Find target file
+    source_files = [file_path] if file_path and file_path.is_file() else _find_source_files(harness, project_dir)
+    if not source_files:
+        return {
+            "harness": harness,
+            "source_file": None,
+            "source_only": [],
+            "target_only": [],
+            "diverged": [],
+            "identical": 0,
+            "drift_detected": False,
+            "error": f"No {harness} config file found",
+        }
+
+    target_path = source_files[0]
+    target_text = _clean_import_content(
+        target_path.read_text(encoding="utf-8", errors="replace"),
+        harness,
+    )
+
+    source_sections = _split_by_heading(source_text)
+    target_sections = _split_by_heading(target_text)
+
+    # Remove HarnessSync-managed sections from CLAUDE.md before comparison
+    # (these were written by HarnessSync itself, not user content)
+    managed_re = re.compile(
+        r"<!-- Managed by HarnessSync -->.*?<!-- End HarnessSync managed content -->",
+        re.DOTALL,
+    )
+    source_cleaned = managed_re.sub("", source_text)
+    source_sections = _split_by_heading(source_cleaned)
+
+    all_headings = set(source_sections) | set(target_sections)
+    source_only: list[str] = []
+    target_only: list[str] = []
+    diverged: list[dict] = []
+    identical = 0
+
+    for heading in sorted(all_headings):
+        in_source = heading in source_sections
+        in_target = heading in target_sections
+
+        if in_source and not in_target:
+            source_only.append(heading)
+        elif in_target and not in_source:
+            target_only.append(heading)
+        else:
+            s_body = source_sections.get(heading, "")
+            t_body = target_sections.get(heading, "")
+            if s_body.strip() != t_body.strip():
+                diff = "".join(difflib.unified_diff(
+                    s_body.splitlines(keepends=True),
+                    t_body.splitlines(keepends=True),
+                    fromfile="CLAUDE.md",
+                    tofile=target_path.name,
+                    lineterm="\n",
+                ))
+                diverged.append({"heading": heading, "diff": diff[:1000]})
+            else:
+                identical += 1
+
+    drift_detected = bool(source_only or target_only or diverged)
+    return {
+        "harness": harness,
+        "source_file": str(target_path),
+        "source_only": source_only,
+        "target_only": target_only,
+        "diverged": diverged,
+        "identical": identical,
+        "drift_detected": drift_detected,
+    }
+
+
+def reconcile_drift(
+    harness: str,
+    project_dir: Path,
+    file_path: Path | None = None,
+    dry_run: bool = False,
+) -> list[str]:
+    """Surface a drift report and offer to pull target-only sections into CLAUDE.md.
+
+    This is the bidirectional reconciliation flow (item 1). It detects drift
+    between CLAUDE.md and the target harness config and reports what's different,
+    preventing the silent data-loss scenario where a user edits AGENTS.md directly
+    and then runs /sync which overwrites their changes.
+
+    Args:
+        harness: Target harness to reconcile with.
+        project_dir: Project root directory.
+        file_path: Specific target file (auto-detected if None).
+        dry_run: If True, report but don't write any changes.
+
+    Returns:
+        List of formatted message strings.
+    """
+    drift = detect_drift(harness, project_dir, file_path)
+
+    if "error" in drift:
+        return [f"Error: {drift['error']}"]
+
+    messages: list[str] = [
+        f"\nBidirectional Drift Report: CLAUDE.md ↔ {harness} ({drift['source_file']})",
+        "=" * 60,
+    ]
+
+    if not drift["drift_detected"]:
+        messages.append(f"✓ No drift detected. {drift['identical']} section(s) are in sync.")
+        return messages
+
+    if drift["source_only"]:
+        messages.append(f"\n→ {len(drift['source_only'])} section(s) only in CLAUDE.md (would NOT appear in {harness}):")
+        for h in drift["source_only"]:
+            messages.append(f"  · {h}")
+
+    if drift["target_only"]:
+        messages.append(f"\n← {len(drift['target_only'])} section(s) only in {harness} (at risk of being overwritten):")
+        for h in drift["target_only"]:
+            messages.append(f"  · {h}")
+        if not dry_run:
+            # Pull target-only sections into CLAUDE.md
+            messages.append(f"\nPulling {len(drift['target_only'])} target-only section(s) into CLAUDE.md...")
+            pull_results = pull_mode(harness, project_dir, file_path, dry_run=dry_run)
+            messages.extend(pull_results)
+
+    if drift["diverged"]:
+        messages.append(f"\n≠ {len(drift['diverged'])} section(s) differ between CLAUDE.md and {harness}:")
+        for item in drift["diverged"]:
+            messages.append(f"  · {item['heading']}")
+            if item.get("diff"):
+                # Show first few lines of diff
+                diff_preview = "\n".join(item["diff"].splitlines()[:8])
+                messages.append(f"    {diff_preview}")
+
+    if dry_run:
+        messages.append("\n[dry-run] No changes written.")
+    else:
+        messages.append(f"\nReconcile complete. Run /sync to propagate CLAUDE.md to {harness}.")
+
+    return messages
+
+
 def main() -> None:
     """Entry point for /sync-import command."""
     args_string = " ".join(sys.argv[1:])
@@ -426,6 +624,12 @@ def main() -> None:
         help="Bidirectional: find rules in target that don't exist in CLAUDE.md",
     )
     parser.add_argument(
+        "--reconcile",
+        action="store_true",
+        help="Bidirectional: detect drift between CLAUDE.md and target harness, "
+             "then offer to pull target-only sections back into CLAUDE.md",
+    )
+    parser.add_argument(
         "--interactive",
         action="store_true",
         help="With --pull-mode: ask before adding each proposed rule",
@@ -445,7 +649,14 @@ def main() -> None:
     project_dir = Path(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
     file_path = Path(args.file) if args.file else None
 
-    if args.pull_mode:
+    if getattr(args, "reconcile", False):
+        results = reconcile_drift(
+            harness=args.harness,
+            project_dir=project_dir,
+            file_path=file_path,
+            dry_run=args.dry_run,
+        )
+    elif args.pull_mode:
         results = pull_mode(
             harness=args.harness,
             project_dir=project_dir,

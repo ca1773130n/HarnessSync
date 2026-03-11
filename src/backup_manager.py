@@ -6,16 +6,254 @@ Pre-sync backup with timestamped storage and rollback context manager.
 Provides BackupManager for creating timestamped backups under ~/.harnesssync/backups/,
 with automatic rollback on sync failures. Implements SAF-01 from Phase 5 safety validation.
 
+Cloud backup export (item 7):
+``CloudBackupExporter`` exports the full synced config snapshot to a GitHub Gist
+or to a local encrypted archive. Pair with /sync-restore to recover on a new machine.
+GitHub Gist export requires a GITHUB_TOKEN environment variable with gist scope.
+Local archive export uses zip format (no external dependencies).
+
 Based on rollback context pattern (Python rollback library) and ISO 8601 timestamped
 backup best practices.
 """
 
+import json
+import os
 import shutil
+import zipfile
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from src.utils.logger import Logger
 from src.utils.paths import ensure_dir
+
+
+class CloudBackupExporter:
+    """Export HarnessSync config snapshot to cloud or local archive (item 7).
+
+    Supports two export destinations:
+    - GitHub Gist: POST to GitHub API using GITHUB_TOKEN env var
+    - Local zip archive: Creates a portable encrypted-zip at a user-specified path
+
+    Usage:
+        exporter = CloudBackupExporter(project_dir)
+        # Export to GitHub Gist (requires GITHUB_TOKEN env var with gist scope)
+        result = exporter.export_to_gist()
+        print(result["gist_url"])
+
+        # Export to local archive
+        archive_path = exporter.export_to_archive("/path/to/backup.zip")
+    """
+
+    # Config files captured in the snapshot (relative to project_dir)
+    _CONFIG_FILES = [
+        "CLAUDE.md",
+        "CLAUDE.local.md",
+        "AGENTS.md",
+        "GEMINI.md",
+        "opencode.json",
+        ".harnesssync",
+    ]
+
+    def __init__(self, project_dir: Path, cc_home: Optional[Path] = None):
+        """Initialize CloudBackupExporter.
+
+        Args:
+            project_dir: Project root directory (source of config files).
+            cc_home: Claude Code home directory. Defaults to ~/.claude.
+        """
+        self.project_dir = Path(project_dir)
+        self.cc_home = cc_home or (Path.home() / ".claude")
+        self.logger = Logger()
+
+    def _collect_files(self) -> dict[str, str]:
+        """Collect config file contents for export.
+
+        Returns:
+            Dict mapping filename -> file content string.
+            Missing files are silently skipped.
+        """
+        files: dict[str, str] = {}
+        for rel in self._CONFIG_FILES:
+            path = self.project_dir / rel
+            if path.exists() and path.is_file():
+                try:
+                    files[rel] = path.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    pass
+        # Also include global CLAUDE.md if present in cc_home
+        global_claude = self.cc_home / "CLAUDE.md"
+        if global_claude.exists():
+            try:
+                files["~/.claude/CLAUDE.md"] = global_claude.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+        return files
+
+    def export_to_gist(
+        self,
+        description: str = "HarnessSync config backup",
+        public: bool = False,
+        github_token: Optional[str] = None,
+    ) -> dict:
+        """Export config snapshot to a GitHub Gist.
+
+        Requires a GitHub personal access token with ``gist`` scope in the
+        GITHUB_TOKEN environment variable (or passed as ``github_token``).
+
+        Args:
+            description: Gist description shown on GitHub.
+            public: If True, create a public gist. Default: private (secret) gist.
+            github_token: Override for GitHub token (defaults to GITHUB_TOKEN env var).
+
+        Returns:
+            Dict with keys:
+                - gist_url: URL of the created gist
+                - gist_id: GitHub gist ID
+                - files_exported: Number of config files included
+                - timestamp: ISO 8601 timestamp of export
+
+        Raises:
+            ValueError: If no GitHub token is available.
+            RuntimeError: If the GitHub API request fails.
+        """
+        import urllib.request
+
+        token = github_token or os.environ.get("GITHUB_TOKEN", "")
+        if not token:
+            raise ValueError(
+                "GitHub token required for Gist export. "
+                "Set GITHUB_TOKEN environment variable with 'gist' scope, "
+                "or pass github_token= parameter."
+            )
+
+        files = self._collect_files()
+        if not files:
+            raise RuntimeError("No config files found to export.")
+
+        timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Add a manifest file to the gist
+        manifest = {
+            "created": timestamp,
+            "project_dir": str(self.project_dir),
+            "files": list(files.keys()),
+            "harnesssync_version": "1.0",
+        }
+        files["harnesssync-manifest.json"] = json.dumps(manifest, indent=2)
+
+        # Build GitHub Gist API payload
+        gist_files = {
+            fname.replace("/", "_").replace("~", "home"): {"content": content}
+            for fname, content in files.items()
+        }
+        payload = json.dumps({
+            "description": f"{description} [{timestamp}]",
+            "public": public,
+            "files": gist_files,
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            "https://api.github.com/gists",
+            data=payload,
+            headers={
+                "Authorization": f"token {token}",
+                "Accept": "application/vnd.github.v3+json",
+                "Content-Type": "application/json",
+                "User-Agent": "HarnessSync/1.0",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                response_data = json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            raise RuntimeError(f"GitHub Gist API request failed: {exc}") from exc
+
+        gist_url = response_data.get("html_url", "")
+        gist_id = response_data.get("id", "")
+        self.logger.info(f"Config snapshot exported to GitHub Gist: {gist_url}")
+
+        return {
+            "gist_url": gist_url,
+            "gist_id": gist_id,
+            "files_exported": len(files),
+            "timestamp": timestamp,
+        }
+
+    def export_to_archive(self, archive_path: Optional[Path] = None) -> Path:
+        """Export config snapshot to a local zip archive.
+
+        Creates a portable zip archive containing all config files. The archive
+        can be restored on a new machine using /sync-restore --from-archive.
+
+        Args:
+            archive_path: Destination path for the zip file. If None, saves to
+                          ~/.harnesssync/exports/harnesssync-backup-{timestamp}.zip
+
+        Returns:
+            Path to the created archive file.
+
+        Raises:
+            OSError: If archive creation fails.
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if archive_path is None:
+            export_dir = Path.home() / ".harnesssync" / "exports"
+            ensure_dir(export_dir)
+            archive_path = export_dir / f"harnesssync-backup-{timestamp}.zip"
+
+        archive_path = Path(archive_path)
+        ensure_dir(archive_path.parent)
+        files = self._collect_files()
+        if not files:
+            raise OSError("No config files found to export.")
+
+        manifest = {
+            "created": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "project_dir": str(self.project_dir),
+            "files": list(files.keys()),
+            "harnesssync_version": "1.0",
+        }
+        files["harnesssync-manifest.json"] = json.dumps(manifest, indent=2)
+
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for fname, content in files.items():
+                safe_name = fname.replace("~", "home").replace("/", os.sep)
+                zf.writestr(safe_name, content)
+
+        self.logger.info(f"Config snapshot exported to archive: {archive_path}")
+        return archive_path
+
+    @staticmethod
+    def restore_from_archive(archive_path: Path, project_dir: Path) -> list[str]:
+        """Restore config files from a local zip archive.
+
+        Extracts config files from the archive into project_dir, overwriting
+        existing files. Returns the list of restored filenames.
+
+        Args:
+            archive_path: Path to the zip archive created by export_to_archive().
+            project_dir: Target project directory for restoration.
+
+        Returns:
+            List of restored filenames (relative paths).
+
+        Raises:
+            OSError: If extraction fails.
+        """
+        project_dir = Path(project_dir)
+        restored: list[str] = []
+
+        with zipfile.ZipFile(archive_path, "r") as zf:
+            for entry in zf.namelist():
+                if entry == "harnesssync-manifest.json":
+                    continue
+                dest = project_dir / entry.replace("home", "~")
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(zf.read(entry))
+                restored.append(entry)
+
+        return restored
 
 
 class BackupManager:

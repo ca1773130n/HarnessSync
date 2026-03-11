@@ -1,15 +1,79 @@
 from __future__ import annotations
 
 """
-Secret detection for environment variables.
+Secret detection for environment variables and config file content.
 
-Scans environment variables for potential secrets using keyword+regex approach.
-Based on TruffleHog/Secrets-Patterns-DB patterns with 15-20% false positive rate.
+Scans environment variables and inline config content using keyword+regex approach
+combined with Shannon entropy analysis to reduce false positives.
+Based on TruffleHog/Secrets-Patterns-DB patterns.
+
+Entropy analysis (item 4):
+High-entropy strings (>= 4.5 bits/char for base64-like values) that appear
+in secret-looking positions are flagged even without keyword matches.
+This catches API keys, JWTs, and bearer tokens that use non-obvious variable names.
 """
 
+import math
 import re
 
 from src.utils.logger import Logger
+
+
+# Shannon entropy threshold for high-entropy secret detection (bits per character)
+# Base64 has theoretical max ~6 bits/char; real secrets typically >= 4.5
+ENTROPY_THRESHOLD = 4.5
+
+# Minimum length for entropy-based detection (short strings have naturally high entropy)
+ENTROPY_MIN_LENGTH = 20
+
+# Characters expected in base64/hex/JWT tokens
+_BASE64_CHARS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
+_HEX_CHARS = set("0123456789abcdefABCDEF")
+
+
+def shannon_entropy(value: str) -> float:
+    """Calculate Shannon entropy (bits per character) for a string.
+
+    Higher values indicate more randomness. Real English text is typically
+    ~4.0 bits/char; random secrets are typically >= 4.5 bits/char.
+
+    Args:
+        value: String to analyze.
+
+    Returns:
+        Entropy in bits per character. Returns 0.0 for empty strings.
+    """
+    if not value:
+        return 0.0
+    length = len(value)
+    freq: dict[str, int] = {}
+    for ch in value:
+        freq[ch] = freq.get(ch, 0) + 1
+    return -sum((count / length) * math.log2(count / length) for count in freq.values())
+
+
+def is_high_entropy_secret(value: str) -> bool:
+    """Return True if value looks like a high-entropy secret token.
+
+    Uses Shannon entropy combined with character-set analysis to detect
+    base64-encoded secrets, API keys, and bearer tokens that don't appear
+    in environment variable names with obvious keywords.
+
+    Args:
+        value: Candidate secret value.
+
+    Returns:
+        True if value is long enough AND has entropy >= ENTROPY_THRESHOLD
+        AND consists mostly of base64 or hex characters.
+    """
+    if len(value) < ENTROPY_MIN_LENGTH:
+        return False
+    entropy = shannon_entropy(value)
+    if entropy < ENTROPY_THRESHOLD:
+        return False
+    # Require the value to be predominantly base64/hex characters
+    base64_ratio = sum(1 for ch in value if ch in _BASE64_CHARS) / len(value)
+    return base64_ratio >= 0.85
 
 
 # Keyword patterns to match in env var names
@@ -86,7 +150,17 @@ class SecretDetector:
             ]
 
             if not matched_keywords:
-                # No secret keywords in name
+                # No secret keywords in name — fall through to entropy check
+                if is_high_entropy_secret(var_value):
+                    detections.append({
+                        "var_name": var_name,
+                        "keywords_matched": [],
+                        "confidence": "low",
+                        "reason": (
+                            f"High-entropy value detected (Shannon entropy "
+                            f"{shannon_entropy(var_value):.2f} bits/char >= {ENTROPY_THRESHOLD})"
+                        ),
+                    })
                 continue
 
             # Check if value matches complexity pattern (16+ chars)
@@ -94,14 +168,56 @@ class SecretDetector:
                 # Value too short or not complex enough
                 continue
 
+            # Upgrade confidence to 'high' when entropy also confirms the finding
+            entropy = shannon_entropy(var_value)
+            confidence = "high" if entropy >= ENTROPY_THRESHOLD else "medium"
+
             # All checks passed - potential secret detected
             detections.append({
                 "var_name": var_name,
                 "keywords_matched": matched_keywords,
-                "confidence": "medium",
-                "reason": f"Contains keywords: {', '.join(matched_keywords)}"
+                "confidence": confidence,
+                "reason": (
+                    f"Contains keywords: {', '.join(matched_keywords)}"
+                    + (f"; high entropy ({entropy:.2f} bits/char)" if confidence == "high" else "")
+                ),
             })
 
+        return detections
+
+    def scan_env_with_entropy(self, env_vars: dict[str, str]) -> list[dict]:
+        """Scan environment variables using entropy analysis only (no keyword matching).
+
+        Finds high-entropy values that look like secrets regardless of variable name.
+        Useful as a secondary pass to catch obfuscated credential names.
+
+        CRITICAL: Never logs or displays actual secret values.
+
+        Args:
+            env_vars: Dict mapping var_name -> var_value.
+
+        Returns:
+            List of detection dicts for high-entropy values not already caught
+            by the keyword-based ``scan()`` method.
+        """
+        keyword_detections = {d["var_name"] for d in self.scan(env_vars)}
+        detections = []
+        for var_name, var_value in env_vars.items():
+            if var_name in keyword_detections:
+                continue  # already caught by keyword scan
+            var_upper = var_name.upper()
+            if any(var_upper.startswith(prefix) for prefix in SAFE_PREFIXES):
+                continue
+            if is_high_entropy_secret(var_value):
+                detections.append({
+                    "var_name": var_name,
+                    "keywords_matched": [],
+                    "confidence": "low",
+                    "reason": (
+                        f"High-entropy value (Shannon entropy "
+                        f"{shannon_entropy(var_value):.2f} bits/char)"
+                    ),
+                })
         return detections
 
     def scan_content(self, content: str, source_label: str = "content") -> list[dict]:

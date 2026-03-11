@@ -25,6 +25,12 @@ Allows users to annotate CLAUDE.md sections with sync control tags:
     <!-- harness:only=codex -->           — include THIS LINE only in codex
     <!-- harness:only=codex,opencode --> — include THIS LINE only in listed targets
 
+  Environment-specific overrides (item 18):
+    @env:production                — section only included when --env=production
+    @env:dev                       — section only included when --env=dev
+    <!-- env:production -->        — HTML-comment form of same annotation
+    <!-- /env:production -->       — close an env block
+
   Unlike block-style harness: tags, inline skip/only annotations apply only
   to the line they appear on (or the section heading line if placed after ##).
 
@@ -72,6 +78,14 @@ _HARNESS_ONLY_RE = re.compile(
     r"<!--\s*harness:only=([a-z0-9,\s_-]+)\s*-->",
     re.IGNORECASE,
 )
+
+# Environment-specific section tags (item 18):
+#   @env:production  or  <!-- env:production -->  — open block for named env
+#   <!-- /env:production -->                       — close env block
+# The @env: shorthand on a standalone line is the friendlier form.
+_ENV_OPEN_AT_RE = re.compile(r"^\s*@env:([a-z0-9_-]+)\s*$", re.IGNORECASE)
+_ENV_OPEN_COMMENT_RE = re.compile(r"<!--\s*env:([a-z0-9_-]+)\s*-->", re.IGNORECASE)
+_ENV_CLOSE_COMMENT_RE = re.compile(r"<!--\s*/env:([a-z0-9_-]+)\s*-->", re.IGNORECASE)
 
 
 def _parse_target_list(targets_str: str) -> set[str]:
@@ -208,6 +222,129 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
     # Collapse runs of 3+ blank lines down to 2
     result = re.sub(r"\n{3,}", "\n\n", result)
     return result.strip()
+
+
+def filter_rules_for_env(content: str, env: str | None) -> str:
+    """Filter CLAUDE.md content for a specific deployment environment (item 18).
+
+    Supports two tag forms:
+
+    1. **Inline heading annotation** — ``@env:X`` appended to a Markdown heading
+       marks that section as env-specific. The section runs until the next heading
+       at the same or higher level::
+
+           ## Strict CI Rules @env:production
+           - No debug logging
+
+           ## Regular Rules
+           - These always appear
+
+    2. **Explicit block tags** — ``<!-- env:X --> ... <!-- /env:X -->``::
+
+           <!-- env:production -->
+           Only in production.
+           <!-- /env:production -->
+           Regular content again.
+
+    Sections tagged for a specific env are dropped when syncing to a different env.
+    Untagged sections and content are always included.
+
+    Args:
+        content: Raw CLAUDE.md text.
+        env: Active environment name (e.g. "production", "dev"). If None or empty,
+             all content is included (passthrough — strips tags only).
+
+    Returns:
+        Filtered content with non-matching env sections removed.
+    """
+    _HEADING_LINE_RE = re.compile(
+        r"^(#{1,6})\s+(.+?)(?:\s+@env:([a-z0-9_-]+))?\s*$",
+        re.IGNORECASE,
+    )
+
+    if not env:
+        # No env filter — strip annotations/tags but keep all content
+        def _strip_at_env(ln: str) -> str:
+            return re.sub(r"\s*@env:[a-z0-9_-]+", "", ln, flags=re.IGNORECASE)
+
+        cleaned = "\n".join(_strip_at_env(ln) for ln in content.splitlines())
+        cleaned = _ENV_OPEN_COMMENT_RE.sub("", cleaned)
+        cleaned = _ENV_CLOSE_COMMENT_RE.sub("", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
+
+    env_lower = env.lower()
+    lines = content.splitlines(keepends=True)
+    output: list[str] = []
+
+    # State for explicit HTML-comment blocks
+    comment_env: str | None = None  # current <!-- env:X --> block, or None
+
+    # State for heading-annotated sections: (env_name, heading_level) or None
+    heading_env: tuple[str, int] | None = None
+
+    for line in lines:
+        stripped = line.rstrip("\n")
+
+        # --- HTML-comment close: <!-- /env:X --> ---
+        close_m = _ENV_CLOSE_COMMENT_RE.search(stripped)
+        if close_m and comment_env and close_m.group(1).lower() == comment_env:
+            comment_env = None
+            continue  # Don't emit the tag line
+
+        # --- HTML-comment open: <!-- env:X --> ---
+        open_m = _ENV_OPEN_COMMENT_RE.search(stripped)
+        if open_m:
+            comment_env = open_m.group(1).lower()
+            continue  # Don't emit the tag line
+
+        # --- Check for @env:X-annotated heading ---
+        heading_m = _HEADING_LINE_RE.match(stripped)
+        if heading_m:
+            level = len(heading_m.group(1))
+            section_env = (heading_m.group(3) or "").lower() or None
+
+            # A heading at same/higher level closes the current heading-env block
+            if heading_env is not None and level <= heading_env[1]:
+                heading_env = None
+
+            if section_env is not None:
+                heading_env = (section_env, level)
+                if section_env != env_lower:
+                    continue  # Drop heading (and its body) for other envs
+                # Emit heading with @env annotation stripped
+                clean = re.sub(r"\s+@env:[a-z0-9_-]+", "", stripped, flags=re.IGNORECASE)
+                output.append(clean + ("\n" if line.endswith("\n") else ""))
+                continue
+            # Untagged heading: also closes any heading-env block
+            # (already handled above by level check)
+
+        # --- Emit or drop based on active block state ---
+        if comment_env is not None:
+            if comment_env == env_lower:
+                output.append(line)
+            # else: drop (inside a different-env comment block)
+        elif heading_env is not None:
+            if heading_env[0] == env_lower:
+                output.append(line)
+            # else: drop (inside a different-env heading section)
+        else:
+            output.append(line)  # Untagged — always include
+
+    result = "".join(output)
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result.strip()
+
+
+def has_env_tags(content: str) -> bool:
+    """Return True if content contains any environment filter tags."""
+    if not content:
+        return False
+    return bool(
+        _ENV_OPEN_AT_RE.search(content)
+        or _ENV_OPEN_COMMENT_RE.search(content)
+        or _ENV_CLOSE_COMMENT_RE.search(content)
+    )
 
 
 def has_sync_tags(content: str) -> bool:

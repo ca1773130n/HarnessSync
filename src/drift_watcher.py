@@ -81,6 +81,8 @@ class DriftWatcher:
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         alert_callback: Callable[[DriftAlert], None] | None = None,
         state_manager: StateManager | None = None,
+        notify: bool = False,
+        notify_cooldown_minutes: float = 60.0,
     ):
         """Initialize the drift watcher.
 
@@ -89,11 +91,23 @@ class DriftWatcher:
             poll_interval: Seconds between each poll cycle.
             alert_callback: Optional function called with each DriftAlert when
                             drift is detected. Defaults to printing to stdout.
+                            Takes precedence over the ``notify`` flag.
             state_manager: Optional StateManager for dependency injection.
+            notify: If True and no alert_callback is provided, use the OS
+                    notification callback that sends desktop banners (item 29).
+            notify_cooldown_minutes: Minimum minutes between OS notifications
+                                     for the same file (default: 60).
         """
         self.project_dir = project_dir
         self.poll_interval = poll_interval
-        self.alert_callback = alert_callback or _default_alert_callback
+        if alert_callback is not None:
+            self.alert_callback = alert_callback
+        elif notify:
+            self.alert_callback = make_notifying_alert_callback(
+                notify=True, threshold_minutes=notify_cooldown_minutes
+            )
+        else:
+            self.alert_callback = _default_alert_callback
         self._state_manager = state_manager or StateManager()
         self._logger = Logger()
         self._thread: threading.Thread | None = None
@@ -216,6 +230,126 @@ class DriftWatcher:
 def _default_alert_callback(alert: DriftAlert) -> None:
     """Default alert handler: print to stdout."""
     print(alert.format())
+
+
+def send_os_notification(title: str, body: str) -> bool:
+    """Send a native OS desktop notification (item 29).
+
+    Attempts to deliver a desktop notification using the best available
+    mechanism for the current platform:
+      - macOS: ``osascript`` (AppleScript) via display notification
+      - Linux: ``notify-send`` (libnotify, available in most distros)
+      - Windows: ``PowerShell`` with BurntToast or basic balloon tip
+      - Fallback: prints to stderr (no-op, never raises)
+
+    CRITICAL: Never includes file content or hashes in the notification body —
+    only filenames and harness names to avoid leaking sensitive config data.
+
+    Args:
+        title: Notification title (short, e.g. "HarnessSync Drift Detected").
+        body: Notification body (e.g. "AGENTS.md was modified outside HarnessSync").
+
+    Returns:
+        True if notification was sent successfully, False otherwise.
+    """
+    import platform
+    import subprocess
+    import shutil
+
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            # macOS: use AppleScript display notification
+            script = f'display notification "{body}" with title "{title}"'
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                timeout=5,
+            )
+            return result.returncode == 0
+
+        elif system == "Linux":
+            # Linux: use notify-send (libnotify)
+            if shutil.which("notify-send"):
+                result = subprocess.run(
+                    ["notify-send", "--urgency=normal", title, body],
+                    capture_output=True,
+                    timeout=5,
+                )
+                return result.returncode == 0
+
+        elif system == "Windows":
+            # Windows: use PowerShell with basic balloon notification
+            ps_script = (
+                "Add-Type -AssemblyName System.Windows.Forms; "
+                "$n = New-Object System.Windows.Forms.NotifyIcon; "
+                "$n.Icon = [System.Drawing.SystemIcons]::Information; "
+                "$n.Visible = $true; "
+                f"$n.ShowBalloonTip(5000, '{title}', '{body}', [System.Windows.Forms.ToolTipIcon]::Info); "
+                "Start-Sleep -Seconds 6; "
+                "$n.Dispose()"
+            )
+            result = subprocess.run(
+                ["powershell", "-Command", ps_script],
+                capture_output=True,
+                timeout=10,
+            )
+            return result.returncode == 0
+
+    except Exception:
+        pass  # Notifications are best-effort; never raise
+
+    return False
+
+
+def make_notifying_alert_callback(
+    notify: bool = True,
+    threshold_minutes: float = 60.0,
+) -> "Callable[[DriftAlert], None]":
+    """Create an alert callback that sends OS notifications for drift (item 29).
+
+    The callback prints to stdout AND sends a native OS notification. A
+    cooldown threshold prevents notification spam when the same file is
+    detected as drifted across multiple poll cycles.
+
+    Args:
+        notify: If False, OS notifications are disabled (stdout only).
+        threshold_minutes: Minimum minutes between notifications for the
+                           same (target, file) pair. Default: 60 minutes.
+
+    Returns:
+        Alert callback function compatible with DriftWatcher.alert_callback.
+    """
+    from typing import Callable
+
+    last_notified: dict[tuple[str, str], float] = {}
+
+    def _callback(alert: DriftAlert) -> None:
+        print(alert.format())
+
+        if not notify:
+            return
+
+        key = (alert.target, alert.file_path)
+        import time as _time
+        now = _time.time()
+        last = last_notified.get(key, 0.0)
+        if now - last < threshold_minutes * 60:
+            return  # Cooldown period active
+
+        title = "HarnessSync — Config Drift Detected"
+        import os
+        filename = os.path.basename(alert.file_path)
+        if alert.deleted:
+            body = f"{alert.target}: {filename} was deleted outside HarnessSync."
+        else:
+            body = f"{alert.target}: {filename} was modified outside HarnessSync."
+
+        sent = send_os_notification(title, body)
+        if sent:
+            last_notified[key] = now
+
+    return _callback
 
 
 def drift_summary(project_dir: Path, state_manager: StateManager | None = None) -> dict:
