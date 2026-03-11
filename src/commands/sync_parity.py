@@ -49,6 +49,38 @@ _SUPPORT_MATRIX: dict[str, dict[str, str]] = {
         "mcp": "partial",      # type-discriminated local/remote only
         "settings": "partial", # per-tool permission entries
     },
+    "cline": {
+        "rules": "full",       # .clinerules + .roo/rules/harnesssync.md
+        "skills": "partial",   # .roo/rules/skills/<name>.md content copy
+        "agents": "partial",   # .roo/rules/agents/<name>.md content copy
+        "commands": "none",    # No command concept in Cline
+        "mcp": "full",         # .roo/mcp.json mcpServers format
+        "settings": "none",    # Managed by VS Code extension
+    },
+    "continue": {
+        "rules": "full",       # .continue/rules/harnesssync.md
+        "skills": "partial",   # .continue/rules/skills/<name>.md
+        "agents": "partial",   # .continue/prompts/<name>.prompt
+        "commands": "partial", # .continue/prompts/cmd-<name>.prompt
+        "mcp": "full",         # .continue/config.json mcpServers
+        "settings": "none",    # Managed by Continue extension
+    },
+    "zed": {
+        "rules": "full",       # .zed/system-prompt.md
+        "skills": "partial",   # .zed/prompts/skills/<name>.md
+        "agents": "partial",   # .zed/prompts/agent-<name>.md
+        "commands": "partial", # .zed/prompts/cmd-<name>.md
+        "mcp": "via-translation",  # context_servers format differs from mcpServers
+        "settings": "none",    # Managed by Zed editor
+    },
+    "neovim": {
+        "rules": "full",       # .avante/system-prompt.md + .codecompanion/system-prompt.md
+        "skills": "partial",   # .avante/rules/skills/<name>.md
+        "agents": "partial",   # .avante/rules/agents/<name>.md
+        "commands": "partial", # .codecompanion/slash-commands/<name>.md
+        "mcp": "full",         # .avante/mcp.json mcpServers
+        "settings": "none",    # Managed by Neovim config
+    },
 }
 
 # Capability descriptions for "partial" support
@@ -69,6 +101,31 @@ _GAPS: dict[str, dict[str, str]] = {
         "commands": "Symlinked verbatim — $ARGUMENTS may appear literally in OpenCode",
         "mcp": "type: local (stdio) and type: remote (URL) only; env vars adapted",
         "settings": "per-tool permission (singular) with allow/ask/deny values",
+    },
+    "cline": {
+        "skills": "Content copy to .roo/rules/skills/ — not a native skill format",
+        "agents": "Content copy to .roo/rules/agents/ — injected as context rules",
+        "commands": "No command equivalent — Cline uses slash commands via extension UI",
+        "settings": "Extension-managed — no config file sync possible",
+    },
+    "continue": {
+        "skills": "Synced as context rules in .continue/rules/skills/ — not native skills",
+        "agents": "Converted to .prompt files — no agent tool-access controls",
+        "commands": "Converted to .prompt files — $ARGUMENTS adapted",
+        "settings": "Extension-managed via VS Code settings — not syncable",
+    },
+    "zed": {
+        "skills": "Synced as prompt files — not a native Zed skill concept",
+        "agents": "Synced as prompt library entries — no tool access control",
+        "commands": "Synced as prompt library entries — $ARGUMENTS adapted",
+        "mcp": "Zed uses context_servers format (different from standard mcpServers)",
+        "settings": "Zed settings are editor-managed and not written by HarnessSync",
+    },
+    "neovim": {
+        "skills": "Synced to .avante/rules/skills/ — injected as context",
+        "agents": "Synced to .avante/rules/agents/ — injected as context rules",
+        "commands": "Synced to .codecompanion/slash-commands/ — $ARGUMENTS adapted",
+        "settings": "Neovim config is Lua-managed — not written by HarnessSync",
     },
 }
 

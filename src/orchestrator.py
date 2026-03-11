@@ -13,7 +13,7 @@ from pathlib import Path
 
 from src.adapters import AdapterRegistry
 from src.adapters.result import SyncResult
-from src.backup_manager import BackupManager, BackupContext
+from src.backup_manager import BackupManager
 from src.changelog_manager import ChangelogManager
 from src.compatibility_reporter import CompatibilityReporter
 from src.config_linter import ConfigLinter
@@ -38,7 +38,8 @@ class SyncOrchestrator:
     def __init__(self, project_dir: Path, scope: str = "all", dry_run: bool = False,
                  allow_secrets: bool = False, account: str = None, cc_home: Path = None,
                  only_sections: set = None, skip_sections: set = None,
-                 incremental: bool = False):
+                 incremental: bool = False,
+                 cli_only_targets: set = None, cli_skip_targets: set = None):
         """Initialize orchestrator.
 
         Args:
@@ -61,6 +62,9 @@ class SyncOrchestrator:
         self.only_sections = only_sections or set()
         self.skip_sections = skip_sections or set()
         self.incremental = incremental
+        # CLI-level target filters (applied before per-project .harnesssync overrides)
+        self.cli_only_targets: set[str] = cli_only_targets or set()
+        self.cli_skip_targets: set[str] = cli_skip_targets or set()
         self.logger = Logger()
         self.state_manager = StateManager()
         self.account_config = None
@@ -281,6 +285,12 @@ class SyncOrchestrator:
             targets = [t for t in targets if t not in self._project_skip_targets]
         if self._profile_targets:
             targets = [t for t in targets if t in self._profile_targets]
+
+        # Apply CLI-level --only-targets / --skip-targets (highest priority)
+        if self.cli_only_targets:
+            targets = [t for t in targets if t in self.cli_only_targets]
+        if self.cli_skip_targets:
+            targets = [t for t in targets if t not in self.cli_skip_targets]
 
         results = {}
 
@@ -631,7 +641,6 @@ class SyncOrchestrator:
         Returns:
             Dict with 'preview' key containing formatted diff output
         """
-        import json as _json
         df = DiffFormatter()
         target = adapter.target_name
 
@@ -707,6 +716,10 @@ class SyncOrchestrator:
             "cursor": ".cursor/rules/harnesssync.mdc",
             "aider": "CONVENTIONS.md",
             "windsurf": ".windsurfrules",
+            "cline": ".clinerules",
+            "continue": ".continue/rules/harnesssync.md",
+            "zed": ".zed/system-prompt.md",
+            "neovim": ".avante/system-prompt.md",
         }
         fname = rules_filenames.get(target)
         if fname:

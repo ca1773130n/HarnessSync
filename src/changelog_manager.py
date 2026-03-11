@@ -7,7 +7,6 @@ every sync event with timestamps, what changed, and which targets were
 updated. Provides an audit trail for teams.
 """
 
-import os
 from datetime import datetime
 from pathlib import Path
 

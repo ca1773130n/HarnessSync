@@ -23,7 +23,6 @@ Untagged content is included in all targets (default passthrough).
 """
 
 import re
-from typing import Sequence
 
 # Supported target names
 KNOWN_TARGETS = ("codex", "gemini", "opencode", "cursor", "aider", "windsurf")

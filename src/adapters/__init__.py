@@ -43,6 +43,10 @@ from . import opencode  # noqa: F401
 from . import cursor  # noqa: F401
 from . import aider  # noqa: F401
 from . import windsurf  # noqa: F401
+from . import cline  # noqa: F401
+from . import continue_dev  # noqa: F401
+from . import zed  # noqa: F401
+from . import neovim  # noqa: F401
 
 __all__ = [
     'AdapterBase',

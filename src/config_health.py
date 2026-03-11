@@ -24,6 +24,10 @@ _TARGET_NATIVE_FRACTIONS: dict[str, float] = {
     "cursor": 0.75,
     "aider": 0.35,
     "windsurf": 0.70,
+    "cline": 0.65,      # Rules + MCP native; agents/skills partial; commands dropped
+    "continue": 0.70,   # Rules + MCP native; agents/commands via prompts
+    "zed": 0.65,        # Rules native; MCP via context_servers; others partial
+    "neovim": 0.65,     # Rules native; MCP native; others partial
 }
 
 # Size thresholds (bytes)

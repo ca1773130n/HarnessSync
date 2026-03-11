@@ -39,6 +39,10 @@ INPUT_COST_PER_MTK: dict[str, float] = {
     "cursor":   3.00,   # Claude/GPT-4o (Cursor default)
     "aider":    3.00,   # Claude/GPT-4o (model-dependent)
     "windsurf": 3.00,   # Claude/GPT-4o tier
+    "cline":    3.00,   # Claude/GPT-4o (VS Code extension, model-dependent)
+    "continue": 1.00,   # Continue.dev — varies widely by model choice
+    "zed":      3.00,   # Zed AI — Claude/GPT-4o tier
+    "neovim":   3.00,   # avante.nvim/codecompanion — model-dependent
 }
 
 # Context window sizes per harness (in tokens)
@@ -49,6 +53,10 @@ CONTEXT_WINDOWS: dict[str, int] = {
     "cursor":   8_192,
     "aider":    8_192,
     "windsurf": 8_192,
+    "cline":    16_384,   # Cline injects rules into each conversation context
+    "continue": 32_768,   # Continue.dev injects rules into context
+    "zed":      16_384,   # Zed AI system prompt context
+    "neovim":   16_384,   # avante.nvim/codecompanion context
 }
 
 # Warning thresholds (fraction of context window)
@@ -289,6 +297,10 @@ def _get_rules_files(target: str, project_dir: Path) -> list[Path]:
         "cursor":   [".cursor/rules/claude-code-rules.mdc"],
         "aider":    ["CONVENTIONS.md"],
         "windsurf": [".windsurfrules"],
+        "cline":    [".clinerules", ".roo/rules/harnesssync.md"],
+        "continue": [".continue/rules/harnesssync.md"],
+        "zed":      [".zed/system-prompt.md"],
+        "neovim":   [".avante/system-prompt.md", ".codecompanion/system-prompt.md"],
     }
 
     results: list[Path] = []

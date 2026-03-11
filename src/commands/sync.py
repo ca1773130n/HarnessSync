@@ -195,6 +195,25 @@ def main():
         metavar="NAME",
         help="Save current --scope/--only/--skip options as a named profile"
     )
+    parser.add_argument(
+        "--only-targets",
+        type=str,
+        default=None,
+        help="Sync only these harness targets (comma-separated): codex,gemini,cursor,cline,..."
+    )
+    parser.add_argument(
+        "--skip-targets",
+        type=str,
+        default=None,
+        help="Skip these harness targets (comma-separated): codex,gemini,cursor,cline,..."
+    )
+    parser.add_argument(
+        "--html-report",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Write a self-contained HTML dry-run report to PATH (implies --dry-run)"
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -221,6 +240,14 @@ def main():
         only_sections = {s.strip() for s in args.only.split(",") if s.strip()} & valid_sections
     if args.skip:
         skip_sections = {s.strip() for s in args.skip.split(",") if s.strip()} & valid_sections
+
+    # Parse --only-targets / --skip-targets into target sets
+    cli_only_targets: set[str] | None = None
+    cli_skip_targets: set[str] = set()
+    if getattr(args, 'only_targets', None):
+        cli_only_targets = {t.strip() for t in args.only_targets.split(",") if t.strip()}
+    if getattr(args, 'skip_targets', None):
+        cli_skip_targets = {t.strip() for t in args.skip_targets.split(",") if t.strip()}
 
     # Apply named profile (overrides --scope/--only/--skip if profile specifies them)
     _profile_targets = None
@@ -296,6 +323,8 @@ def main():
                     only_sections=only_sections,
                     skip_sections=skip_sections,
                     incremental=getattr(args, 'incremental', False),
+                    cli_only_targets=cli_only_targets,
+                    cli_skip_targets=cli_skip_targets,
                 )
                 results = orchestrator.sync_all()
                 elapsed = time.time() - start_time
@@ -311,6 +340,8 @@ def main():
                     only_sections=only_sections,
                     skip_sections=skip_sections,
                     incremental=getattr(args, 'incremental', False),
+                    cli_only_targets=cli_only_targets,
+                    cli_skip_targets=cli_skip_targets,
                 )
 
                 # Check for multi-account setup
@@ -384,6 +415,23 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
                 print(f"\n[{target}]")
                 print(target_results["preview"])
         print(f"\n(dry-run complete, no files modified)")
+
+        # Write HTML report if --html-report specified
+        html_report_path = getattr(args, 'html_report', None)
+        if html_report_path:
+            try:
+                from src.html_report import write_html_report
+                report_path = Path(html_report_path)
+                write_html_report(
+                    dry_run_results=results,
+                    output_path=report_path,
+                    project_dir=Path(os.getcwd()),
+                    scope=getattr(args, 'scope', 'all'),
+                    account=account,
+                )
+                print(f"HTML report written to: {report_path}")
+            except Exception as e:
+                print(f"Warning: HTML report failed: {e}", file=sys.stderr)
     else:
         # Display conflict warnings if any
         if '_conflicts' in results:
@@ -482,12 +530,61 @@ def _run_watch_mode(project_dir: Path, args, only_sections, skip_sections) -> No
                         if isinstance(tr, dict) and not str(tr).startswith('_')
                     )
                     print(f"[{ts}] Sync complete.\n")
+                    _send_desktop_notification(
+                        "HarnessSync", "Sync complete", is_error=False
+                    )
                 except Exception as e:
                     print(f"[{ts}] Sync error: {e}\n")
+                    _send_desktop_notification(
+                        "HarnessSync", f"Sync error: {e}", is_error=True
+                    )
 
                 last_mtimes = current_mtimes
     except KeyboardInterrupt:
         print("\nWatch mode stopped.")
+
+
+def _send_desktop_notification(title: str, message: str, is_error: bool = False) -> None:
+    """Send a desktop notification on macOS or Linux.
+
+    Uses osascript (macOS) or notify-send (Linux) if available.
+    Silently no-ops if no notification system is found.
+
+    Args:
+        title: Notification title.
+        message: Notification body text.
+        is_error: If True, uses error sound/icon on macOS.
+    """
+    import platform
+    import subprocess as _subprocess
+
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            # macOS: use osascript to show a notification
+            subtitle = "Error" if is_error else "Success"
+            sound = "Basso" if is_error else "Glass"
+            script = (
+                f'display notification "{message}" '
+                f'with title "{title}" subtitle "{subtitle}" sound name "{sound}"'
+            )
+            _subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                timeout=3,
+            )
+        elif system == "Linux":
+            # Linux: use notify-send if available
+            import shutil as _shutil
+            if _shutil.which("notify-send"):
+                urgency = "critical" if is_error else "normal"
+                _subprocess.run(
+                    ["notify-send", "-u", urgency, title, message],
+                    capture_output=True,
+                    timeout=3,
+                )
+    except Exception:
+        pass  # Desktop notifications are best-effort
 
 
 if __name__ == "__main__":

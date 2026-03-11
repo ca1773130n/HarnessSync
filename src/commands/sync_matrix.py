@@ -34,6 +34,10 @@ CAPABILITY_MATRIX: list[dict] = [
         "cursor":    (NATIVE,  ".cursor/rules/*.mdc files"),
         "aider":     (ADAPTED, "CONVENTIONS.md managed section"),
         "windsurf":  (NATIVE,  ".windsurfrules managed section"),
+        "cline":     (NATIVE,  ".clinerules + .roo/rules/harnesssync.md"),
+        "continue":  (NATIVE,  ".continue/rules/harnesssync.md"),
+        "zed":       (NATIVE,  ".zed/system-prompt.md"),
+        "neovim":    (NATIVE,  ".avante/system-prompt.md + .codecompanion/system-prompt.md"),
     },
     {
         "section": "skills",
@@ -44,6 +48,10 @@ CAPABILITY_MATRIX: list[dict] = [
         "cursor":   (ADAPTED, ".cursor/rules/skills/*.mdc (content copy)"),
         "aider":    (ADAPTED, "Added to .aider.conf.yml read list"),
         "windsurf": (ADAPTED, ".windsurf/memories/<name>.md"),
+        "cline":    (ADAPTED, ".roo/rules/skills/<name>.md"),
+        "continue": (ADAPTED, ".continue/rules/skills/<name>.md"),
+        "zed":      (ADAPTED, ".zed/prompts/skills/<name>.md"),
+        "neovim":   (ADAPTED, ".avante/rules/skills/<name>.md"),
     },
     {
         "section": "agents",
@@ -54,6 +62,10 @@ CAPABILITY_MATRIX: list[dict] = [
         "cursor":   (ADAPTED, ".cursor/rules/agents/*.mdc files"),
         "aider":    (DROPPED, "No agent concept in Aider"),
         "windsurf": (ADAPTED, ".windsurf/workflows/<name>.md"),
+        "cline":    (ADAPTED, ".roo/rules/agents/<name>.md"),
+        "continue": (ADAPTED, ".continue/prompts/<name>.prompt"),
+        "zed":      (ADAPTED, ".zed/prompts/agent-<name>.md"),
+        "neovim":   (ADAPTED, ".avante/rules/agents/<name>.md"),
     },
     {
         "section": "commands",
@@ -64,6 +76,10 @@ CAPABILITY_MATRIX: list[dict] = [
         "cursor":   (ADAPTED, ".cursor/rules/commands/*.mdc (no $ARGUMENTS)"),
         "aider":    (DROPPED, "No command concept in Aider"),
         "windsurf": (ADAPTED, ".windsurf/workflows/cmd-*.md (no $ARGUMENTS)"),
+        "cline":    (DROPPED, "No command concept in Cline"),
+        "continue": (ADAPTED, ".continue/prompts/cmd-<name>.prompt"),
+        "zed":      (ADAPTED, ".zed/prompts/cmd-<name>.md"),
+        "neovim":   (ADAPTED, ".codecompanion/slash-commands/<name>.md"),
     },
     {
         "section": "mcp_servers",
@@ -74,6 +90,10 @@ CAPABILITY_MATRIX: list[dict] = [
         "cursor":   (NATIVE,  ".cursor/mcp.json mcpServers"),
         "aider":    (PARTIAL, "Server names noted in .aider.conf.yml; no exec support"),
         "windsurf": (NATIVE,  ".codeium/windsurf/mcp_config.json mcpServers"),
+        "cline":    (NATIVE,  ".roo/mcp.json mcpServers"),
+        "continue": (NATIVE,  ".continue/config.json mcpServers"),
+        "zed":      (ADAPTED, ".zed/settings.json context_servers (format differs)"),
+        "neovim":   (NATIVE,  ".avante/mcp.json mcpServers"),
     },
     {
         "section": "settings",
@@ -84,6 +104,10 @@ CAPABILITY_MATRIX: list[dict] = [
         "cursor":   (DROPPED, "Managed by Cursor IDE — not written"),
         "aider":    (ADAPTED, ".aider.conf.yml --yes flag mapping"),
         "windsurf": (DROPPED, "Managed by Windsurf IDE — not written"),
+        "cline":    (DROPPED, "Managed by VS Code extension — not written"),
+        "continue": (DROPPED, "Managed by Continue extension — not written"),
+        "zed":      (DROPPED, "Managed by Zed editor — not written"),
+        "neovim":   (DROPPED, "Managed by Neovim config — not written"),
     },
     {
         "section": "sync_tags",
@@ -94,6 +118,10 @@ CAPABILITY_MATRIX: list[dict] = [
         "cursor":   (DROPPED, "Tags not interpreted — content passed through"),
         "aider":    (DROPPED, "Tags not interpreted — content passed through"),
         "windsurf": (DROPPED, "Tags not interpreted — content passed through"),
+        "cline":    (DROPPED, "Tags not interpreted — content passed through"),
+        "continue": (DROPPED, "Tags not interpreted — content passed through"),
+        "zed":      (DROPPED, "Tags not interpreted — content passed through"),
+        "neovim":   (DROPPED, "Tags not interpreted — content passed through"),
     },
     {
         "section": "harness_overrides",
@@ -104,11 +132,16 @@ CAPABILITY_MATRIX: list[dict] = [
         "cursor":   (DROPPED, "Override file not applied to .mdc format"),
         "aider":    (DROPPED, "Override file not applied to CONVENTIONS.md"),
         "windsurf": (DROPPED, "Override file not applied to .windsurfrules"),
+        "cline":    (DROPPED, "Override file not applied to .clinerules"),
+        "continue": (DROPPED, "Override file not applied to .continue/rules"),
+        "zed":      (DROPPED, "Override file not applied to system-prompt.md"),
+        "neovim":   (DROPPED, "Override file not applied to avante config"),
     },
 ]
 
 # Display order for targets
-TARGETS = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"]
+TARGETS = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf",
+           "cline", "continue", "zed", "neovim"]
 
 # Level display config: (symbol, display label)
 LEVEL_DISPLAY = {
