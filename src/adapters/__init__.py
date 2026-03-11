@@ -40,6 +40,9 @@ from .result import SyncResult
 from . import codex  # noqa: F401
 from . import gemini  # noqa: F401
 from . import opencode  # noqa: F401
+from . import cursor  # noqa: F401
+from . import aider  # noqa: F401
+from . import windsurf  # noqa: F401
 
 __all__ = [
     'AdapterBase',

@@ -140,11 +140,42 @@ def main():
         action="store_true",
         help="Skip interactive conflict resolution (always overwrite)"
     )
+    parser.add_argument(
+        "--only",
+        type=str,
+        default=None,
+        help="Sync only these sections (comma-separated): rules,skills,agents,commands,mcp,settings"
+    )
+    parser.add_argument(
+        "--skip",
+        type=str,
+        default=None,
+        help="Skip these sections (comma-separated): rules,skills,agents,commands,mcp,settings"
+    )
+    parser.add_argument(
+        "--incremental",
+        action="store_true",
+        help="Only sync targets where source files changed since last sync (delta sync)"
+    )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Watch for config file changes and sync automatically (Ctrl+C to stop)"
+    )
 
     try:
         args = parser.parse_args(tokens)
     except SystemExit:
         return
+
+    # Parse --only / --skip into section sets
+    only_sections = None
+    skip_sections: set[str] = set()
+    valid_sections = {"rules", "skills", "agents", "commands", "mcp", "settings"}
+    if args.only:
+        only_sections = {s.strip() for s in args.only.split(",") if s.strip()} & valid_sections
+    if args.skip:
+        skip_sections = {s.strip() for s in args.skip.split(",") if s.strip()} & valid_sections
 
     # Debounce check
     state_manager = StateManager()
@@ -186,6 +217,10 @@ def main():
                     except Exception:
                         pass  # Conflict resolution failure should not block sync
 
+            if getattr(args, 'watch', False):
+                _run_watch_mode(project_dir, args, only_sections, skip_sections)
+                return
+
             if args.account:
                 # Sync specific account
                 orchestrator = SyncOrchestrator(
@@ -193,7 +228,10 @@ def main():
                     scope=args.scope,
                     dry_run=args.dry_run,
                     allow_secrets=args.allow_secrets,
-                    account=args.account
+                    account=args.account,
+                    only_sections=only_sections,
+                    skip_sections=skip_sections,
+                    incremental=getattr(args, 'incremental', False),
                 )
                 results = orchestrator.sync_all()
                 elapsed = time.time() - start_time
@@ -205,7 +243,10 @@ def main():
                     project_dir=project_dir,
                     scope=args.scope,
                     dry_run=args.dry_run,
-                    allow_secrets=args.allow_secrets
+                    allow_secrets=args.allow_secrets,
+                    only_sections=only_sections,
+                    skip_sections=skip_sections,
+                    incremental=getattr(args, 'incremental', False),
                 )
 
                 # Check for multi-account setup
@@ -295,6 +336,94 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
         # Display compatibility report if issues detected
         if '_compatibility_report' in results:
             print(results['_compatibility_report'])
+
+
+def _run_watch_mode(project_dir: Path, args, only_sections, skip_sections) -> None:
+    """Watch Claude Code config files and sync on change.
+
+    Uses polling (stat mtime) since fswatch/inotify may not be available.
+    Triggers incremental sync whenever a watched file changes.
+
+    Args:
+        project_dir: Project root directory
+        args: Parsed sync arguments
+        only_sections: Section filter from --only
+        skip_sections: Section filter from --skip
+    """
+    import time as _time
+
+    # Files and dirs to watch
+    watch_targets = [
+        project_dir / "CLAUDE.md",
+        project_dir / ".claude",
+        project_dir / ".mcp.json",
+        project_dir / ".harness-sync",
+        Path.home() / ".claude" / "settings.json",
+        Path.home() / ".mcp.json",
+    ]
+
+    def _collect_mtimes() -> dict:
+        mtimes: dict[str, float] = {}
+        for target in watch_targets:
+            if target.is_file():
+                mtimes[str(target)] = target.stat().st_mtime
+            elif target.is_dir():
+                for f in target.rglob("*"):
+                    if f.is_file():
+                        mtimes[str(f)] = f.stat().st_mtime
+        return mtimes
+
+    print("HarnessSync Watch Mode")
+    print("=" * 50)
+    print("Watching Claude Code config files for changes...")
+    print("Press Ctrl+C to stop.\n")
+
+    last_mtimes = _collect_mtimes()
+
+    try:
+        while True:
+            _time.sleep(1)
+            current_mtimes = _collect_mtimes()
+
+            changed = set()
+            for path, mtime in current_mtimes.items():
+                if last_mtimes.get(path) != mtime:
+                    changed.add(path)
+            for path in last_mtimes:
+                if path not in current_mtimes:
+                    changed.add(path)
+
+            if changed:
+                import datetime
+                ts = datetime.datetime.now().strftime("%H:%M:%S")
+                print(f"[{ts}] Changes detected ({len(changed)} file(s)), syncing...")
+                for p in sorted(changed)[:5]:
+                    print(f"  {p}")
+
+                try:
+                    orchestrator = SyncOrchestrator(
+                        project_dir=project_dir,
+                        scope=args.scope,
+                        dry_run=args.dry_run,
+                        allow_secrets=args.allow_secrets,
+                        only_sections=only_sections,
+                        skip_sections=skip_sections,
+                        incremental=True,  # Always incremental in watch mode
+                    )
+                    results = orchestrator.sync_all()
+                    # Brief summary
+                    synced_total = sum(
+                        sum(getattr(r, 'synced', 0) for r in tr.values() if hasattr(r, 'synced'))
+                        for tr in results.values()
+                        if isinstance(tr, dict) and not str(tr).startswith('_')
+                    )
+                    print(f"[{ts}] Sync complete.\n")
+                except Exception as e:
+                    print(f"[{ts}] Sync error: {e}\n")
+
+                last_mtimes = current_mtimes
+    except KeyboardInterrupt:
+        print("\nWatch mode stopped.")
 
 
 if __name__ == "__main__":

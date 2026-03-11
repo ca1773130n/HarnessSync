@@ -125,6 +125,15 @@ def _format_target_health(
 
 def main() -> None:
     """Entry point for /sync-health command."""
+    import shlex as _shlex
+    args_str = " ".join(sys.argv[1:])
+    tokens = _shlex.split(args_str) if args_str.strip() else []
+
+    show_skills = "--skills" in tokens
+    show_readiness = "--readiness" in tokens
+    show_score = "--score" in tokens
+    show_all = "--all" in tokens or (not show_skills and not show_readiness and not show_score)
+
     project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
     registered = AdapterRegistry.list_targets()
 
@@ -162,6 +171,50 @@ def main() -> None:
         )
     else:
         print("\nAll configured harnesses are installed.")
+
+    # --- Config Health Score ---
+    if show_all or show_score:
+        print()
+        try:
+            from src.source_reader import SourceReader
+            from src.config_health import ConfigHealthChecker
+            reader = SourceReader(scope="all", project_dir=project_dir)
+            source_data = reader.discover_all()
+            checker = ConfigHealthChecker()
+            health_report = checker.check(source_data, project_dir)
+            print(checker.format_report(health_report))
+        except Exception as e:
+            print(f"Config health check failed: {e}")
+
+    # --- Harness Readiness Checklist ---
+    if show_all or show_readiness:
+        print()
+        try:
+            from src.harness_readiness import HarnessReadinessChecker
+            readiness_checker = HarnessReadinessChecker()
+            readiness_reports = readiness_checker.check_all_targets(project_dir)
+            print(readiness_checker.format_report(readiness_reports))
+        except Exception as e:
+            print(f"Readiness check failed: {e}")
+
+    # --- Skill Compatibility ---
+    if show_all or show_skills:
+        print()
+        try:
+            from src.source_reader import SourceReader
+            from src.skill_compatibility import SkillCompatibilityChecker
+            if 'source_data' not in dir():
+                reader = SourceReader(scope="all", project_dir=project_dir)
+                source_data = reader.discover_all()
+            skills = source_data.get("skills", {})
+            if skills:
+                compat_checker = SkillCompatibilityChecker()
+                compat_reports = compat_checker.check_all_skills(skills)
+                print(compat_checker.format_report(compat_reports))
+            else:
+                print("Skill Compatibility: No skills found.")
+        except Exception as e:
+            print(f"Skill compatibility check failed: {e}")
 
 
 if __name__ == "__main__":

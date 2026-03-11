@@ -36,7 +36,9 @@ class SyncOrchestrator:
     """
 
     def __init__(self, project_dir: Path, scope: str = "all", dry_run: bool = False,
-                 allow_secrets: bool = False, account: str = None, cc_home: Path = None):
+                 allow_secrets: bool = False, account: str = None, cc_home: Path = None,
+                 only_sections: set = None, skip_sections: set = None,
+                 incremental: bool = False):
         """Initialize orchestrator.
 
         Args:
@@ -46,6 +48,9 @@ class SyncOrchestrator:
             allow_secrets: If True, allow sync even when secrets detected in env vars
             account: Account name for per-account sync (None = v1 behavior)
             cc_home: Custom Claude Code config directory (derived from account if provided)
+            only_sections: If set, only sync these sections (rules/skills/agents/commands/mcp/settings)
+            skip_sections: If set, skip these sections
+            incremental: If True, skip targets where no source files changed since last sync
         """
         self.project_dir = project_dir
         self.scope = scope
@@ -53,6 +58,9 @@ class SyncOrchestrator:
         self.allow_secrets = allow_secrets
         self.account = account
         self.cc_home = cc_home
+        self.only_sections = only_sections or set()
+        self.skip_sections = skip_sections or set()
+        self.incremental = incremental
         self.logger = Logger()
         self.state_manager = StateManager()
         self.account_config = None
@@ -115,6 +123,19 @@ class SyncOrchestrator:
         # Pass scoped MCP data for v2.0 scope-aware adapters
         adapter_data['mcp_scoped'] = source_data.get('mcp_servers_scoped', {})
 
+        # --- PRE-SYNC: MCP REACHABILITY CHECK ---
+        # Warn (but do not block) if any MCP servers are unreachable
+        try:
+            from src.mcp_reachability import McpReachabilityChecker
+            checker = McpReachabilityChecker()
+            mcp_servers_for_check = source_data.get('mcp_servers', {})
+            if mcp_servers_for_check:
+                reach_results = checker.check_all(mcp_servers_for_check)
+                for warning in checker.get_warnings(reach_results):
+                    self.logger.warn(f"Pre-sync: {warning}")
+        except Exception as e:
+            self.logger.warn(f"MCP reachability check failed: {e}")
+
         # --- PRE-SYNC: SECRET DETECTION ---
         # Run secret detection on MCP env vars (before any writes)
         try:
@@ -175,9 +196,29 @@ class SyncOrchestrator:
             if isinstance(r, dict)
         )
 
+        # --- INCREMENTAL: PRE-COMPUTE CURRENT FILE HASHES (for delta check) ---
+        _current_hashes: dict[str, str] = {}
+        if self.incremental:
+            _source_paths = reader.get_source_paths()
+            for _paths in _source_paths.values():
+                for _p in _paths:
+                    if _p.is_file():
+                        _h = hash_file_sha256(_p)
+                        if _h:
+                            _current_hashes[str(_p)] = _h
+
         # --- SYNC: EXECUTE ADAPTERS (wrapped in BackupContext if available) ---
         for target in targets:
             adapter = AdapterRegistry.get_adapter(target, self.project_dir)
+
+            # --- INCREMENTAL: skip target if no source files changed ---
+            if self.incremental and _current_hashes:
+                drifted = self.state_manager.detect_drift(target, _current_hashes,
+                                                           account=self.account)
+                if not drifted:
+                    self.logger.info(f"{target}: no changes since last sync, skipping (incremental)")
+                    results[target] = {'_skipped_incremental': SyncResult(skipped=1)}
+                    continue
 
             if self.dry_run:
                 results[target] = self._preview_sync(adapter, adapter_data)
@@ -190,6 +231,9 @@ class SyncOrchestrator:
                         for r in adapter_data.get('rules', [])
                         if isinstance(r, dict)
                     ]
+
+                # Apply --only / --skip section filtering
+                target_data = self._apply_section_filter(target_data)
 
                 # Sync with backup/rollback protection
                 try:
@@ -256,6 +300,48 @@ class SyncOrchestrator:
             results['_conflicts'] = conflicts
 
         return results
+
+    def _apply_section_filter(self, data: dict) -> dict:
+        """Apply --only and --skip section filters to adapter data.
+
+        Sections: rules, skills, agents, commands, mcp, settings.
+        If only_sections is set, zero out all sections not in it.
+        Then zero out any sections in skip_sections.
+
+        Args:
+            data: Source data dict for a target adapter
+
+        Returns:
+            Filtered data dict (sections cleared to empty, not removed)
+        """
+        if not self.only_sections and not self.skip_sections:
+            return data
+
+        # Mapping from section name to default empty value
+        section_defaults: dict[str, object] = {
+            "rules": [],
+            "skills": {},
+            "agents": {},
+            "commands": {},
+            "mcp": {},
+            "mcp_scoped": {},
+            "settings": {},
+        }
+
+        filtered = dict(data)
+
+        for section, default in section_defaults.items():
+            # Normalize: mcp_scoped tracks with mcp
+            section_key = "mcp" if section == "mcp_scoped" else section
+
+            # If only_sections specified and this section is not in it → zero out
+            if self.only_sections and section_key not in self.only_sections:
+                filtered[section] = default
+            # If skip_sections specified and this section is in it → zero out
+            elif section_key in self.skip_sections:
+                filtered[section] = default
+
+        return filtered
 
     def _send_webhook(self, results: dict) -> None:
         """POST sync summary to configured webhook URL (if set).
