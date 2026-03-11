@@ -457,3 +457,198 @@ class ProfileManager:
                 lines.append(f"    targets: {', '.join(targets)}")
 
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # GitHub Gist Export / Import
+    # ------------------------------------------------------------------
+
+    def export_to_gist(
+        self,
+        profile_name: str = "team",
+        description: str = "HarnessSync team profile",
+        public: bool = False,
+        github_token: str | None = None,
+    ) -> str:
+        """Export a named profile to a GitHub Gist and return the Gist URL.
+
+        Enables one-command team config sharing: export a profile once, then
+        teammates run ``ProfileManager().import_from_gist(url)`` to pull it.
+
+        Args:
+            profile_name: Local profile name to export.
+            description: Gist description shown on GitHub.
+            public: If True, create a public Gist (default: secret Gist).
+            github_token: GitHub personal access token with ``gist`` scope.
+                          Reads from the GITHUB_TOKEN env var if not provided.
+
+        Returns:
+            HTTPS URL of the created Gist.
+
+        Raises:
+            ValueError: If the profile doesn't exist or the token is missing.
+            RuntimeError: If the Gist API call fails.
+        """
+        import urllib.request
+        import urllib.error
+
+        profile = self.get_profile(profile_name)
+        if profile is None:
+            available = ", ".join(self.list_profiles())
+            raise ValueError(
+                f"Profile {profile_name!r} not found. Available: {available or 'none'}"
+            )
+
+        token = github_token or os.environ.get("GITHUB_TOKEN", "")
+        if not token:
+            raise ValueError(
+                "GitHub token required. Set GITHUB_TOKEN env var or pass github_token."
+            )
+
+        export_data = {
+            "_harnesssync_version": 1,
+            "_exported_profile": profile_name,
+            **profile,
+        }
+        file_content = json.dumps(export_data, indent=2, ensure_ascii=False) + "\n"
+
+        payload = json.dumps({
+            "description": description,
+            "public": public,
+            "files": {
+                "harnesssync-profile.json": {"content": file_content},
+            },
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            "https://api.github.com/gists",
+            data=payload,
+            headers={
+                "Authorization": f"token {token}",
+                "Content-Type": "application/json",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "HarnessSync/1.0",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"GitHub API error {e.code}: {err_body}") from e
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"Network error creating Gist: {e}") from e
+
+        html_url: str = body.get("html_url", "")
+        raw_url: str = ""
+        files = body.get("files", {})
+        if "harnesssync-profile.json" in files:
+            raw_url = files["harnesssync-profile.json"].get("raw_url", "")
+
+        # Store the raw URL in the profile metadata for easy re-import
+        profile["_gist_url"] = raw_url or html_url
+        self.save_profile(profile_name, profile)
+
+        return html_url
+
+    def import_from_gist(
+        self,
+        gist_url: str,
+        import_as: str = "team",
+        overwrite: bool = True,
+        github_token: str | None = None,
+    ) -> dict:
+        """Import a HarnessSync profile from a GitHub Gist URL.
+
+        Accepts both the Gist HTML URL (https://gist.github.com/user/ID) and
+        a raw file URL. The profile is saved locally under ``import_as``.
+
+        Args:
+            gist_url: GitHub Gist URL or raw file URL.
+            import_as: Local profile name to save the fetched profile as.
+            overwrite: If False, raise ValueError if profile already exists.
+            github_token: Optional GitHub token (increases rate limit for private Gists).
+
+        Returns:
+            Imported profile dict.
+
+        Raises:
+            ValueError: If the URL format is invalid or profile already exists (when not overwriting).
+            RuntimeError: If fetching fails.
+        """
+        import urllib.request
+        import urllib.error
+        import re
+
+        if not overwrite and self.get_profile(import_as) is not None:
+            raise ValueError(
+                f"Profile {import_as!r} already exists. Pass overwrite=True to replace it."
+            )
+
+        # Convert Gist HTML URL → raw API URL
+        # https://gist.github.com/USER/GIST_ID → https://api.github.com/gists/GIST_ID
+        api_url = gist_url
+        gist_id_match = re.search(r"gist\.github\.com/[^/]+/([a-f0-9]+)", gist_url)
+        if gist_id_match:
+            gist_id = gist_id_match.group(1)
+            api_url = f"https://api.github.com/gists/{gist_id}"
+
+        headers: dict[str, str] = {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "HarnessSync/1.0",
+        }
+        token = github_token or os.environ.get("GITHUB_TOKEN", "")
+        if token:
+            headers["Authorization"] = f"token {token}"
+
+        req = urllib.request.Request(api_url, headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"GitHub API error {e.code}: {err_body}") from e
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"Network error fetching Gist: {e}") from e
+
+        # If we got an API response, extract the file content
+        if isinstance(body, dict) and "files" in body:
+            files = body["files"]
+            profile_file = files.get("harnesssync-profile.json")
+            if not profile_file:
+                # Fallback: grab the first JSON file
+                for fname, fdata in files.items():
+                    if fname.endswith(".json"):
+                        profile_file = fdata
+                        break
+            if not profile_file:
+                raise ValueError("Gist has no harnesssync-profile.json file")
+
+            content = profile_file.get("content") or ""
+            if not content:
+                # Need to fetch raw_url
+                raw_url = profile_file.get("raw_url", "")
+                if raw_url:
+                    raw_req = urllib.request.Request(raw_url, headers=headers, method="GET")
+                    with urllib.request.urlopen(raw_req, timeout=15) as raw_resp:
+                        content = raw_resp.read().decode("utf-8")
+        else:
+            # Assume body IS the profile JSON (raw URL was given)
+            content = json.dumps(body)
+
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Gist content is not valid JSON: {e}") from e
+
+        # Strip internal metadata keys
+        profile = {k: v for k, v in data.items() if not k.startswith("_")}
+        if not profile:
+            raise ValueError("Gist profile has no usable keys")
+
+        if "description" not in profile:
+            profile["description"] = f"Imported from Gist: {gist_url}"
+
+        self.save_profile(import_as, profile)
+        return profile

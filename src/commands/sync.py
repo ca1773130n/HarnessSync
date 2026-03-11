@@ -214,6 +214,16 @@ def main():
         metavar="PATH",
         help="Write a self-contained HTML dry-run report to PATH (implies --dry-run)"
     )
+    parser.add_argument(
+        "--pick-sections",
+        action="store_true",
+        help="Launch interactive section picker to choose which sections to sync"
+    )
+    parser.add_argument(
+        "--monorepo",
+        action="store_true",
+        help="Discover and sync each monorepo sub-package with its own config"
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -240,6 +250,17 @@ def main():
         only_sections = {s.strip() for s in args.only.split(",") if s.strip()} & valid_sections
     if args.skip:
         skip_sections = {s.strip() for s in args.skip.split(",") if s.strip()} & valid_sections
+
+    # --pick-sections: interactive multi-select (overrides --only/--skip when set)
+    if getattr(args, "pick_sections", False) and not args.only and not args.skip:
+        try:
+            from src.section_picker import pick_sections_interactive, format_section_selection
+            only_sections, skip_sections = pick_sections_interactive(
+                preselected=only_sections or set(valid_sections),
+            )
+            print(format_section_selection(only_sections, skip_sections))
+        except Exception:
+            pass  # Non-blocking: fall back to syncing all sections
 
     # Parse --only-targets / --skip-targets into target sets
     cli_only_targets: set[str] | None = None
@@ -310,6 +331,10 @@ def main():
 
             if getattr(args, 'watch', False):
                 _run_watch_mode(project_dir, args, only_sections, skip_sections)
+                return
+
+            if getattr(args, 'monorepo', False):
+                _run_monorepo_sync(project_dir, args)
                 return
 
             if args.account:
@@ -448,6 +473,43 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
         # Display compatibility report if issues detected
         if '_compatibility_report' in results:
             print(results['_compatibility_report'])
+
+
+def _run_monorepo_sync(project_dir: Path, args) -> None:
+    """Run per-package sync for a monorepo project.
+
+    Discovers sub-packages with .harnesssync-package.json or CLAUDE.md files
+    inside well-known package directories (packages/, apps/, libs/, etc.) and
+    syncs each one with its own target/section overrides.
+    """
+    from src.monorepo_sync import MonorepoPackageDiscoverer, run_monorepo_sync, format_monorepo_results
+
+    print("HarnessSync — Monorepo Mode")
+    print("=" * 50)
+
+    discoverer = MonorepoPackageDiscoverer(project_dir)
+    packages = discoverer.discover()
+
+    if not packages:
+        print("No monorepo sub-packages found.")
+        print(
+            "Add a .harnesssync-package.json to any subdirectory, or place a CLAUDE.md "
+            "inside packages/, apps/, libs/, or services/."
+        )
+        return
+
+    print(discoverer.format_report(packages))
+    print()
+
+    results = run_monorepo_sync(
+        project_dir=project_dir,
+        packages=packages,
+        dry_run=args.dry_run,
+        scope=args.scope,
+        allow_secrets=getattr(args, "allow_secrets", False),
+    )
+
+    print(format_monorepo_results(results))
 
 
 def _run_watch_mode(project_dir: Path, args, only_sections, skip_sections) -> None:

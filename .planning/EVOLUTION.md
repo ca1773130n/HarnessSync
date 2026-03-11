@@ -601,3 +601,70 @@ _2026-03-11T02:04:37.187Z_
 - Config Inheritance's suppress directive (!override) is a novel pattern not seen in other config systems — may confuse users; consider adding a /sync-inherit explain command with examples
 
 ---
+## Iteration 10
+_2026-03-11T02:21:54.848Z_
+
+### Items Attempted
+
+- **Sync Preview / Dry Run Mode** — pass
+- **Feature Parity Heatmap** — pass
+- **Config Drift Notifications** — pass
+- **Full Config Bundle Export/Import** — pass
+- **Project-Type Adaptive Sync** — pass
+- **Auto-Sync on Config Save** — pass
+- **Secrets Leak Prevention** — pass
+- **Team Config Sharing via Git** — pass
+- **MCP Server Discovery & Recommendations** — pass
+- **Sync History Time Machine** — pass
+- **Named Sync Profiles (Work/Personal/Project)** — pass
+- **Third-Party Adapter Plugin SDK** — pass
+- **Sync Webhooks & External Triggers** — pass
+- **Natural Language → Config Generation** — pass
+- **Sync Coverage Score** — pass
+- **Conflict Resolution Wizard** — pass
+- **Sync Analytics & Insights** — pass
+- **Custom Config Lint Rules** — pass
+- **Harness Version Compatibility Checker** — pass
+- **Cross-Harness Config Search** — pass
+- **Interactive Onboarding Wizard** — pass
+- **Multi-Machine Sync via Git** — pass
+- **Rule Rationale Annotations** — pass
+- **Continuous MCP Server Health Monitor** — pass
+- **Skill & Rule Usage Analytics** — pass
+- **Conditional / Trigger-Based Sync Rules** — pass
+- **Community Config Template Library** — pass
+- **Sync Impact Predictor** — pass
+- **AI Behavior Regression Detection** — pass
+- **Config Size Optimizer & Deduplicator** — pass
+- **Auto-Generated Sync Changelog** — pass
+- **Harness API Deprecation Warnings** — pass
+- **Interactive Scope Selector for Partial Sync** — pass
+- **Config Health Score with Actionable Recommendations** — pass
+
+### Decisions Made
+
+- Feature Parity Heatmap (item 2): Added _format_heatmap() and ANSI color helpers to commands/sync_parity.py with --heatmap and --no-color flags. Chose to keep the existing _format_report() intact for backward compat and add heatmap as an opt-in display mode. Color auto-disabled for non-TTY output.
+- Project-Type Adaptive Sync (item 5): Integrated ProjectTypeDetector into orchestrator.sync_all() pre-sync phase. Only applies auto-skip when user hasn't manually set only_sections/skip_sections to avoid overriding explicit user intent. Best-effort (wrapped in try/except).
+- Natural Language Config Generator (item 14): Created src/nl_config_generator.py as a standalone pattern-matching module with 11 behavior categories. Chose pattern-matching over LLM inference to make it offline-capable, fast, and deterministic. Multi-intent descriptions split on conjunctions.
+- Sync Coverage Score (item 15): Added calculate_coverage_score() and format_coverage_scores() to CompatibilityReporter. Wired into orchestrator post-sync to surface per-harness coverage percentages. Coverage stored in _coverage_scores key of results dict for external consumers.
+- Custom Config Lint Rules (item 18): Extended ConfigLinter with load_custom_rules() and add_custom_rule() methods. Added _run_custom_rules() and _evaluate_custom_rule() dispatching 6 rule types. Lint file at .harness-sync/lint-rules.json loaded automatically when project_dir is provided.
+- Sync Analytics (item 17): Added analytics() and format_analytics() to ChangelogManager. Parses the existing changelog.md with regex to extract per-target sync counts, failure rates, and file change frequencies. Added collections.defaultdict import for counter accumulation.
+- Sync Impact Predictor (item 28): Created src/sync_impact_predictor.py with SyncImpactPredictor class. Predicts MCP tool exposure changes, rule conflicts with known harness preferences, and settings permission implications. Wired into orchestrator dry-run path only (no impact in live sync).
+
+### Patterns Discovered
+
+- All new src/*.py files follow the established pattern: `from __future__ import annotations` at top, module docstring explaining feature, dataclasses for structured return types, Logger-free (modules that don't need I/O avoid the Logger dependency).
+- Orchestrator pre-sync pipeline follows try/except wrapping convention: every safety check is best-effort — informational checks never block sync. This pattern is used for MCP reachability, config linting, conflict detection, and now impact prediction.
+- The codebase has extensive feature coverage already (30 items in the list, ~20 already implemented). The pattern is to create focused single-responsibility modules in src/ and wire them into orchestrator.sync_all() at the appropriate pipeline stage.
+- Results dict uses underscore-prefixed keys (_blocked, _conflicts, _coverage_scores) for special/metadata entries. This convention is checked via `target.startswith('_')` throughout the codebase.
+- HarnessSync analytics are always computed from local filesystem signals (shell history, changelog, state files) — no telemetry or external calls. This offline-first pattern is consistent across harness_adoption.py, dead_config_detector.py, and now changelog analytics.
+
+### Takeaways
+
+- Many of the 30 product ideas in this iteration were already implemented in previous iterations. About 20/30 items had corresponding modules; the remaining ~10 needed new code. Future evolution iterations should audit what's already wired into the orchestrator vs. just having a module file.
+- The orchestrator.sync_all() function is getting very long (~500+ lines). A future refactor could extract pre-sync, adapter-execution, and post-sync phases into separate methods for readability.
+- The changelog analytics regex approach is fragile — if the changelog entry format changes, parsing breaks silently. A structured log format (JSONL alongside the markdown) would make analytics more robust.
+- Custom lint rules are loaded on every sync via project_dir — adding a caching layer in ConfigLinter would avoid re-reading the file on every sync invocation when watch mode is active.
+- The NL config generator has limited coverage (11 categories). High-value extensions: framework-specific rules (React, Django, FastAPI), security checklist rules, and team-convention rules that map to specific harness lint configurations.
+
+---
