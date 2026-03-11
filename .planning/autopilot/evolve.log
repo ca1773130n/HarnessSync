@@ -67,3 +67,12 @@
 [2026-03-11T01:39:57.927Z] Batch execute completed (code changes detected)
 [2026-03-11T01:39:57.927Z] Running single review for all 1 groups
 [2026-03-11T01:41:26.488Z] Batch review completed
+[2026-03-11T01:41:26.541Z] Auto-committed: evolve(iteration-8): api-consolidation
+[2026-03-11T01:41:26.542Z] Starting iteration 9
+[2026-03-11T01:44:26.556Z] Discovered 35 new + 28 carried-over = 63 total items, 1 groups, selected 1
+[2026-03-11T01:44:26.556Z] Capped batch from 63 to 30 items (max 30)
+[2026-03-11T01:44:26.557Z] Batch-executing 1 groups (30 items) in one subprocess
+[2026-03-11T02:01:32.070Z] Read iteration feedback: 10 decisions, 5 patterns, 5 takeaways
+[2026-03-11T02:01:32.107Z] Batch execute completed (code changes detected)
+[2026-03-11T02:01:32.108Z] Running single review for all 1 groups
+[2026-03-11T02:04:37.128Z] Batch review completed

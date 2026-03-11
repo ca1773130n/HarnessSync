@@ -350,3 +350,251 @@ class HarnessAdoptionAnalyzer:
             return "Low recent activity. Consider scheduling with /sync or checking if harness is still active."
 
         return "Active — no action needed."
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Per-harness usage attribution (item 28)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Shell history file patterns to check for harness invocations
+_SHELL_HISTORY_FILES = [
+    Path.home() / ".bash_history",
+    Path.home() / ".zsh_history",
+    Path.home() / ".local" / "share" / "fish" / "fish_history",
+]
+
+# CLI executable names per harness to search for in shell history
+_HARNESS_CLI_NAMES: dict[str, list[str]] = {
+    "codex":    ["codex"],
+    "gemini":   ["gemini"],
+    "opencode": ["opencode"],
+    "cursor":   ["cursor"],
+    "windsurf": ["windsurf"],
+    "aider":    ["aider"],
+    "cline":    ["cline"],
+    "continue": ["continue"],
+    "zed":      ["zed"],
+    "neovim":   ["nvim", "neovim"],
+}
+
+
+class UsageAttributionReport:
+    """Per-harness actual usage metrics derived from shell history."""
+
+    def __init__(
+        self,
+        target: str,
+        invocation_count: int,
+        last_invocation: str | None,
+        share_of_total: float,
+        rules_in_source: int,
+        rules_synced: int,
+        rules_coverage_pct: float,
+    ):
+        self.target = target
+        self.invocation_count = invocation_count
+        self.last_invocation = last_invocation
+        self.share_of_total = share_of_total         # 0.0 – 1.0
+        self.rules_in_source = rules_in_source       # total rules in CC source
+        self.rules_synced = rules_synced             # rules that made it to this target
+        self.rules_coverage_pct = rules_coverage_pct  # synced / source
+
+    def insight(self) -> str:
+        """Return an actionable insight sentence."""
+        if self.invocation_count == 0:
+            return f"Not used in shell history — verify if {self.target} is actively used."
+        if self.share_of_total > 0.5 and self.rules_coverage_pct < 0.7:
+            return (
+                f"Primary harness ({self.share_of_total*100:.0f}% usage) but only "
+                f"{self.rules_coverage_pct*100:.0f}% rule coverage — prioritize sync fidelity."
+            )
+        if self.share_of_total < 0.1 and self.invocation_count > 0:
+            return f"Rarely used ({self.share_of_total*100:.0f}%) — low priority for sync."
+        if self.rules_coverage_pct < 0.5:
+            return f"Low rule coverage ({self.rules_coverage_pct*100:.0f}%) — some rules may be dropped."
+        return f"Healthy — {self.share_of_total*100:.0f}% usage, {self.rules_coverage_pct*100:.0f}% rule coverage."
+
+
+class UsageAttributionAnalyzer:
+    """Analyzes shell history to attribute usage to specific harnesses.
+
+    Reads shell history files (.bash_history, .zsh_history, fish_history)
+    to count invocations of each harness CLI. Cross-references with sync
+    state to compute how well each harness's rules coverage matches its usage.
+
+    Args:
+        project_dir: Project root directory.
+        state_manager: StateManager for sync state (created if None).
+        history_files: Override shell history file paths for testing.
+    """
+
+    def __init__(
+        self,
+        project_dir: Path | None = None,
+        state_manager=None,
+        history_files: list[Path] | None = None,
+    ):
+        self.project_dir = project_dir or Path.cwd()
+        if state_manager is None:
+            from src.state_manager import StateManager
+            state_manager = StateManager()
+        self.state_manager = state_manager
+        self.history_files = history_files or _SHELL_HISTORY_FILES
+
+    def _count_invocations(self) -> dict[str, int]:
+        """Count CLI invocations per harness from shell history files."""
+        counts: dict[str, int] = {h: 0 for h in _HARNESS_CLI_NAMES}
+
+        for history_path in self.history_files:
+            if not history_path.exists():
+                continue
+            try:
+                text = history_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+
+            for harness, cli_names in _HARNESS_CLI_NAMES.items():
+                for cli in cli_names:
+                    # Count lines starting with the CLI command (shell history format)
+                    # zsh history has ": timestamp:elapsed;command" format
+                    import re as _re
+                    pattern = _re.compile(
+                        rf"(?m)^(?::\s*\d+:\d+;)?{_re.escape(cli)}\b"
+                    )
+                    counts[harness] += len(pattern.findall(text))
+
+        return counts
+
+    def _get_last_invocation(self, cli_names: list[str]) -> str | None:
+        """Find the most recent invocation date of a CLI from zsh history."""
+        latest_ts: int | None = None
+
+        for history_path in self.history_files:
+            if not history_path.exists():
+                continue
+            if "zsh" not in str(history_path):
+                continue  # Only zsh history has timestamps
+            try:
+                text = history_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+
+            import re as _re
+            for cli in cli_names:
+                # zsh format: ": timestamp:elapsed;command"
+                for m in _re.finditer(rf"^:\s*(\d+):\d+;{_re.escape(cli)}\b", text, _re.MULTILINE):
+                    ts = int(m.group(1))
+                    if latest_ts is None or ts > latest_ts:
+                        latest_ts = ts
+
+        if latest_ts is None:
+            return None
+        from datetime import datetime, timezone
+        return datetime.fromtimestamp(latest_ts, tz=timezone.utc).strftime("%Y-%m-%d")
+
+    def _get_rules_coverage(self, target: str, total_source_rules: int) -> int:
+        """Estimate number of source rules that synced to target."""
+        target_status = self.state_manager.get_target_status(target)
+        if not target_status:
+            return 0
+        # Use synced count from last sync state if available
+        last_counts = target_status.get("last_sync_counts", {})
+        return last_counts.get("rules", 0) or max(0, total_source_rules - 1)
+
+    def analyze(
+        self,
+        targets: list[str] | None = None,
+        total_source_rules: int = 10,
+    ) -> list[UsageAttributionReport]:
+        """Analyze usage attribution across harnesses.
+
+        Args:
+            targets: Harnesses to analyze (default: all known).
+            total_source_rules: Total rules in Claude Code source (for coverage calc).
+
+        Returns:
+            List of UsageAttributionReport sorted by invocation_count descending.
+        """
+        if targets is None:
+            targets = list(_HARNESS_CLI_NAMES.keys())
+
+        counts = self._count_invocations()
+        total_invocations = max(1, sum(counts.get(t, 0) for t in targets))
+
+        reports: list[UsageAttributionReport] = []
+        for target in targets:
+            inv_count = counts.get(target, 0)
+            cli_names = _HARNESS_CLI_NAMES.get(target, [target])
+            last_inv = self._get_last_invocation(cli_names)
+            synced_rules = self._get_rules_coverage(target, total_source_rules)
+            coverage_pct = synced_rules / total_source_rules if total_source_rules > 0 else 1.0
+
+            reports.append(UsageAttributionReport(
+                target=target,
+                invocation_count=inv_count,
+                last_invocation=last_inv,
+                share_of_total=inv_count / total_invocations,
+                rules_in_source=total_source_rules,
+                rules_synced=synced_rules,
+                rules_coverage_pct=min(1.0, coverage_pct),
+            ))
+
+        reports.sort(key=lambda r: r.invocation_count, reverse=True)
+        return reports
+
+    def format_report(self, reports: list[UsageAttributionReport]) -> str:
+        """Format usage attribution report as human-readable text."""
+        if not reports:
+            return "No usage data available."
+
+        total = sum(r.invocation_count for r in reports)
+        lines = [
+            "Per-Harness Usage Attribution",
+            "=" * 50,
+            f"Total harness invocations found in shell history: {total}",
+            "",
+        ]
+
+        for r in reports:
+            bar_len = int(r.share_of_total * 20)
+            bar = "█" * bar_len + "░" * (20 - bar_len)
+            lines.append(
+                f"{r.target:<12} {bar}  "
+                f"{r.share_of_total*100:4.0f}%  ({r.invocation_count} invocations)"
+            )
+            coverage_bar = int(r.rules_coverage_pct * 10)
+            lines.append(
+                f"{'':12}  Rule coverage: "
+                f"{'█' * coverage_bar}{'░' * (10 - coverage_bar)}  "
+                f"{r.rules_coverage_pct*100:.0f}%"
+            )
+            if r.last_invocation:
+                lines.append(f"{'':12}  Last used: {r.last_invocation}")
+            lines.append(f"{'':12}  ↳ {r.insight()}")
+            lines.append("")
+
+        # Summary insights
+        if total == 0:
+            lines.append(
+                "Note: No harness invocations found in shell history.\n"
+                "Shell history may be in a non-standard location or disabled."
+            )
+        else:
+            primary = max(reports, key=lambda r: r.invocation_count)
+            if primary.invocation_count > 0:
+                lines.append(
+                    f"Primary harness: {primary.target} "
+                    f"({primary.share_of_total*100:.0f}% of usage)"
+                )
+                low_coverage = [
+                    r for r in reports
+                    if r.invocation_count > 0 and r.rules_coverage_pct < 0.7
+                ]
+                if low_coverage:
+                    names = ", ".join(r.target for r in low_coverage)
+                    lines.append(
+                        f"Low coverage in active harnesses: {names}\n"
+                        "Consider running /sync-matrix to see what's being dropped."
+                    )
+
+        return "\n".join(lines)

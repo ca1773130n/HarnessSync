@@ -475,3 +475,30 @@ _2026-03-11T01:33:31.891Z_
 - The --only-targets flag was a natural extension of the existing --only sections pattern and required minimal code — high leverage for power users who use different harnesses for different workflows
 
 ---
+## Iteration 8
+_2026-03-11T01:41:26.541Z_
+
+### Items Attempted
+
+- **Consider consolidating sync-* commands (5 commands)** — pass
+
+### Decisions Made
+
+- Consolidated sync-health, sync-status, and sync-parity under sync-health as subcommands — these three are all read-only diagnostic commands that naturally belong together. sync-setup and sync-restore were intentionally left standalone because they perform management operations with side effects.
+- Used importlib.import_module for subcommand dispatch rather than direct function calls — this avoids circular imports and allows each module to remain independently invocable.
+- Preserved all original commands (sync-status, sync-parity) as top-level commands with backward compatibility — added cross-reference notes pointing to the parent. No breaking changes.
+- Added --help routing at the top of sync-health main() to surface the new subcommand structure to users.
+
+### Patterns Discovered
+
+- The commands directory uses a consistent pattern: frontmatter description + usage docs + a single shell dispatch line invoking a Python module. This makes command consolidation clean — routing only needs to happen at the Python layer.
+- All command Python modules follow the same structure: PLUGIN_ROOT path setup, then main() as entry point. The subcommand dispatch pattern (pop first token, redirect sys.argv, importlib.import_module, mod.main()) works cleanly with this convention.
+- sync-health already had feature flags (--score, --readiness, --skills) suggesting it was designed for expansion. The subcommand pattern extends this naturally.
+
+### Takeaways
+
+- The 5 commands flagged for consolidation split cleanly into two groups: diagnostic (health/status/parity) vs management (setup/restore). Only the diagnostic group benefits from consolidation — the management commands are different enough in scope that a parent would be artificial.
+- deepeval library is incompatible with Python 3.9 (uses union type syntax `|` in pydantic models) and must be excluded from test runs with -p no:deepeval. This is a pre-existing issue unrelated to this change.
+- The command file format (.md with frontmatter + shell dispatch) is expressive but has no native subcommand concept — subcommand routing must live in the Python layer, not the .md file.
+
+---
