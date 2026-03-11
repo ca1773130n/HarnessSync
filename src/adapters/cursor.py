@@ -74,10 +74,20 @@ class CursorAdapter(AdapterBase):
 
             out_path = self.rules_dir / f"{out_name}.mdc"
 
+            # Version-gate alwaysApply field (requires Cursor >= 0.40)
+            try:
+                from src.harness_version_compat import get_compat_flags
+                flags = get_compat_flags("cursor", self.project_dir)
+                _always_apply_supported = flags.get("mdc_alwaysApply", True)
+            except Exception:
+                _always_apply_supported = True
+
+            _frontmatter_extra = "alwaysApply: true\n" if _always_apply_supported else ""
+
             mdc_content = (
                 f"---\n"
                 f"description: Synced from Claude Code by HarnessSync\n"
-                f"alwaysApply: true\n"
+                f"{_frontmatter_extra}"
                 f"---\n\n"
                 f"{HARNESSSYNC_MARKER}\n"
                 f"<!-- Last synced: {timestamp} -->\n\n"

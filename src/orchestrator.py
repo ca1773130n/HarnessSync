@@ -249,6 +249,15 @@ class SyncOrchestrator:
         except Exception as e:
             self.logger.warn(f"Config linter failed: {e}")
 
+        # --- PRE-SYNC: HARNESS VERSION COMPATIBILITY CHECK ---
+        try:
+            from src.harness_version_compat import format_compat_warnings
+            compat_warnings = format_compat_warnings(project_dir=self.project_dir)
+            for w in compat_warnings:
+                self.logger.warn(f"Version compat: {w}")
+        except Exception:
+            pass  # Version compat check is informational, never blocks
+
         # --- PRE-SYNC: CONFLICT DETECTION ---
         # Run conflict detection (non-blocking, informational)
         conflicts = {}
@@ -283,6 +292,16 @@ class SyncOrchestrator:
             except ImportError as e:
                 self.logger.warn(f"BackupManager unavailable: {e}")
 
+        # --- PRE-SYNC: CAPTURE USER ANNOTATIONS (skip in dry-run) ---
+        _captured_annotations: dict = {}
+        if not self.dry_run:
+            try:
+                from src.annotation_preserver import AnnotationPreserver
+                _ann_preserver = AnnotationPreserver(self.project_dir)
+                _captured_annotations = _ann_preserver.capture_all(targets)
+            except Exception:
+                pass  # Annotation preservation is best-effort
+
         # Detect if any rules have sync tags (used for per-target filtering)
         _rules_have_tags = any(
             has_sync_tags(r.get('content', '')) for r in adapter_data.get('rules', [])
@@ -316,6 +335,29 @@ class SyncOrchestrator:
             if self.dry_run:
                 results[target] = self._preview_sync(adapter, adapter_data)
             else:
+                # --- OFFLINE QUEUE: check target availability before syncing ---
+                try:
+                    from src.offline_queue import OfflineQueue, is_target_available
+                    if not is_target_available(target, self.project_dir):
+                        self.logger.warn(
+                            f"{target}: config directory unavailable — queuing for later replay"
+                        )
+                        oq = OfflineQueue()
+                        oq.enqueue(
+                            target=target,
+                            source_snapshot=adapter_data,
+                            reason="target config directory unavailable",
+                            project_dir=str(self.project_dir),
+                        )
+                        results[target] = {
+                            '_queued': SyncResult(skipped=1, skipped_files=[
+                                f"{target}: queued (offline)"
+                            ])
+                        }
+                        continue
+                except ImportError:
+                    pass  # offline_queue not available — proceed normally
+
                 # Build target-specific data (applying sync tag filtering)
                 target_data = dict(adapter_data)
                 if _rules_have_tags:
@@ -324,6 +366,17 @@ class SyncOrchestrator:
                         for r in adapter_data.get('rules', [])
                         if isinstance(r, dict)
                     ]
+
+                # --- MCP ALIASING: apply per-target server name aliases ---
+                try:
+                    from src.mcp_aliasing import load_aliases, apply_aliases
+                    _mcp_aliases = load_aliases(project_dir=self.project_dir)
+                    if _mcp_aliases and target_data.get('mcp'):
+                        target_data['mcp'] = apply_aliases(
+                            target_data['mcp'], target, _mcp_aliases
+                        )
+                except Exception:
+                    pass  # Aliasing is best-effort
 
                 # Apply --only / --skip section filtering
                 target_data = self._apply_section_filter(target_data)
@@ -337,6 +390,20 @@ class SyncOrchestrator:
                     results[target] = {
                         'error': SyncResult(failed=1, failed_files=[str(e)])
                     }
+
+        # --- POST-SYNC: RESTORE USER ANNOTATIONS (skip in dry-run) ---
+        if not self.dry_run and _captured_annotations:
+            try:
+                from src.annotation_preserver import AnnotationPreserver
+                _ann_preserver = AnnotationPreserver(self.project_dir)
+                restored = _ann_preserver.restore_all(_captured_annotations)
+                if restored:
+                    total_restored = sum(restored.values())
+                    self.logger.info(
+                        f"Preserved user annotations in {total_restored} file(s)"
+                    )
+            except Exception:
+                pass  # Best-effort
 
         # --- POST-SYNC: SYMLINK CLEANUP (skip in dry-run) ---
         if not self.dry_run:

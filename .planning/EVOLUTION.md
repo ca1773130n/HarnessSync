@@ -213,3 +213,71 @@ _2026-03-11T00:20:31.384Z_
 - The startup drift check is necessarily conservative (reads from state file, no live adapter checking) — it can miss drift caused by manual edits to target files, which is the exact problem users worry about; a future improvement would hash target files too
 
 ---
+## Iteration 4
+_2026-03-11T00:39:42.157Z_
+
+### Items Attempted
+
+- **Sync Preview / Dry Run Mode** — pass
+- **Team Sync Profiles via Git** — pass
+- **Custom Adapter SDK for Community Harnesses** — pass
+- **Config Coverage Report** — pass
+- **Drift Alerts with Smart Notifications** — pass
+- **Scheduled Sync (Cron-Based)** — pass
+- **New Harness Onboarding Wizard** — pass
+- **Environment Profiles (Work / Personal / Client)** — pass
+- **MCP Server Reachability Dashboard** — pass
+- **GitHub Actions Sync Workflow** — pass
+- **Interactive Conflict Resolution** — pass
+- **Sync Analytics and Drift Metrics** — pass
+- **Tag-Based Selective Sync** — pass
+- **Skill Compatibility Checker Before Authoring** — pass
+- **Dotfiles Repo Export** — pass
+- **Harness Adoption Insights** — pass
+- **Cross-Harness Rule Deduplication** — pass
+- **Pre-Commit Sync Gate** — pass
+- **Multi-Project Sync Orchestrator** — pass
+- **Sync History Timeline** — pass
+- **LLM-Assisted Config Translation** — pass
+- **Sync Impact Analysis** — pass
+- **VS Code AI Extension Config Sync** — pass
+- **Config Linting with Auto-Fix Suggestions** — pass
+- **Shareable Sync Recipes / Community Hub** — pass
+- **Ambient Sync Status in Terminal Prompt** — pass
+- **Project Type Detection with Smart Defaults** — pass
+- **Downstream Change Propagation Webhooks** — pass
+
+### Decisions Made
+
+- Implemented VSCodeAdapter as a proper adapter registered with AdapterRegistry, targeting .github/copilot-instructions.md (Copilot) and .codeium/instructions.md (Codeium) — both share a managed-marker pattern for idempotent sync
+- GitHub Actions workflow generator uses template string interpolation rather than a YAML library to avoid adding dependencies; the output is fully functional with escape sequences for GitHub Actions syntax ({{{{ }}}})
+- HarnessAdoptionAnalyzer uses three signals for staleness: last-sync timestamp, file mtime of key config files, and 30-day changelog event count — all read-only with no side effects
+- Multi-project sync uses concurrent.futures.ThreadPoolExecutor for parallel project syncing with a configurable concurrency cap (default 4) to avoid overwhelming I/O or hitting lock conflicts
+- Config linter auto-fix uses a LintFix dataclass with fix_pattern and fix_replacement fields so callers can apply fixes programmatically via apply_fixes() without parsing the issue string
+- Project type detector uses a priority-ordered chain of detection rules (monorepo first, then framework-specific, then language-level) with confidence levels to communicate certainty to the user
+- WebhookNotifier delegates entirely to webhooks.json for webhook config and passes the sync payload as HARNESSSYNC_EVENT env var to scripts — this is backward compatible with the existing HARNESSSYNC_WEBHOOK_URL env var which is preserved in orchestrator._send_webhook()
+- ProfileManager.export_to_repo() / load_from_repo() uses a _harnesssync_team_profile sentinel key to distinguish team profiles from user profiles and strips internal keys on import
+- Three-way conflict diff uses difflib for unified diffs on all three pairs (base→current, base→source, source→current); the merge template uses git-style conflict markers for familiarity
+- RuleDeduplicator uses union-find (path compression) for O(n²) pairwise clustering — acceptable since harness config files are small; it strips managed markers before analysis to avoid flagging the synced content itself as duplicates
+
+### Patterns Discovered
+
+- All new modules use `from __future__ import annotations` for Python 3.9 compatibility — this is consistently applied across the codebase
+- New command files follow the same pattern: PLUGIN_ROOT insertion, argparse parser, main() function returning exit code, if __name__ == '__main__' guard
+- Adapters follow AdapterBase contract with all 6 abstract methods implemented; the vscode adapter uses SyncResult consistently for skipped/synced/failed counts
+- The orchestrator's _send_webhook already existed with single-URL env-var support — augmenting it to delegate to WebhookNotifier preserved backward compat without rewriting caller code
+- StateManager is used via get_target_status() throughout the codebase — HarnessAdoptionAnalyzer correctly reads from it without writing, respecting the read/write separation
+- The managed-marker pattern (<!-- Managed by HarnessSync --> ... <!-- End HarnessSync managed content -->) is used by all file-based adapters; VSCodeAdapter reuses this for copilot-instructions.md
+- Profile export/import uses a .harness-sync/ directory (already used for changelogs and overrides) — consistent with existing project-level config convention
+
+### Takeaways
+
+- The codebase is already very mature — almost half the 28 product-ideation items were already partially implemented (dry-run, conflict detection, skill compat, MCP health, etc.). Future ideation batches should build on gaps rather than reimplementing existing functionality
+- The AdapterRegistry decorator pattern makes adding new adapters trivial — VSCodeAdapter registration was just one decorator line; this is the strongest architectural pattern in the project
+- HarnessSync has no external dependencies for its core functionality (only stdlib) — this is a key design constraint to preserve when adding new modules like WebhookNotifier (uses urllib) and RuleDeduplicator (uses difflib)
+- The webhook notifier pattern (fire-and-forget, log but never block) is critical for reliability — integration hooks should never fail a sync
+- ProjectTypeDetector operates purely on filesystem signals without spawning subprocesses, making it fast and safe to call in hooks
+- The three-way diff addition to ConflictDetector is a natural extension of the existing resolve_interactive() method — the new API (three_way_diff + resolve_three_way_interactive) is additive and does not change existing behavior
+- RuleDeduplicator reads multiple harness files including AGENTS.md which is used by both codex and opencode — the deduplicator correctly tracks source file rather than harness name to avoid false positive grouping
+
+---
