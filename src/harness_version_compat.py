@@ -468,3 +468,124 @@ def format_compat_warnings(project_dir: Path | None = None) -> list[str]:
         warnings.extend(result.warnings)
 
     return warnings
+
+
+# New capabilities introduced in recent harness versions — used for upgrade suggestions.
+# Format: {harness: [(introduced_in_version, capability_name, user_benefit, sync_section)]}
+# sync_section: which HarnessSync source section benefits (rules/skills/agents/commands/mcp/settings)
+_NEW_CAPABILITIES: dict[str, list[tuple[str, str, str, str]]] = {
+    "cursor": [
+        ("0.42", "glob_scoped_rules", "Rules can now be scoped to specific file patterns — your project rules could use glob scoping for finer control", "rules"),
+        ("0.43", "mcp_json", "Cursor now supports MCP servers — your MCP config can sync to Cursor", "mcp"),
+    ],
+    "windsurf": [
+        ("1.0", "mcp_servers", "Windsurf v1.0+ supports MCP — your MCP servers can now sync here", "mcp"),
+        ("1.2", "memory_files", "Windsurf now supports memory files — your skills could sync as Windsurf memories", "skills"),
+    ],
+    "gemini": [
+        ("1.5", "tools_exclude", "Gemini now supports tool exclusion rules — your settings can propagate tool restrictions", "settings"),
+        ("2.0", "tools_allowed", "Gemini v2.0+ supports tools.allowed allowlist — finer permission control is now syncable", "settings"),
+    ],
+    "codex": [
+        ("1.1", "sandbox_mode", "Codex now supports sandbox_mode — your safety settings can include this field", "settings"),
+        ("1.2", "approval_policy", "Codex now supports approval_policy — your permission settings can fully sync", "settings"),
+    ],
+    "aider": [
+        ("0.50", "read_files_list", "Aider v0.50+ supports read_files list — your skill files can be referenced as context", "skills"),
+    ],
+}
+
+
+def suggest_capability_upgrades(
+    project_dir: Path | None = None,
+    source_data: dict | None = None,
+) -> list[str]:
+    """Suggest sync improvements when installed harnesses support new capabilities.
+
+    Compares the installed harness version against the pinned version and
+    against the new capability registry. When the installed version is newer
+    than the pinned version and unlocks a new capability that would benefit
+    the user's existing Claude Code config, a suggestion string is returned.
+
+    Args:
+        project_dir: Project root directory for version config lookup.
+        source_data: Pre-loaded source config dict (from SourceReader.discover_all()).
+                     If None, capability matching is skipped (suggestions are generic).
+
+    Returns:
+        List of actionable suggestion strings. Empty if no upgrades available.
+
+    Example output:
+        [
+            "Windsurf 1.2 is installed (you have pinned 1.0): memory files are now supported "
+            "— you have 3 skills that could sync as Windsurf memories. Run /sync to enable.",
+        ]
+    """
+    pinned_versions = load_pinned_versions(project_dir)
+    suggestions: list[str] = []
+
+    for target, pinned in pinned_versions.items():
+        installed = _detect_installed_version(target)
+        if not installed:
+            continue
+        if _version_gte(pinned, installed):
+            continue  # Already pinned at or beyond installed — no upgrade news
+
+        # Installed version is newer than pinned — check for new capabilities
+        new_caps = _NEW_CAPABILITIES.get(target, [])
+        for (min_ver, cap_name, benefit, section) in new_caps:
+            # Only surface if the installed version supports it but pinned doesn't
+            if _version_gte(installed, min_ver) and not _version_gte(pinned, min_ver):
+                # Count relevant source items if source_data provided
+                count_hint = ""
+                if source_data and section:
+                    section_data = source_data.get(section, {})
+                    count: int = 0
+                    if isinstance(section_data, dict):
+                        count = len(section_data)
+                    elif isinstance(section_data, (list, str)):
+                        count = len(section_data)
+                    if count:
+                        unit = {
+                            "rules": "rule line(s)",
+                            "skills": "skill(s)",
+                            "agents": "agent(s)",
+                            "commands": "command(s)",
+                            "mcp": "MCP server(s)",
+                            "settings": "setting(s)",
+                        }.get(section, "item(s)")
+                        count_hint = f" — you have {count} {unit} that could benefit"
+
+                suggestions.append(
+                    f"{target.capitalize()} {installed} is installed (pinned: {pinned}): "
+                    f"{benefit}{count_hint}. "
+                    f"Run `harnesssync --set-version {target}={installed}` to upgrade, "
+                    f"then /sync to enable."
+                )
+
+    return suggestions
+
+
+def format_upgrade_suggestions(
+    project_dir: Path | None = None,
+    source_data: dict | None = None,
+) -> str:
+    """Format capability upgrade suggestions as a human-readable string.
+
+    Convenience wrapper around suggest_capability_upgrades() for CLI output.
+
+    Args:
+        project_dir: Project root directory.
+        source_data: Pre-loaded source config dict.
+
+    Returns:
+        Formatted multi-line string with suggestions, or empty string if none.
+    """
+    suggestions = suggest_capability_upgrades(project_dir=project_dir, source_data=source_data)
+    if not suggestions:
+        return ""
+    lines = ["Capability Upgrade Suggestions:", ""]
+    for i, s in enumerate(suggestions, 1):
+        lines.append(f"  {i}. {s}")
+    lines.append("")
+    return "\n".join(lines)

@@ -484,6 +484,20 @@ def _show_default_status():
         for line in _format_plugin_drift(drift):
             print(line)
 
+    # Capability upgrade suggestions (proactive notification of new harness features)
+    try:
+        from src.harness_version_compat import format_upgrade_suggestions
+        source_data = reader.discover_all()
+        upgrade_msg = format_upgrade_suggestions(
+            project_dir=project_dir,
+            source_data=source_data,
+        )
+        if upgrade_msg:
+            print()
+            print(upgrade_msg)
+    except Exception:
+        pass  # Non-critical; don't break status output on version check failure
+
 
 if __name__ == "__main__":
     main()

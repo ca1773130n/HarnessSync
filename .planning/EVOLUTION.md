@@ -878,3 +878,69 @@ _2026-03-11T03:16:05.073Z_
 - Graceful degradation profiles need to be hooked into the adapter sync path (orchestrator.py) to actually inject fallback content — the module is useful standalone for analysis but won't auto-apply until integrated
 
 ---
+## Iteration 14
+_2026-03-11T03:34:20.191Z_
+
+### Items Attempted
+
+- **Named Sync Profiles** — pass
+- **Config Conflict Resolution Wizard** — pass
+- **Real-Time Drift Alerts** — pass
+- **AI-Powered Rule Translation** — pass
+- **Shareable Config Templates** — pass
+- **CI/CD Sync Action** — pass
+- **Capability Gap Report** — pass
+- **MCP Server Health Badges in Dashboard** — pass
+- **Auto-Detect Installed Harnesses** — pass
+- **Cross-Harness Config Search** — pass
+- **Human-Readable Sync Changelog** — pass
+- **Project-Type Aware Sync Rules** — pass
+- **Team Config Server** — pass
+- **Rule Usage & Effectiveness Tracker** — pass
+- **Git Pre-Commit Sync Hook** — pass
+- **MCP Server Registry Browser** — pass
+- **Cross-Harness Response Quality Benchmark** — pass
+- **Secrets-Safe Sync with Redaction** — pass
+- **Config Lint CI Mode with Exit Codes** — pass
+- **Parity Score Per Harness** — pass
+- **Interactive First-Run Setup Wizard** — pass
+- **Skill/Agent Compatibility Matrix** — pass
+- **Config Bundle Export/Import** — pass
+- **Auto-Fix Suggestions for Lint Errors** — pass
+- **Harness Version Update Detector** — pass
+- **Sync Correctness Test Suite** — pass
+- **Rule Dependency Visualization** — pass
+- **Post-Sync Config Verification** — pass
+- **Harness Usage Analytics Dashboard** — pass
+- **Contextual Rule Injection per Working Directory** — pass
+- **Point-in-Time Rollback** — pass
+
+### Decisions Made
+
+- Drift watcher uses a daemon thread + threading.Event for clean stop semantics, poll-based (not inotify) for cross-platform support and simplicity
+- MCP registry ships with 16 curated offline entries and falls back to remote fetch; fetch timeout is short (5s) so it never blocks startup
+- AI translation is opt-in and falls back gracefully to regex translation when ANTHROPIC_API_KEY is absent — no hard dependency on the API
+- Pre-commit hook runs sync synchronously (blocking) to ensure target files are ready before commit completes, unlike the post-commit hook which is async
+- sync_lint --ci emits structured JSON with per-issue severity and exits with 0=clean, 1=warnings, 2=errors — standard CI gate convention
+- PostSyncVerifier is integrated into the orchestrator as a non-blocking post-step that stores issues in results['_post_sync_verify'] without blocking sync
+- Rule dependency viz outputs both text tree and Mermaid diagram; Mermaid is wrapped in a fenced code block so GitHub renders it automatically
+- RuleUsageTracker uses append-only JSONL to avoid lock contention — single-line JSON writes are atomic on POSIX filesystems
+- LintFix.auto_fixable pattern was already in config_linter.py; sync_lint --fix just needed to call the existing apply_fixes() method
+
+### Patterns Discovered
+
+- The codebase consistently uses 'from __future__ import annotations' for Python 3.9 compatibility — all new files follow this pattern
+- New modules follow the try/except ImportError pattern for optional dependencies (anthropic, yaml, tomllib) rather than hard requiring them
+- All commands follow the same bootstrap pattern: PLUGIN_ROOT resolution, sys.path.insert, then argparse — good for consistency
+- StateManager.load_state() returns a dict with a 'targets' key containing per-target data including 'file_hashes' — used by drift detection
+- The orchestrator has a clear post-sync section pattern (try/except with logger.warn) that makes it safe to add new post-sync hooks
+
+### Takeaways
+
+- The codebase is very mature — most of the 30 items were already partially or fully implemented across previous iterations
+- The main gaps were in cross-cutting concerns: CI integration (--ci flag), pre-commit vs post-commit hooks, and AI-powered semantic translation
+- The post-sync verifier is a high-value safety net that was missing despite the integrity signing infrastructure already existing
+- Rule dependency visualization was genuinely new — no existing infrastructure for cross-rule reference analysis existed
+- The registry browser pattern (offline fallback + remote fetch) is a solid UX pattern worth reusing for template discovery
+
+---
