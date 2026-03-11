@@ -30,6 +30,17 @@ from pathlib import Path
 # Approximate characters per token (GPT/Claude heuristic)
 CHARS_PER_TOKEN = 4.0
 
+# Cost per 1M input tokens (USD) per harness's typical model, 2025 estimates
+# These are approximate — actual costs depend on the model selected by the user
+INPUT_COST_PER_MTK: dict[str, float] = {
+    "codex":    0.50,   # GPT-4o mini tier (Codex CLI default)
+    "gemini":   0.075,  # Gemini 1.5 Flash
+    "opencode": 3.00,   # GPT-4o or Claude tier (configurable)
+    "cursor":   3.00,   # Claude/GPT-4o (Cursor default)
+    "aider":    3.00,   # Claude/GPT-4o (model-dependent)
+    "windsurf": 3.00,   # Claude/GPT-4o tier
+}
+
 # Context window sizes per harness (in tokens)
 CONTEXT_WINDOWS: dict[str, int] = {
     "codex":    8_192,
@@ -43,6 +54,20 @@ CONTEXT_WINDOWS: dict[str, int] = {
 # Warning thresholds (fraction of context window)
 WARN_THRESHOLD = 0.25   # Warn at 25% usage
 CRITICAL_THRESHOLD = 0.50  # Critical at 50% usage
+
+
+def _estimate_session_cost_usd(tokens: int, target: str) -> float:
+    """Estimate per-session USD cost to load a config into a harness context.
+
+    Args:
+        tokens: Estimated token count of the config.
+        target: Target harness name.
+
+    Returns:
+        USD cost as float (e.g. 0.0032).
+    """
+    cost_per_m = INPUT_COST_PER_MTK.get(target, 3.00)
+    return (tokens / 1_000_000) * cost_per_m
 
 
 @dataclass
@@ -87,12 +112,19 @@ class HarnessTokenReport:
             return "warn"
         return "ok"
 
+    @property
+    def session_cost_usd(self) -> float:
+        """Estimated per-session USD cost to load this config into context."""
+        return _estimate_session_cost_usd(self.total_tokens, self.target)
+
     def format_summary(self) -> str:
         pct = self.total_fraction * 100
+        cost = self.session_cost_usd
         symbol = "⚠" if self.level == "warn" else ("✗" if self.level == "critical" else "✓")
+        cost_str = f"~${cost:.4f}/session" if cost >= 0.0001 else f"~${cost:.6f}/session"
         return (
             f"{symbol} {self.target}: ~{self.total_tokens:,} tokens "
-            f"({pct:.1f}% of {self.context_window:,}-token context)"
+            f"({pct:.1f}% of {self.context_window:,}-token context, {cost_str})"
         )
 
 

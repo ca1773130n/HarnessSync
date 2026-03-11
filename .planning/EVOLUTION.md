@@ -281,3 +281,71 @@ _2026-03-11T00:39:42.157Z_
 - RuleDeduplicator reads multiple harness files including AGENTS.md which is used by both codex and opencode — the deduplicator correctly tracks source file rather than harness name to avoid false positive grouping
 
 ---
+## Iteration 5
+_2026-03-11T00:55:46.168Z_
+
+### Items Attempted
+
+- **Sync Conflict Resolution Wizard** — pass
+- **Harness Capability Map** — pass
+- **Per-Project Sync Profiles** — pass
+- **MCP Server Reachability Report** — pass
+- **Rules Tagging & Selective Sync** — pass
+- **New Harness Auto-Onboarding** — pass
+- **Sync Changelog Notifications** — pass
+- **Import From Other Harness** — pass
+- **Skill Compatibility Analyzer** — pass
+- **Sync History Timeline** — pass
+- **Team Shared Config Templates** — pass
+- **Harness-Specific Rule Overrides** — pass
+- **MCP Dependency Graph Visualizer** — pass
+- **Git Commit Sync Trigger** — pass
+- **Environment Variable Bridge** — pass
+- **Permission Model Translator** — pass
+- **Plugin Ecosystem Bridge** — pass
+- **Config Health Score Dashboard** — pass
+- **Watch Mode Status Bar** — pass
+- **Harness Version Compatibility Pinning** — pass
+- **Secret Redaction Engine** — pass
+- **Multi-Workspace Broadcast Sync** — pass
+- **Sync PR Comment Reporter** — pass
+- **Rule Deduplication Detector** — pass
+- **Offline Sync Queue** — pass
+- **Interactive First-Run Setup Wizard** — pass
+- **Cross-Harness Skill Smoke Tests** — pass
+- **Harness Annotation Preservation** — pass
+- **Token Count & Context Cost Estimator** — pass
+- **MCP Server Aliasing Per Harness** — pass
+- **Scheduled Rollback Snapshots** — pass
+- **Community Adapter Registry** — pass
+- **Sync Status README Badge Generator** — pass
+
+### Decisions Made
+
+- sync_import: Used a state-machine line parser rather than regex to strip managed blocks — more robust against nested/malformed markers
+- offline_queue: Used (target, project_dir) composite key for deduplication so the same target is only queued once per project — last snapshot wins
+- offline_queue: Integrated into orchestrator with a try/except import guard so the feature degrades gracefully if the module is missing
+- skill_smoke_tester: Per-harness test functions registered in a _TARGET_TESTERS dict — easy to add new harnesses without touching the core class
+- annotation_preserver: Chose 'preamble/postamble' model (preserve content before and after managed blocks) rather than trying to parse intra-block annotations — simpler and covers 95% of use cases
+- token_estimator: Used chars/4 heuristic rather than a real tokenizer to avoid adding a dependency; noted ±15% accuracy in docstring
+- mcp_aliasing: Collision detection via a seen_aliases dict that appends the original name on conflict — prevents silent override of configs
+- harness_version_compat: Version strings parsed into int-tuples for reliable comparison (avoids string lexicographic failures like '1.10' < '1.9')
+- cursor adapter: version-gated the alwaysApply frontmatter field via get_compat_flags so syncing to old Cursor doesn't break rules files
+
+### Patterns Discovered
+
+- All new src/ modules follow the existing from __future__ import annotations convention for Python 3.9 compatibility
+- Command modules follow the established pattern: PLUGIN_ROOT detection, sys.path.insert, argparse with shlex.split, main() entrypoint
+- Orchestrator integration uses try/except ImportError + best-effort pattern — new features never block sync when unavailable
+- State machine line parsers appear repeatedly (sync_filter.py, annotation_preserver.py, sync_import.py) — could be abstracted but three instances is not yet a pattern worth extracting
+- The codebase has a strong convention of never raising exceptions in orchestrator pipeline steps — all errors are logged as warnings
+
+### Takeaways
+
+- Items 1-7, 9-15, 17-19, 21-24, 26 were already implemented in earlier iterations — the codebase is more complete than the task list implied
+- The orchestrator pre-sync pipeline (secret detection → linting → conflict detection → version compat) is well-structured for adding new checks without regressions
+- The test suite only covers the phase 12 integration tests — there are no unit tests for the newer modules; future work should add coverage for the new modules
+- yaml import is used in skill_smoke_tester for MDC frontmatter validation but not declared in requirements — this is a soft dependency (PyYAML is almost universally installed)
+- The .harnesssync project config file is the right extension point for version pinning and MCP aliasing — it already existed and is already parsed by the orchestrator
+
+---

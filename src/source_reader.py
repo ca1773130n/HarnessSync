@@ -732,6 +732,65 @@ class SourceReader:
 
         return settings
 
+    def get_harness_override(self, target_name: str) -> str:
+        """Read per-harness override file (e.g. CLAUDE.codex.md) if present.
+
+        Per-harness override files let users maintain harness-specific additions
+        that layer on top of the main CLAUDE.md during sync. For example,
+        CLAUDE.codex.md contains codex-only instructions appended when syncing
+        to codex.
+
+        Supported files (looked up in project_dir, then .claude/):
+            CLAUDE.codex.md   -> codex
+            CLAUDE.gemini.md  -> gemini
+            CLAUDE.opencode.md -> opencode
+            CLAUDE.cursor.md  -> cursor
+            CLAUDE.aider.md   -> aider
+            CLAUDE.windsurf.md -> windsurf
+
+        Args:
+            target_name: Target harness name (e.g. "codex").
+
+        Returns:
+            Content of the override file, or empty string if none found.
+        """
+        if not self.project_dir or not target_name:
+            return ""
+
+        target_lower = target_name.lower()
+        candidates = [
+            self.project_dir / f"CLAUDE.{target_lower}.md",
+            self.project_dir / ".claude" / f"CLAUDE.{target_lower}.md",
+        ]
+        for path in candidates:
+            if path.is_file():
+                try:
+                    return path.read_text(encoding="utf-8")
+                except OSError:
+                    pass
+        return ""
+
+    def get_harness_override_paths(self) -> dict[str, Path]:
+        """Return mapping of target -> override file path for all present overrides.
+
+        Returns:
+            Dict mapping target_name -> Path for each existing override file.
+        """
+        known_targets = ("codex", "gemini", "opencode", "cursor", "aider", "windsurf")
+        result: dict[str, Path] = {}
+        if not self.project_dir:
+            return result
+        for target in known_targets:
+            candidates = [
+                self.project_dir / f"CLAUDE.{target}.md",
+                self.project_dir / ".claude" / f"CLAUDE.{target}.md",
+            ]
+            for path in candidates:
+                if path.is_file():
+                    result[target] = path
+                    break
+        return result
+
     def discover_all(self) -> dict:
         """
         Convenience method to get all config types at once.
@@ -751,6 +810,7 @@ class SourceReader:
             "mcp_servers": flat,
             "mcp_servers_scoped": scoped,
             "settings": self.get_settings(),
+            "harness_overrides": self.get_harness_override_paths(),
         }
 
     def get_source_paths(self) -> dict[str, list[Path]]:

@@ -1,0 +1,62 @@
+{
+  "decisions": [
+    "Added <!-- sync:skip --> as alias for <!-- sync:exclude --> in sync_filter.py — the item spec used 'skip' not 'exclude', and aliasing preserves backward compatibility with existing tags",
+    "Extended SecretDetector.scan_content() with low-confidence flag because inline file scanning has higher false positive risk than env var scanning — marked 'low' confidence to distinguish from the existing 'medium' env-var detections",
+    "Added per-session USD cost to HarnessTokenReport using conservative 2025 model pricing — displayed alongside token counts so users see the combined context + cost signal in one view",
+    "Added calculate_fidelity_score() to CompatibilityReporter using category-weighted scoring (rules=2x, mcp=1.5x) because rules and MCP are the highest-value sync targets and losing them hurts more than losing commands",
+    "Implemented generate_gap_report() in CompatibilityReporter with a static _GAP_MATRIX — avoids re-running sync to compute gaps; the matrix is maintained alongside the support matrix in sync_parity.py",
+    "Added get_harness_override() / get_harness_override_paths() to SourceReader — override files are discovered lazily at sync time and appended as a separate rules entry per-target, not merged into the main rules string, preserving clear provenance",
+    "Injected per-harness override content in orchestrator _after_ sync tag filtering — this means CLAUDE.codex.md content bypasses sync tag filtering, which is correct since it's already target-specific",
+    "generate_degraded_variant() in skill_translator builds on translate_skill_content() rather than replacing it — avoids duplicating the existing tool-rewrite logic and adds MCP call pattern matching on top",
+    "ConfigSizeOptimizer uses a 5-line sliding window for repetition detection (not per-paragraph) to catch repetition that crosses paragraph boundaries; window steps by 5 to avoid duplicate alerts",
+    "ConfigTimeMachine.timeline() uses git log --name-only with \x1f field separators to reliably parse multi-word commit subjects without ambiguity from whitespace",
+    "ConfigBundle redacts sensitive env keys by keyword match (not regex value match) in export — simpler and avoids false positives from long random strings that happen to be non-secret",
+    "sync_mcp_health.py collects MCP from per-harness config files independently of SourceReader — it checks what's actually deployed to targets, not just what's in the source CLAUDE.md",
+    "ChangelogManager writes to both .harness-sync/changelog.md (existing) and SYNC-CHANGELOG.md at project root (new) — the hidden dir file is the canonical store; the root file is a discoverable mirror"
+  ],
+  "patterns": [
+    "The existing adapter/orchestrator/source_reader triad is clean but all extension points funnel through sync_all() — new per-target behaviors (override files, fidelity scores) naturally slot in between tag filtering and adapter.sync_all()",
+    "Several modules already existed as stubs with good structure (skill_translator, mcp_reachability, token_estimator) — iteration-6 mostly extended these rather than creating new modules, suggesting the codebase was well-planned",
+    "The test suite covers only the adapter layer (phase 12/13/14 tests) and doesn't test orchestrator logic or new modules — new features went in without test coverage, which is a pattern risk for this repo",
+    "Static support matrices (_SUPPORT_MATRIX, _GAP_MATRIX) are duplicated between sync_parity.py and compatibility_reporter.py — they will drift; consider a single source-of-truth in src/adapters/registry.py",
+    "The changelog_manager already had a clean append-only architecture that made dual-write trivial — good design paid dividends",
+    "config_size_optimizer uses a Counter import inside a loop (from collections import Counter) — should be moved to module-level import for Python style consistency"
+  ],
+  "takeaways": [
+    "The product-ideation items cluster into two types: (a) enhancements to existing modules (most of this iteration) and (b) genuinely new infrastructure (config_bundle, config_time_machine, sync_mcp_health) — the former are lower-risk",
+    "Items 3 (Team Config Broadcast), 6 (Harness Behavior Comparison), 17 (Plugin Registry), 18 (NL Config Editor), 19 (Pre-Sync Impact Analysis), 22 (Sync Watchdog), 26 (Zero-Config Wizard already exists) required external infrastructure (cloud, running processes, LLMs) and were skipped as not implementable as standalone code",
+    "The gap between 'spec says feature X' and 'feature X is usable' is large for several items — e.g. config_time_machine is fully implemented but there's no /sync-time-machine command wired to expose it yet",
+    "Per-harness override files (CLAUDE.codex.md) are a clean solution to a real user pain point and fit naturally into the existing rules pipeline — worth promoting prominently in docs",
+    "USD cost estimation on token reports makes the token estimator significantly more actionable — users respond to dollar amounts more than abstract token counts"
+  ],
+  "files_changed": [
+    "src/sync_filter.py",
+    "src/secret_detector.py",
+    "src/token_estimator.py",
+    "src/compatibility_reporter.py",
+    "src/source_reader.py",
+    "src/orchestrator.py",
+    "src/skill_translator.py",
+    "src/changelog_manager.py",
+    "src/config_size_optimizer.py",
+    "src/config_time_machine.py",
+    "src/config_bundle.py",
+    "src/commands/sync_mcp_health.py"
+  ],
+  "items_skipped": [
+    "Item 3 (Team Config Broadcast) — requires S3/git infrastructure and network access; not implementable as local code",
+    "Item 6 (Harness Behavior Comparison) — requires invoking multiple live AI harnesses; infrastructure-dependent",
+    "Item 9 (Git Commit-Triggered Sync) — sync_git_hook.py already exists; item is already implemented",
+    "Item 14 (Visual Rollback Timeline) — sync_rollback.py already exists; visual timeline requires a UI layer not present",
+    "Item 15 (CI/CD Sync Gate Action) — sync_github_actions.py already exists; item is already implemented",
+    "Item 16 (Duplicate Rule Detector) — rule_deduplicator.py already exists; item is already implemented",
+    "Item 17 (Plugin Registry) — requires community infrastructure and a hosted registry service",
+    "Item 18 (Natural Language Config Editor) — requires LLM API calls at runtime; out of scope for offline tool",
+    "Item 19 (Pre-Sync Impact Analysis) — requires process introspection and session detection; OS-dependent",
+    "Item 22 (Sync Watchdog) — requires long-running background daemon and OS notification APIs",
+    "Item 23 (Reverse Sync) — sync_import.py already exists; item is already implemented",
+    "Item 26 (Zero-Config Wizard) — setup_wizard.py already exists; item is already implemented",
+    "Item 28 (Post-Sync Smoke Test) — skill_smoke_tester.py and sync_smoke_test.py already exist",
+    "Item 30 (Harness Deprecation Alerts) — requires internet access and version monitoring service"
+  ]
+}

@@ -367,6 +367,17 @@ class SyncOrchestrator:
                         if isinstance(r, dict)
                     ]
 
+                # --- PER-HARNESS OVERRIDE FILES: append CLAUDE.<target>.md content ---
+                _override_content = reader.get_harness_override(target)
+                if _override_content:
+                    target_data['rules'] = list(target_data.get('rules', []))
+                    target_data['rules'].append({
+                        'path': f'CLAUDE.{target}.md',
+                        'content': _override_content,
+                        'scope': 'project',
+                        'scope_patterns': [],
+                    })
+
                 # --- MCP ALIASING: apply per-target server name aliases ---
                 try:
                     from src.mcp_aliasing import load_aliases, apply_aliases

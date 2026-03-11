@@ -21,6 +21,14 @@ SECRET_KEYWORDS = [
     'PRIVATE_KEY'
 ]
 
+# Patterns that look like inline secrets in file content (e.g. CLAUDE.md)
+# Matches: key=VALUE, key: VALUE, key="VALUE" where VALUE looks like a secret
+_INLINE_SECRET_RE = re.compile(
+    r'(?:api[_-]?key|secret[_-]?key?|password|passwd|token|access[_-]token|private[_-]key)'
+    r'\s*[:=]\s*["\']?([A-Za-z0-9_\-+=/.]{16,})["\']?',
+    re.IGNORECASE,
+)
+
 # Safe prefixes to whitelist (testing/example values)
 SAFE_PREFIXES = [
     'TEST_', 'EXAMPLE_', 'DEMO_',
@@ -94,6 +102,39 @@ class SecretDetector:
                 "reason": f"Contains keywords: {', '.join(matched_keywords)}"
             })
 
+        return detections
+
+    def scan_content(self, content: str, source_label: str = "content") -> list[dict]:
+        """Scan text content (e.g. CLAUDE.md) for inline secrets.
+
+        Looks for patterns like ``api_key: sk-abc123...`` or
+        ``password=supersecretvalue123`` that should not be synced.
+
+        CRITICAL: Never logs or displays actual secret values.
+
+        Args:
+            content: Raw text content to scan.
+            source_label: Human-readable label for the source (e.g. filename).
+
+        Returns:
+            List of detection dicts with keys:
+                - var_name: Matched keyword (e.g. "api_key")
+                - keywords_matched: List of matched keywords
+                - confidence: 'low' (heuristic inline scan)
+                - reason: Human-readable detection reason
+                - source: source_label
+        """
+        detections = []
+        for line_num, line in enumerate(content.splitlines(), start=1):
+            for m in _INLINE_SECRET_RE.finditer(line):
+                keyword = m.group(0).split("=")[0].split(":")[0].strip()
+                detections.append({
+                    "var_name": keyword,
+                    "keywords_matched": [keyword],
+                    "confidence": "low",
+                    "reason": f"Inline secret pattern on line {line_num} in {source_label}",
+                    "source": source_label,
+                })
         return detections
 
     def scan_mcp_env(self, mcp_servers: dict) -> list[dict]:

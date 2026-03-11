@@ -245,6 +245,89 @@ def score_skill_file(path: Path, target_name: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Degraded-but-functional skill variant generator (#21)
+# ---------------------------------------------------------------------------
+
+# Harnesses that can embed instructions in their agent/rules format
+_PLAIN_TEXT_TARGETS = frozenset(("codex", "gemini", "opencode", "aider", "windsurf", "cursor"))
+
+# Header inserted into generated degraded variants to make them self-documenting
+_DEGRADED_HEADER_TEMPLATE = (
+    "<!-- HarnessSync: auto-generated degraded variant for {target} -->\n"
+    "<!-- Original Claude Code skill: {skill_name} -->\n"
+    "<!-- Some CC-specific capabilities are unavailable in {target}; "
+    "equivalent instructions provided below. -->\n\n"
+)
+
+
+def generate_degraded_variant(content: str, skill_name: str, target_name: str) -> str:
+    """Generate a degraded-but-functional skill variant for an unsupported target.
+
+    When a skill uses MCP tools, Agent sub-tasks, or other CC-only capabilities
+    that don't translate literally, this function produces a plain-text version
+    with equivalent instructions so the user can still invoke analogous behavior
+    in the target harness.
+
+    Strategy:
+    1. Translate CC tool references to descriptive equivalents (reuse existing logic)
+    2. Replace MCP tool_call blocks with explanatory text
+    3. Strip CC-only frontmatter but keep name/description
+    4. Prepend a self-documenting header noting this is a degraded variant
+    5. Append a "Limitations" section listing what was unavailable
+
+    Args:
+        content: Raw skill file content.
+        skill_name: Name of the skill (for the header).
+        target_name: Destination harness name.
+
+    Returns:
+        Degraded-but-functional content string.
+    """
+    if not content.strip():
+        return content
+
+    # Step 1: Standard translation pass
+    translated = translate_skill_content(content, target_name)
+
+    # Step 2: Replace remaining MCP tool invocations with explanatory text
+    # Pattern: lines that contain tool invocations like `use_mcp_tool(...)` or
+    # XML-style `<mcp_call>...</mcp_call>` that survived standard translation
+    mcp_call_re = re.compile(
+        r"(?:<mcp_call>.*?</mcp_call>|use_mcp_tool\([^)]+\))",
+        re.DOTALL | re.IGNORECASE,
+    )
+    translated = mcp_call_re.sub(
+        f"[Note: This step requires a tool available in Claude Code but not in {target_name}. "
+        "Perform this step manually or via the harness's native tools.]",
+        translated,
+    )
+
+    # Step 3: Collect limitations for the footer
+    limitations: list[str] = []
+    orig_tool_refs = len(_INLINE_TOOL_RE.findall(content))
+    if orig_tool_refs > 0:
+        limitations.append(f"Claude Code tool references rewritten ({orig_tool_refs} found)")
+    if _TOOL_CALL_BLOCK_RE.search(content):
+        limitations.append("XML tool-call blocks removed (CC-only syntax)")
+    if mcp_call_re.search(content):
+        limitations.append("MCP tool calls replaced with manual-step instructions")
+
+    # Step 4: Build the degraded variant
+    header = _DEGRADED_HEADER_TEMPLATE.format(
+        target=target_name, skill_name=skill_name
+    )
+
+    footer = ""
+    if limitations:
+        footer = (
+            "\n\n---\n**Limitations in this degraded variant:**\n"
+            + "\n".join(f"- {lim}" for lim in limitations)
+        )
+
+    return header + translated + footer
+
+
+# ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
 

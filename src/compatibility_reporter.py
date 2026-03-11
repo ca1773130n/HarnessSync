@@ -204,6 +204,206 @@ class CompatibilityReporter:
 
         return "\n".join(lines)
 
+    def calculate_fidelity_score(self, results: dict) -> dict:
+        """Calculate translation fidelity score (0-100) per target and category.
+
+        A score of 100 means all items synced directly (no translation needed).
+        Adapted items score 70. Skipped and failed items score 0.
+
+        Args:
+            results: Dict mapping target_name -> {config_type: SyncResult}
+
+        Returns:
+            Dict mapping target_name -> {
+                "overall": float,          # 0-100 overall score
+                "by_category": {           # per config_type scores
+                    "rules": float,
+                    "skills": float,
+                    ...
+                },
+                "label": str,              # "excellent" | "good" | "fair" | "poor"
+            }
+        """
+        scores: dict = {}
+
+        for target_name, target_results in results.items():
+            if target_name.startswith("_") or not isinstance(target_results, dict):
+                continue
+
+            category_scores: dict[str, float] = {}
+            category_weights: dict[str, float] = {
+                "rules": 2.0, "mcp": 1.5, "skills": 1.5,
+                "agents": 1.0, "commands": 1.0, "settings": 1.0,
+            }
+
+            weighted_sum = 0.0
+            weight_total = 0.0
+
+            for config_type, result in target_results.items():
+                if not isinstance(result, SyncResult):
+                    continue
+
+                total = result.synced + result.adapted + result.skipped + result.failed
+                if total == 0:
+                    continue
+
+                # Score: synced=100pts, adapted=70pts, skipped=0pts, failed=0pts
+                raw_score = (result.synced * 100 + result.adapted * 70) / total
+                category_scores[config_type] = round(raw_score, 1)
+
+                w = category_weights.get(config_type, 1.0)
+                weighted_sum += raw_score * w
+                weight_total += w
+
+            overall = round(weighted_sum / weight_total, 1) if weight_total > 0 else 100.0
+            if overall >= 90:
+                label = "excellent"
+            elif overall >= 75:
+                label = "good"
+            elif overall >= 50:
+                label = "fair"
+            else:
+                label = "poor"
+
+            scores[target_name] = {
+                "overall": overall,
+                "by_category": category_scores,
+                "label": label,
+            }
+
+        return scores
+
+    def format_fidelity_scores(self, scores: dict) -> str:
+        """Format fidelity scores for user output.
+
+        Args:
+            scores: Dict from calculate_fidelity_score().
+
+        Returns:
+            Formatted string.
+        """
+        if not scores:
+            return ""
+
+        lines = ["\nTranslation Fidelity Scores", "=" * 40]
+        for target, data in sorted(scores.items()):
+            overall = data["overall"]
+            label = data["label"]
+            bar_len = int(overall / 5)  # 20 chars = 100%
+            bar = "█" * bar_len + "░" * (20 - bar_len)
+            lines.append(f"\n{target.upper()}: {overall:.0f}/100 [{label}]")
+            lines.append(f"  [{bar}]")
+            for cat, score in sorted(data["by_category"].items()):
+                indicator = "✓" if score >= 90 else ("~" if score >= 60 else "✗")
+                lines.append(f"  {indicator} {cat:<10} {score:.0f}%")
+
+        lines.append("")
+        lines.append("Score guide: 100=direct sync  70=adapted  0=skipped/failed")
+        return "\n".join(lines)
+
+    def generate_gap_report(self, source_data: dict, targets: list[str]) -> str:
+        """Generate a capability gap report showing what's lost per harness.
+
+        For each target, lists Claude Code features that have no equivalent
+        or require significant translation, with item counts.
+
+        Args:
+            source_data: Output of SourceReader.discover_all().
+            targets: List of target harness names.
+
+        Returns:
+            Formatted gap report string.
+        """
+        # Feature support levels per target (None=full, "partial", "none")
+        _GAP_MATRIX: dict[str, dict[str, str | None]] = {
+            "codex": {
+                "skills": "partial",
+                "agents": "partial",
+                "commands": "partial",
+                "mcp": "partial",
+                "settings": "partial",
+            },
+            "gemini": {
+                "agents": "partial",
+                "commands": "partial",
+                "settings": "partial",
+            },
+            "opencode": {
+                "agents": "partial",
+                "commands": "partial",
+                "mcp": "partial",
+                "settings": "partial",
+            },
+            "cursor": {
+                "skills": "none",
+                "agents": "none",
+                "commands": "partial",
+                "mcp": "partial",
+                "settings": "partial",
+            },
+            "aider": {
+                "skills": "none",
+                "agents": "none",
+                "commands": "none",
+                "mcp": "none",
+                "settings": "partial",
+            },
+            "windsurf": {
+                "skills": "none",
+                "agents": "none",
+                "commands": "none",
+                "mcp": "partial",
+                "settings": "partial",
+            },
+        }
+
+        counts = {
+            "skills": len(source_data.get("skills", {})),
+            "agents": len(source_data.get("agents", {})),
+            "commands": len(source_data.get("commands", {})),
+            "mcp": len(source_data.get("mcp_servers", {})),
+            "settings": 1 if source_data.get("settings") else 0,
+        }
+
+        lines = ["Capability Gap Report", "=" * 50, ""]
+        lines.append("Shows Claude Code features with no or partial equivalent")
+        lines.append("in each target harness.\n")
+
+        any_gap = False
+        for target in sorted(targets):
+            gaps = _GAP_MATRIX.get(target, {})
+            target_lines = []
+            for feature, level in gaps.items():
+                count = counts.get(feature, 0)
+                if count == 0:
+                    continue  # Nothing to lose
+                if level == "none":
+                    target_lines.append(
+                        f"  ✗ {feature}: NO equivalent — {count} item(s) will not sync"
+                    )
+                    any_gap = True
+                elif level == "partial":
+                    target_lines.append(
+                        f"  ~ {feature}: partial support — {count} item(s) may lose fidelity"
+                    )
+                    any_gap = True
+
+            if target_lines:
+                lines.append(f"[{target.upper()}]")
+                lines.extend(target_lines)
+                lines.append("")
+
+        if not any_gap:
+            lines.append("No capability gaps detected for your current feature set.")
+        else:
+            lines.append(
+                "Tip: Use <!-- sync:skip --> to exclude CC-only items from targets\n"
+                "that don't support them, or <!-- sync:codex-only --> to restrict\n"
+                "content to specific harnesses."
+            )
+
+        return "\n".join(lines)
+
     def has_issues(self, report: dict) -> bool:
         """
         Check if report contains adapted or failed items.

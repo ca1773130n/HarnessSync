@@ -103,8 +103,8 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
                 output.append(line)
             continue
 
-        # --- Check for no-sync shorthand ---
-        if re.search(r"<!--\s*no-sync\s*-->", line, re.IGNORECASE):
+        # --- Check for no-sync / sync:skip shorthands ---
+        if re.search(r"<!--\s*(?:no-sync|sync:skip)\s*-->", line, re.IGNORECASE):
             active_tag = "exclude"
             continue
 
@@ -162,8 +162,8 @@ def has_sync_tags(content: str) -> bool:
     # Classic tags
     if _CLASSIC_TAG_RE.search(content):
         return True
-    # no-sync
-    if re.search(r"<!--\s*no-sync\s*-->", content, re.IGNORECASE):
+    # no-sync / sync:skip
+    if re.search(r"<!--\s*(?:no-sync|sync:skip)\s*-->", content, re.IGNORECASE):
         return True
     # harness open/close
     if _HARNESS_OPEN_RE.search(content) or _HARNESS_CLOSE_RE.search(content):
@@ -176,3 +176,74 @@ def has_sync_tags(content: str) -> bool:
         if targets and not any(t.endswith("-only") or t in ("exclude", "end") for t in targets):
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Rule Effectiveness Annotations (#25)
+# ---------------------------------------------------------------------------
+
+# Pattern: <!-- effective: helped | confused | neutral -->
+# Optionally followed by a note: <!-- effective: confused in codex — too verbose -->
+_EFFECTIVENESS_RE = re.compile(
+    r"<!--\s*effective:\s*(helped|confused|neutral)(?:[^\-]+-+\s*([^>]+))?\s*-->",
+    re.IGNORECASE,
+)
+
+
+def extract_effectiveness_annotations(content: str) -> list[dict]:
+    """Extract rule effectiveness annotations from content.
+
+    Users tag rules with <!-- effective: helped --> or
+    <!-- effective: confused in codex — rule caused bad output -->
+    annotations to build a personal knowledge base of config choices.
+
+    Args:
+        content: Raw CLAUDE.md text.
+
+    Returns:
+        List of annotation dicts with keys:
+            - rating: "helped" | "confused" | "neutral"
+            - note: Optional note text (may be empty string)
+            - line_number: 1-based line number of the annotation
+    """
+    annotations: list[dict] = []
+    for i, line in enumerate(content.splitlines(), start=1):
+        m = _EFFECTIVENESS_RE.search(line)
+        if m:
+            annotations.append({
+                "rating": m.group(1).lower(),
+                "note": (m.group(2) or "").strip(),
+                "line_number": i,
+            })
+    return annotations
+
+
+def format_effectiveness_report(annotations: list[dict]) -> str:
+    """Format effectiveness annotations as a lint report section.
+
+    Args:
+        annotations: Output of extract_effectiveness_annotations().
+
+    Returns:
+        Formatted string, empty if no annotations found.
+    """
+    if not annotations:
+        return ""
+
+    counts: dict[str, int] = {"helped": 0, "confused": 0, "neutral": 0}
+    for a in annotations:
+        counts[a["rating"]] = counts.get(a["rating"], 0) + 1
+
+    lines = [
+        "Rule Effectiveness Annotations",
+        "-" * 40,
+        f"  helped: {counts['helped']}  confused: {counts['confused']}  neutral: {counts['neutral']}",
+    ]
+    confused = [a for a in annotations if a["rating"] == "confused"]
+    if confused:
+        lines.append("")
+        lines.append("Rules flagged as 'confused' (review these):")
+        for a in confused:
+            note = f" — {a['note']}" if a["note"] else ""
+            lines.append(f"  line {a['line_number']}: confused{note}")
+    return "\n".join(lines)
