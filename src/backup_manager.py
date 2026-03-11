@@ -43,13 +43,16 @@ class BackupManager:
         self.backup_root = backup_root
         self.logger = logger or Logger()
 
-    def backup_target(self, target_path: Path, target_name: str) -> Path:
+    def backup_target(self, target_path: Path, target_name: str,
+                      label: str | None = None) -> Path:
         """
         Create timestamped backup of a target config file or directory.
 
         Args:
             target_path: Path to file or directory to backup
             target_name: Target name (e.g., 'codex', 'opencode', 'gemini')
+            label: Optional human-readable label (e.g., 'before-new-project-rules').
+                   Appended to the backup directory name and stored in a metadata file.
 
         Returns:
             Path to created backup directory
@@ -60,8 +63,14 @@ class BackupManager:
         # Generate timestamp in YYYYMMDD_HHMMSS format
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-        # Create backup directory structure: backup_root/{target_name}/{filename}_{timestamp}/
-        backup_name = f"{target_path.name}_{timestamp}"
+        # Create backup directory structure: backup_root/{target_name}/{filename}_{timestamp}[_{label}]/
+        safe_label = ""
+        if label:
+            # Sanitize label: alphanumeric + hyphens/underscores only
+            import re
+            safe_label = "_" + re.sub(r"[^a-zA-Z0-9_-]", "-", label)[:40]
+
+        backup_name = f"{target_path.name}_{timestamp}{safe_label}"
         backup_dir = self.backup_root / target_name / backup_name
 
         # Ensure parent directory exists
@@ -76,6 +85,22 @@ class BackupManager:
                 # For files: use copy2 to preserve metadata
                 ensure_dir(backup_dir)
                 shutil.copy2(target_path, backup_dir / target_path.name)
+
+            # Write label metadata file if label provided
+            if label:
+                try:
+                    import json
+                    meta = {
+                        "label": label,
+                        "timestamp": timestamp,
+                        "source": str(target_path),
+                        "target_name": target_name,
+                    }
+                    (backup_dir / ".harnesssync-snapshot.json").write_text(
+                        json.dumps(meta, indent=2), encoding="utf-8"
+                    )
+                except OSError:
+                    pass  # Metadata write failure is non-fatal
 
             self.logger.debug(f"Backed up {target_path} to {backup_dir}")
             return backup_dir
@@ -125,6 +150,78 @@ class BackupManager:
             except (OSError, shutil.Error) as e:
                 # Log error but continue (best-effort rollback)
                 self.logger.error(f"Rollback failed for {original_path}: {e}")
+
+    def list_snapshots(self, target_name: str | None = None) -> list[dict]:
+        """List available backup snapshots with metadata.
+
+        Args:
+            target_name: If provided, list only snapshots for this target.
+                         If None, list snapshots for all targets.
+
+        Returns:
+            List of snapshot info dicts sorted by modification time (newest first):
+            {
+                "target": str,
+                "name": str,           # backup directory name
+                "path": Path,          # full path to backup directory
+                "timestamp": str,      # YYYYMMDD_HHMMSS from directory name
+                "label": str | None,   # user-defined label (if any)
+                "mtime": float,        # modification time
+            }
+        """
+        import json
+
+        snapshots = []
+
+        if target_name:
+            target_dirs = [self.backup_root / target_name]
+        else:
+            target_dirs = (
+                [d for d in self.backup_root.iterdir() if d.is_dir()]
+                if self.backup_root.exists()
+                else []
+            )
+
+        for target_dir in target_dirs:
+            if not target_dir.is_dir():
+                continue
+            tname = target_dir.name
+
+            try:
+                backup_dirs = [d for d in target_dir.iterdir() if d.is_dir()]
+            except OSError:
+                continue
+
+            for bdir in backup_dirs:
+                meta_file = bdir / ".harnesssync-snapshot.json"
+                label = None
+                if meta_file.exists():
+                    try:
+                        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                        label = meta.get("label")
+                    except (OSError, json.JSONDecodeError):
+                        pass
+
+                try:
+                    mtime = bdir.stat().st_mtime
+                except OSError:
+                    mtime = 0.0
+
+                # Extract timestamp from directory name (first 15 chars after target)
+                parts = bdir.name.split("_", 2)
+                ts = "_".join(parts[:2]) if len(parts) >= 2 else bdir.name
+
+                snapshots.append({
+                    "target": tname,
+                    "name": bdir.name,
+                    "path": bdir,
+                    "timestamp": ts,
+                    "label": label,
+                    "mtime": mtime,
+                })
+
+        snapshots.sort(key=lambda s: s["mtime"], reverse=True)
+        return snapshots
 
     def cleanup_old_backups(self, target_name: str, keep_count: int = 10):
         """

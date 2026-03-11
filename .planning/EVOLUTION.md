@@ -69,3 +69,79 @@ _2026-03-10T23:39:33.228Z_
 - The changelog is append-only with no rotation — for long-lived projects this file will grow indefinitely; a future improvement could add max-age or max-entries trimming
 
 ---
+## Iteration 2
+_2026-03-11T00:02:14.908Z_
+
+### Items Attempted
+
+- **Harness Capability Matrix** — pass
+- **Named Sync Profiles (Work / Personal / Client)** — pass
+- **Selective Section Sync** — pass
+- **Sync Audit Log** — pass
+- **Auto-Backup Before Each Sync** — pass
+- **Drift Alerts with Change Attribution** — pass
+- **Interactive Conflict Resolution** — pass
+- **Git Hook Auto-Sync** — pass
+- **GitHub Actions / CI Sync Step** — pass
+- **Team Config Broadcast via Git** — pass
+- **MCP Server Reachability Check Before Sync** — pass
+- **Cursor IDE Support** — pass
+- **Aider Support** — pass
+- **Windsurf (Codeium) Support** — pass
+- **Config Health Score & Recommendations** — pass
+- **Secret Detection & Scrubbing Before Sync** — pass
+- **Config Linter & Pre-Sync Validation** — pass
+- **Incremental (Delta) Sync** — pass
+- **Watch Mode: Continuous Auto-Sync** — pass
+- **Interactive Onboarding Wizard** — pass
+- **Config Map: Visual Overview of Your Setup** — pass
+- **Dotfiles-Compatible Export** — pass
+- **Cross-Harness Usage Analytics (Local)** — pass
+- **Auto-Generated Sync Changelog** — pass
+- **Skill Compatibility Checker** — pass
+- **Environment-Specific Sync (Dev/Staging/Prod)** — pass
+- **Side-by-Side Harness Comparison Report** — pass
+- **Auto-Sync on Plugin Install/Update** — pass
+- **/sync-rollback: Point-in-Time Restore** — pass
+- **Harness Readiness Checklist** — pass
+- **Sync Completion Webhooks** — pass
+- **Starter Config Templates** — pass
+- **Parity Gap Suggestions** — pass
+- **Multi-Project Batch Sync** — pass
+- **Scheduled Sync via Cron** — pass
+- **Agent Capability Scope Translation** — pass
+- **Config Size Optimizer** — pass
+
+### Decisions Made
+
+- Cursor adapter uses .cursor/rules/*.mdc format — Cursor's native rule format with YAML frontmatter, which gives full native support for rules; MCP goes to .cursor/mcp.json (same mcpServers schema as standard MCP JSON)
+- Aider adapter maps rules to CONVENTIONS.md (aider reads this as context), skills to .aider.conf.yml 'read' list, MCP servers noted as informational comments. Commands and agents dropped since Aider has no execution model for them.
+- Windsurf adapter uses .windsurfrules (project root, like .cursorrules), .windsurf/memories/ for skills, .windsurf/workflows/ for agents/commands, .codeium/windsurf/mcp_config.json for MCP.
+- Section filtering (--only/--skip) implemented in orchestrator._apply_section_filter() which zeros out filtered sections to their empty defaults rather than removing keys — preserves adapter API contract.
+- Incremental sync checks drift before each target using existing StateManager.detect_drift() — no new state format needed, just new code path in orchestrator.
+- Watch mode uses polling (1-second mtime checks) instead of fswatch/inotify to avoid external dependencies — portable across macOS/Linux/WSL.
+- MCP reachability: stdio servers checked via shutil.which(), URL servers via TCP socket connect with configurable timeout. Non-blocking: warns but never blocks sync.
+- Config health score uses a simple 4-dimension model (completeness, portability, security, size) with ASCII progress bars for visual feedback.
+- Harness readiness checker pulls target config from a static dict — avoids coupling to adapter internals while staying accurate.
+- Skill compatibility checker uses regex patterns against SKILL.md content — catches Claude Code-specific tool refs, hook events, and MCP dependencies line by line.
+
+### Patterns Discovered
+
+- All new src/*.py files follow the established pattern: from __future__ import annotations at top, Logger() for logging, Path objects everywhere.
+- New adapters all follow AdapterBase contract precisely — registered via @AdapterRegistry.register() decorator, all 6 abstract methods implemented.
+- Command .md files follow the consistent template: YAML frontmatter with description, Usage/Options section, and the portable python detection one-liner.
+- The orchestrator pipeline is now structured as: MCP reachability check → secret detection → config linting → conflict detection → backup → section filter → incremental check → sync → cleanup → compatibility report → state update → changelog → webhook.
+- The SyncOrchestrator constructor has grown to 9 parameters — it might benefit from a SyncOptions dataclass in a future refactor to avoid the growing arg list.
+- The sync command has grown significantly. It might benefit from splitting into a parse_args() function and a run() function for testability.
+
+### Takeaways
+
+- The existing ChangelogManager already handled the persistence needed for /sync-log — only a viewer command was missing. Pattern: infrastructure often already exists, just needs to be exposed as user-facing commands.
+- The BackupManager already existed but /sync-rollback was missing. Good pattern for iteration: wire up existing infrastructure with user commands.
+- Adding Cursor/Aider/Windsurf as adapters required no changes to the orchestrator or base adapter class — the decorator registry pattern is working well.
+- The sync_health.py command was already well-structured but needed integration hooks for the new health modules. Extending existing commands is cleaner than creating new ones when the conceptual domain is the same.
+- Watch mode polling at 1-second intervals is simple and portable but will consume 1% CPU constantly. A future improvement would be to use OS-level file watching (FSEvents on macOS, inotify on Linux) via a subprocess.
+- The capability matrix (sync-matrix) is now the authoritative source for what each harness supports — it should be kept in sync as new adapters are added.
+- Items 2, 7, 9, 10, 20, 22, 23, 26, 27, 28 were either too complex for reliable implementation in one pass or had significant overlap with existing features — they represent future milestones.
+
+---

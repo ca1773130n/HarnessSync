@@ -3,37 +3,67 @@ from __future__ import annotations
 """Tag-based content filtering for selective sync.
 
 Allows users to annotate CLAUDE.md sections with sync control tags:
-  <!-- sync:exclude -->          — exclude from all targets
-  <!-- sync:codex-only -->       — include only in codex
-  <!-- sync:gemini-only -->      — include only in gemini
-  <!-- sync:opencode-only -->    — include only in opencode
-  <!-- sync:end -->              — end a tagged region
+
+  Classic tags (backward compatible):
+    <!-- sync:exclude -->          — exclude from all targets
+    <!-- sync:codex-only -->       — include only in codex
+    <!-- sync:gemini-only -->      — include only in gemini
+    <!-- sync:opencode-only -->    — include only in opencode
+    <!-- sync:end -->              — end a tagged region
+
+  New multi-target inclusion (item 13):
+    <!-- no-sync -->               — exclude from all targets (alias for sync:exclude)
+    <!-- sync:codex,gemini -->     — include only in listed targets (comma-separated)
+
+  Per-harness content overrides (item 2):
+    <!-- harness:codex -->         — content visible only to codex (override block)
+    <!-- /harness:codex -->        — close harness override block
 
 Untagged content is included in all targets (default passthrough).
 """
 
 import re
+from typing import Sequence
 
 # Supported target names
-KNOWN_TARGETS = ("codex", "gemini", "opencode")
+KNOWN_TARGETS = ("codex", "gemini", "opencode", "cursor", "aider", "windsurf")
 
-# Tag patterns
-_TAG_RE = re.compile(
-    r"<!--\s*sync:(exclude|codex-only|gemini-only|opencode-only|end)\s*-->",
-    re.IGNORECASE
+# Classic tag pattern (backward compat)
+_CLASSIC_TAG_RE = re.compile(
+    r"<!--\s*sync:(exclude|codex-only|gemini-only|opencode-only|cursor-only|aider-only|windsurf-only|end)\s*-->",
+    re.IGNORECASE,
+)
+
+# New multi-target tag: <!-- sync:codex,gemini --> or <!-- no-sync -->
+_MULTI_TARGET_TAG_RE = re.compile(
+    r"<!--\s*(?:sync:([a-z0-9,\s]+)|no-sync)\s*-->",
+    re.IGNORECASE,
+)
+
+# Harness override open/close: <!-- harness:codex --> / <!-- /harness:codex -->
+_HARNESS_OPEN_RE = re.compile(
+    r"<!--\s*harness:([a-z0-9_-]+)\s*-->",
+    re.IGNORECASE,
+)
+_HARNESS_CLOSE_RE = re.compile(
+    r"<!--\s*/harness:([a-z0-9_-]+)\s*-->",
+    re.IGNORECASE,
 )
 
 
 def filter_rules_for_target(content: str, target_name: str) -> str:
     """Filter rules content for a specific target based on sync tags.
 
-    Parses the content line by line, tracking active sync tags.
-    Regions between a tag and the next ``<!-- sync:end -->`` are included
-    or excluded based on whether the tag matches ``target_name``.
+    Processes content line by line, supporting:
+    1. Classic sync:exclude / sync:X-only / sync:end tags
+    2. New <!-- no-sync --> shorthand (excludes from all)
+    3. New <!-- sync:codex,gemini --> multi-target include lists
+    4. New <!-- harness:X -->...<!-- /harness:X --> override blocks
+       (content only visible to target X)
 
     Args:
         content: Raw rules text (e.g. CLAUDE.md contents).
-        target_name: Target identifier ("codex", "gemini", "opencode").
+        target_name: Target identifier ("codex", "gemini", "opencode", ...).
 
     Returns:
         Filtered content with excluded sections removed. Tag comment lines
@@ -42,20 +72,46 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
     if not content:
         return content
 
-    # Build a set of accepted "only" tags for this target
-    # e.g. "codex" accepts regions tagged "codex-only"
-    target_only_tag = f"{target_name}-only"
+    target_lower = target_name.lower()
 
     lines = content.splitlines(keepends=True)
     output: list[str] = []
 
-    # State: None = default (include), "exclude" = drop, "only:<target>" = conditional
+    # State machine
+    # active_tag: None = include all, "exclude" = drop, "only:<targets>" = target list
     active_tag: str | None = None
+    # harness_only: set of targets for current harness block; None = not in a harness block
+    harness_target: str | None = None
 
     for line in lines:
-        m = _TAG_RE.search(line)
-        if m:
-            tag = m.group(1).lower()
+        # --- Check for harness close tag first ---
+        hc_match = _HARNESS_CLOSE_RE.search(line)
+        if hc_match:
+            # Closing a harness block
+            harness_target = None
+            continue  # Don't emit the tag line
+
+        # --- Check for harness open tag ---
+        ho_match = _HARNESS_OPEN_RE.search(line)
+        if ho_match:
+            harness_target = ho_match.group(1).lower()
+            continue  # Don't emit the tag line
+
+        # --- If inside a harness block, only emit for the matching target ---
+        if harness_target is not None:
+            if harness_target == target_lower:
+                output.append(line)
+            continue
+
+        # --- Check for no-sync shorthand ---
+        if re.search(r"<!--\s*no-sync\s*-->", line, re.IGNORECASE):
+            active_tag = "exclude"
+            continue
+
+        # --- Check for classic sync tags ---
+        cm = _CLASSIC_TAG_RE.search(line)
+        if cm:
+            tag = cm.group(1).lower()
             if tag == "end":
                 active_tag = None
             elif tag == "exclude":
@@ -63,28 +119,60 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
             else:
                 # e.g. "codex-only"
                 active_tag = tag
-            # Don't emit tag lines themselves
             continue
 
+        # --- Check for multi-target sync tag: <!-- sync:codex,gemini --> ---
+        mm = re.search(r"<!--\s*sync:([a-z0-9,\s]+)\s*-->", line, re.IGNORECASE)
+        if mm:
+            targets_str = mm.group(1)
+            # Check if this looks like a target list (has comma or matches known targets)
+            targets = {t.strip().lower() for t in targets_str.split(",") if t.strip()}
+            # Only treat as multi-target if it doesn't match the old "-only" pattern
+            # (classic tags already handled above)
+            if targets and not any(t.endswith("-only") or t in ("exclude", "end") for t in targets):
+                active_tag = f"targets:{','.join(sorted(targets))}"
+                continue
+
+        # --- Emit based on active_tag ---
         if active_tag is None:
-            # Default region — include for all targets
             output.append(line)
         elif active_tag == "exclude":
-            # Excluded from all targets
-            pass
-        elif active_tag == target_only_tag:
-            # Matches this target — include
-            output.append(line)
-        else:
-            # Some other target's exclusive region — skip
-            pass
+            pass  # Drop
+        elif active_tag.endswith("-only"):
+            # Classic format: "codex-only" matches target "codex"
+            expected = active_tag[:-5]  # strip "-only"
+            if expected == target_lower:
+                output.append(line)
+        elif active_tag.startswith("targets:"):
+            # New multi-target format
+            allowed = set(active_tag[len("targets:"):].split(","))
+            if target_lower in allowed:
+                output.append(line)
 
     result = "".join(output)
-    # Collapse runs of 3+ blank lines down to 2 (clean up gaps left by removed sections)
+    # Collapse runs of 3+ blank lines down to 2
     result = re.sub(r"\n{3,}", "\n\n", result)
     return result.strip()
 
 
 def has_sync_tags(content: str) -> bool:
     """Return True if content contains any sync control tags."""
-    return bool(_TAG_RE.search(content or ""))
+    if not content:
+        return False
+    # Classic tags
+    if _CLASSIC_TAG_RE.search(content):
+        return True
+    # no-sync
+    if re.search(r"<!--\s*no-sync\s*-->", content, re.IGNORECASE):
+        return True
+    # harness open/close
+    if _HARNESS_OPEN_RE.search(content) or _HARNESS_CLOSE_RE.search(content):
+        return True
+    # Multi-target sync tags (<!-- sync:codex,gemini -->)
+    mm = re.search(r"<!--\s*sync:([a-z0-9,\s]+)\s*-->", content, re.IGNORECASE)
+    if mm:
+        targets_str = mm.group(1)
+        targets = {t.strip().lower() for t in targets_str.split(",") if t.strip()}
+        if targets and not any(t.endswith("-only") or t in ("exclude", "end") for t in targets):
+            return True
+    return False

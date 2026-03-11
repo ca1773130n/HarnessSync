@@ -10,6 +10,16 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PY=$(command -v python3 || command -v python); [ -n \"$PY\" ] && \"$PY\" ${CLAUDE_PLUGIN_ROOT}/src/hooks/session_start.py || true"
+          }
+        ]
+      }
     ]
   }
 }

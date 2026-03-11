@@ -100,6 +100,21 @@ def format_results_table(results: dict, account: str = None) -> str:
     return "\n".join(lines)
 
 
+def _save_profile_from_args(pm, args) -> None:
+    """Save current sync args as a named profile."""
+    name = args.profile_save
+    config: dict = {"scope": args.scope}
+    if args.only:
+        config["only_sections"] = [s.strip() for s in args.only.split(",") if s.strip()]
+    if args.skip:
+        config["skip_sections"] = [s.strip() for s in args.skip.split(",") if s.strip()]
+    try:
+        pm.save_profile(name, config)
+        print(f"Profile {name!r} saved. Activate with: /sync --profile {name}")
+    except ValueError as e:
+        print(f"Error saving profile: {e}", file=sys.stderr)
+
+
 def main():
     """Entry point for /sync command."""
     # Parse arguments from $ARGUMENTS
@@ -162,10 +177,40 @@ def main():
         action="store_true",
         help="Watch for config file changes and sync automatically (Ctrl+C to stop)"
     )
+    parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help="Activate a named sync profile (e.g., 'work', 'minimal')"
+    )
+    parser.add_argument(
+        "--profile-list",
+        action="store_true",
+        help="List all configured sync profiles and exit"
+    )
+    parser.add_argument(
+        "--profile-save",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="Save current --scope/--only/--skip options as a named profile"
+    )
 
     try:
         args = parser.parse_args(tokens)
     except SystemExit:
+        return
+
+    # --- PROFILE MANAGEMENT ---
+    from src.profile_manager import ProfileManager
+    pm = ProfileManager()
+
+    if getattr(args, 'profile_list', False):
+        print(pm.format_list())
+        return
+
+    if getattr(args, 'profile_save', None):
+        _save_profile_from_args(pm, args)
         return
 
     # Parse --only / --skip into section sets
@@ -176,6 +221,25 @@ def main():
         only_sections = {s.strip() for s in args.only.split(",") if s.strip()} & valid_sections
     if args.skip:
         skip_sections = {s.strip() for s in args.skip.split(",") if s.strip()} & valid_sections
+
+    # Apply named profile (overrides --scope/--only/--skip if profile specifies them)
+    _profile_targets = None
+    if getattr(args, 'profile', None):
+        try:
+            base_kwargs = {
+                "scope": args.scope,
+                "only_sections": only_sections,
+                "skip_sections": skip_sections,
+            }
+            merged = pm.apply_to_kwargs(args.profile, base_kwargs)
+            args.scope = merged.get("scope", args.scope)
+            only_sections = merged.get("only_sections", only_sections)
+            skip_sections = merged.get("skip_sections", skip_sections)
+            _profile_targets = merged.get("profile_targets")
+            print(f"[profile: {args.profile}]")
+        except KeyError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return
 
     # Debounce check
     state_manager = StateManager()

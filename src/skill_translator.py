@@ -115,6 +115,136 @@ def translate_skill_file(path: Path, target_name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Translation quality scoring (item 29)
+# ---------------------------------------------------------------------------
+
+def score_translation(original: str, translated: str, target_name: str) -> dict:
+    """Score how faithfully a skill was translated to a target harness (0-100).
+
+    Quality is measured along three axes:
+    - content_retention: Fraction of original non-whitespace characters preserved
+    - tool_refs_remaining: CC-specific tool references still present after translation
+    - frontmatter: Fraction of frontmatter keys preserved
+
+    Args:
+        original: Raw skill file content before translation
+        translated: Content after translate_skill_content()
+        target_name: Target harness name (included in output for reference)
+
+    Returns:
+        Dict with:
+            score (int 0-100), grade (str), content_retention (float),
+            tool_refs_dropped (int), tool_refs_original (int),
+            tool_refs_remaining (int), frontmatter_keys_kept (int),
+            frontmatter_keys_dropped (int), target (str), notes (list[str])
+    """
+    if not original.strip():
+        return {
+            "score": 100, "grade": "excellent", "target": target_name,
+            "notes": ["Empty skill — nothing to translate"],
+        }
+
+    notes: list[str] = []
+
+    # Content retention
+    orig_chars = max(1, len(original.replace(" ", "").replace("\n", "")))
+    trans_chars = len(translated.replace(" ", "").replace("\n", ""))
+    content_retention = trans_chars / orig_chars
+
+    # Tool reference analysis
+    orig_tool_refs = len(_INLINE_TOOL_RE.findall(original))
+    trans_tool_refs = len(_INLINE_TOOL_RE.findall(translated))
+    tool_refs_dropped = orig_tool_refs - trans_tool_refs
+
+    if orig_tool_refs > 0:
+        notes.append(f"{tool_refs_dropped}/{orig_tool_refs} CC tool reference(s) rewritten")
+    if trans_tool_refs > 0:
+        notes.append(f"{trans_tool_refs} CC tool reference(s) still remain — may not work in {target_name}")
+
+    # XML tool-call blocks
+    xml_orig = len(_TOOL_CALL_BLOCK_RE.findall(original))
+    xml_trans = len(_TOOL_CALL_BLOCK_RE.findall(translated))
+    if xml_orig > xml_trans:
+        notes.append(f"{xml_orig - xml_trans} XML tool-call block(s) removed")
+
+    # Frontmatter keys
+    fm_kept = _count_frontmatter_keys(translated)
+    fm_orig = _count_frontmatter_keys(original)
+    fm_dropped = fm_orig - fm_kept
+    if fm_dropped > 0:
+        notes.append(f"{fm_dropped} CC-specific frontmatter key(s) stripped")
+
+    # Score: 50 pts base from content retention + 30 pts from tool ref cleanup
+    retention_score = min(50, int(content_retention * 50))
+
+    if orig_tool_refs > 0:
+        rewrite_bonus = int((1 - trans_tool_refs / orig_tool_refs) * 30)
+    else:
+        rewrite_bonus = 30
+
+    retention_penalty = 20 if content_retention < 0.3 else 0
+    if content_retention < 0.3:
+        notes.append("Warning: >70% of content dropped — review manually")
+
+    score = max(0, min(100, retention_score + rewrite_bonus - retention_penalty))
+
+    if score >= 90:
+        grade = "excellent"
+    elif score >= 70:
+        grade = "good"
+    elif score >= 50:
+        grade = "fair"
+    else:
+        grade = "poor"
+
+    if not notes:
+        notes.append("No CC-specific content detected — translation is a clean copy")
+
+    return {
+        "score": score,
+        "grade": grade,
+        "content_retention": round(content_retention, 3),
+        "tool_refs_dropped": tool_refs_dropped,
+        "tool_refs_original": orig_tool_refs,
+        "tool_refs_remaining": trans_tool_refs,
+        "frontmatter_keys_kept": fm_kept,
+        "frontmatter_keys_dropped": fm_dropped,
+        "target": target_name,
+        "notes": notes,
+    }
+
+
+def _count_frontmatter_keys(content: str) -> int:
+    """Count YAML frontmatter keys, or 0 if no frontmatter."""
+    if not content.startswith("---"):
+        return 0
+    end = content.find("\n---", 3)
+    if end == -1:
+        return 0
+    fm_text = content[3:end]
+    return sum(1 for line in fm_text.splitlines() if re.match(r"^\w[\w-]*\s*:", line))
+
+
+def score_skill_file(path: Path, target_name: str) -> dict:
+    """Read a skill file and return its translation quality score.
+
+    Args:
+        path: Path to the skill file (.md)
+        target_name: Target harness name
+
+    Returns:
+        Score dict from score_translation()
+    """
+    try:
+        original = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {"score": 0, "grade": "poor", "target": target_name,
+                "notes": ["Could not read skill file"]}
+    translated = translate_skill_content(original, target_name)
+    return score_translation(original, translated, target_name)
+
+
+# ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
 
