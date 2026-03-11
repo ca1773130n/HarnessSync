@@ -60,6 +60,12 @@ def main():
         help="Import accounts from JSON file (non-interactive)"
     )
     parser.add_argument(
+        "--guided",
+        action="store_true",
+        help="Interactive guided onboarding wizard: auto-detects harnesses, "
+             "walks through section selection, and writes initial .harnesssync config"
+    )
+    parser.add_argument(
         "--auto",
         action="store_true",
         help="Auto-discover and configure accounts from home directory"
@@ -101,6 +107,9 @@ def main():
             _import_config_file(args.config_file)
         elif args.add:
             _add_account_inline(args.add, args.source, args.targets)
+        elif getattr(args, "guided", False):
+            project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
+            wizard.run_guided(project_dir=project_dir)
         elif args.auto or not sys.stdin.isatty():
             _auto_setup()
         else:

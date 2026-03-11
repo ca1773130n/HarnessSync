@@ -1,0 +1,324 @@
+from __future__ import annotations
+
+"""Sync integrity verification — cryptographic signing of synced configs.
+
+Signs synced harness configs with HMAC-SHA256 at write time and verifies
+signatures before reads, flagging tampering or external modification.
+
+Provides an audit trail for team environments where synced AGENTS.md or
+GEMINI.md could be modified by malicious or accidental out-of-band edits.
+
+How it works:
+1. When a target file is written by HarnessSync, sign_file() computes
+   HMAC-SHA256 over the file content using a local machine secret and
+   stores the signature in .harness-sync/signatures.json.
+
+2. Before reading or comparing synced configs, verify_file() recomputes
+   the HMAC and checks it against the stored signature. A mismatch means
+   the file was modified after HarnessSync last wrote it.
+
+3. The HMAC key is stored in ~/.harnesssync/integrity.key (created on first
+   use, never transmitted). Teams can opt in to a shared key via env var
+   HARNESSSYNC_INTEGRITY_KEY for cross-machine consistency.
+
+Security properties:
+- Detects out-of-band modifications to synced config files.
+- Does NOT prevent modifications — only surfaces them.
+- The key is a local secret; signatures are per-machine by default.
+- Signatures are stored separately from content so they survive re-sync.
+"""
+
+import hashlib
+import hmac
+import json
+import os
+import secrets
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+# Signatures database location
+_SIGS_FILENAME = "signatures.json"
+
+# Local HMAC key file (generated on first use)
+_KEY_FILE = Path.home() / ".harnesssync" / "integrity.key"
+
+
+def _load_or_create_key() -> bytes:
+    """Load the local HMAC signing key, creating it if it doesn't exist.
+
+    Key priority:
+    1. HARNESSSYNC_INTEGRITY_KEY env var (hex-encoded, enables team sharing)
+    2. ~/.harnesssync/integrity.key file (machine-local, auto-generated)
+
+    Returns:
+        32-byte HMAC key.
+    """
+    env_key = os.environ.get("HARNESSSYNC_INTEGRITY_KEY", "").strip()
+    if env_key:
+        try:
+            return bytes.fromhex(env_key)[:32].ljust(32, b"\x00")
+        except ValueError:
+            pass  # Invalid hex — fall through to file key
+
+    _KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if _KEY_FILE.exists():
+        try:
+            return bytes.fromhex(_KEY_FILE.read_text().strip())
+        except (ValueError, OSError):
+            pass
+
+    # Generate and persist a new random key
+    key = secrets.token_bytes(32)
+    try:
+        _KEY_FILE.write_text(key.hex())
+        _KEY_FILE.chmod(0o600)
+    except OSError:
+        pass
+    return key
+
+
+def _compute_signature(content: bytes, key: bytes) -> str:
+    """Compute HMAC-SHA256 signature for file content.
+
+    Args:
+        content: Raw file bytes to sign.
+        key: 32-byte HMAC key.
+
+    Returns:
+        Hex-encoded HMAC-SHA256 signature string.
+    """
+    return hmac.new(key, content, hashlib.sha256).hexdigest()
+
+
+@dataclass
+class SignatureRecord:
+    """Stored signature record for a single file."""
+    path: str          # Absolute path (resolved)
+    signature: str     # Hex HMAC-SHA256
+    size: int          # File size in bytes at signing time
+    signed_at: str     # ISO timestamp
+
+    def to_dict(self) -> dict:
+        return {
+            "path": self.path,
+            "signature": self.signature,
+            "size": self.size,
+            "signed_at": self.signed_at,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> SignatureRecord:
+        return cls(
+            path=d["path"],
+            signature=d["signature"],
+            size=d.get("size", 0),
+            signed_at=d.get("signed_at", ""),
+        )
+
+
+@dataclass
+class VerificationResult:
+    """Result of verifying one or more file signatures."""
+    verified: list[str] = field(default_factory=list)    # Paths that verified OK
+    tampered: list[str] = field(default_factory=list)    # Paths with bad signature
+    unsigned: list[str] = field(default_factory=list)    # Paths with no stored sig
+    missing: list[str] = field(default_factory=list)     # Paths that no longer exist
+
+    @property
+    def all_ok(self) -> bool:
+        return not self.tampered and not self.missing
+
+    @property
+    def has_issues(self) -> bool:
+        return bool(self.tampered or self.missing)
+
+    def format(self) -> str:
+        lines = ["Sync Integrity Report"]
+        lines.append("=" * 40)
+        if self.verified:
+            lines.append(f"✓ Verified:  {len(self.verified)} file(s)")
+        if self.unsigned:
+            lines.append(f"? Unsigned:  {len(self.unsigned)} file(s) (no signature on record)")
+        if self.tampered:
+            lines.append(f"⚠ TAMPERED:  {len(self.tampered)} file(s) — out-of-band modification detected")
+            for path in self.tampered:
+                lines.append(f"    {path}")
+        if self.missing:
+            lines.append(f"✗ Missing:   {len(self.missing)} file(s) — signed files no longer exist")
+            for path in self.missing:
+                lines.append(f"    {path}")
+        if self.all_ok and not self.unsigned:
+            lines.append("All synced configs verified.")
+        return "\n".join(lines)
+
+
+class SyncIntegrityStore:
+    """Manages HMAC signatures for synced harness config files.
+
+    Signatures are stored in <project_dir>/.harness-sync/signatures.json.
+    Each entry maps the resolved absolute file path to its HMAC-SHA256
+    signature, file size, and signing timestamp.
+
+    Usage:
+        store = SyncIntegrityStore(project_dir=Path("."))
+        store.sign_file(Path("AGENTS.md"))      # Called after writing
+        result = store.verify_file(Path("AGENTS.md"))   # Called before reading
+    """
+
+    def __init__(self, project_dir: Path | None = None):
+        """Initialize the integrity store.
+
+        Args:
+            project_dir: Project root directory. Signatures stored in
+                         <project_dir>/.harness-sync/signatures.json.
+        """
+        self._project_dir = project_dir or Path.cwd()
+        self._sigs_dir = self._project_dir / ".harness-sync"
+        self._sigs_path = self._sigs_dir / _SIGS_FILENAME
+        self._key = _load_or_create_key()
+        self._data: dict[str, dict] = self._load()
+
+    def _load(self) -> dict[str, dict]:
+        """Load signatures database from disk."""
+        if not self._sigs_path.exists():
+            return {}
+        try:
+            return json.loads(self._sigs_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _save(self) -> None:
+        """Persist signatures database to disk."""
+        self._sigs_dir.mkdir(parents=True, exist_ok=True)
+        self._sigs_path.write_text(
+            json.dumps(self._data, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def sign_file(self, file_path: Path) -> SignatureRecord | None:
+        """Compute and store the HMAC signature for a file.
+
+        Should be called immediately after HarnessSync writes a target file.
+
+        Args:
+            file_path: Path to the file to sign (need not be inside project_dir).
+
+        Returns:
+            SignatureRecord if signing succeeded, None if file unreadable.
+        """
+        from datetime import datetime, timezone
+
+        resolved = file_path.resolve()
+        try:
+            content = resolved.read_bytes()
+        except OSError:
+            return None
+
+        sig = _compute_signature(content, self._key)
+        record = SignatureRecord(
+            path=str(resolved),
+            signature=sig,
+            size=len(content),
+            signed_at=datetime.now(tz=timezone.utc).isoformat(),
+        )
+        self._data[str(resolved)] = record.to_dict()
+        self._save()
+        return record
+
+    def verify_file(self, file_path: Path) -> str:
+        """Verify the integrity of a single synced file.
+
+        Args:
+            file_path: Path to verify.
+
+        Returns:
+            One of: "ok" | "tampered" | "unsigned" | "missing"
+        """
+        resolved = file_path.resolve()
+        key = str(resolved)
+
+        if key not in self._data:
+            return "unsigned"
+
+        if not resolved.exists():
+            return "missing"
+
+        try:
+            content = resolved.read_bytes()
+        except OSError:
+            return "missing"
+
+        stored_sig = self._data[key]["signature"]
+        actual_sig = _compute_signature(content, self._key)
+
+        if hmac.compare_digest(actual_sig, stored_sig):
+            return "ok"
+        return "tampered"
+
+    def verify_all(self) -> VerificationResult:
+        """Verify all signed files in the database.
+
+        Returns:
+            VerificationResult summarizing the verification status of all files.
+        """
+        result = VerificationResult()
+        for path_str in self._data:
+            status = self.verify_file(Path(path_str))
+            if status == "ok":
+                result.verified.append(path_str)
+            elif status == "tampered":
+                result.tampered.append(path_str)
+            elif status == "missing":
+                result.missing.append(path_str)
+            else:
+                result.unsigned.append(path_str)
+        return result
+
+    def sign_target_files(self, target_files: list[Path]) -> int:
+        """Sign multiple target files in bulk.
+
+        Convenience method for signing all files written in a sync operation.
+
+        Args:
+            target_files: List of file paths to sign.
+
+        Returns:
+            Number of files successfully signed.
+        """
+        signed = 0
+        for f in target_files:
+            if self.sign_file(f) is not None:
+                signed += 1
+        return signed
+
+    def revoke(self, file_path: Path) -> bool:
+        """Remove the stored signature for a file (e.g. when deleting it).
+
+        Args:
+            file_path: Path to revoke signature for.
+
+        Returns:
+            True if a signature was removed, False if not found.
+        """
+        key = str(file_path.resolve())
+        if key in self._data:
+            del self._data[key]
+            self._save()
+            return True
+        return False
+
+    def summary(self) -> dict:
+        """Return a summary dict of signing coverage.
+
+        Returns:
+            Dict with counts of total, verified, tampered, unsigned, and missing.
+        """
+        result = self.verify_all()
+        return {
+            "total_signed": len(self._data),
+            "verified": len(result.verified),
+            "tampered": len(result.tampered),
+            "unsigned": len(result.unsigned),
+            "missing": len(result.missing),
+        }

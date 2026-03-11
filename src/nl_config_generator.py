@@ -363,3 +363,130 @@ class NLConfigGenerator:
                 cats.append(rule.category)
                 seen.add(rule.category)
         return cats
+
+    def parse_exclusion(self, description: str) -> dict:
+        """Parse a natural-language exclusion/inclusion rule into a .harnesssync config dict.
+
+        Converts plain-English sync control statements into the structured config
+        format accepted by .harnesssync, eliminating the need for users to learn
+        the config schema for common customizations.
+
+        Supported patterns:
+        - "never sync MCP servers to Aider"
+          → {"skip_sections": {"aider": ["mcp"]}}
+        - "only sync security rules to Cursor"
+          → {"tag_filter": {"cursor": {"include_tags": ["security"]}}}
+        - "exclude rules from Codex"
+          → {"skip_sections": {"codex": ["rules"]}}
+        - "never sync to Aider"
+          → {"skip_targets": ["aider"]}
+        - "only sync to Gemini and Codex"
+          → {"only_targets": ["gemini", "codex"]}
+        - "skip MCP for all targets"
+          → {"skip_sections": ["mcp"]}
+
+        Args:
+            description: Plain-English exclusion/inclusion description.
+
+        Returns:
+            Dict compatible with .harnesssync config format. Returns empty dict
+            if no pattern matches.
+        """
+        text = description.lower().strip()
+
+        # Known section aliases → canonical section names
+        _SECTION_ALIASES: dict[str, str] = {
+            "mcp": "mcp", "mcp servers": "mcp", "mcp server": "mcp",
+            "rules": "rules", "rule": "rules",
+            "skills": "skills", "skill": "skills",
+            "agents": "agents", "agent": "agents",
+            "commands": "commands", "command": "commands",
+            "settings": "settings", "setting": "settings",
+        }
+
+        # Known harness aliases → canonical target names
+        _TARGET_ALIASES: dict[str, str] = {
+            "aider": "aider", "codex": "codex", "gemini": "gemini",
+            "opencode": "opencode", "cursor": "cursor",
+            "windsurf": "windsurf", "cline": "cline",
+            "continue": "continue", "zed": "zed", "neovim": "neovim",
+        }
+
+        def _find_section(t: str) -> str | None:
+            for alias, canonical in _SECTION_ALIASES.items():
+                if alias in t:
+                    return canonical
+            return None
+
+        def _find_targets(t: str) -> list[str]:
+            found = []
+            for alias, canonical in _TARGET_ALIASES.items():
+                if alias in t:
+                    found.append(canonical)
+            return found
+
+        # Pattern: "never sync to <target>" / "skip <target>"
+        if re.search(r"never sync to|skip all|exclude all targets|no targets", text):
+            targets = _find_targets(text)
+            if targets:
+                return {"skip_targets": targets}
+
+        # Pattern: "only sync to <targets>"
+        if re.search(r"only sync to|only target|restrict to", text):
+            targets = _find_targets(text)
+            if targets:
+                return {"only_targets": targets}
+
+        # Pattern: "never sync <section> to <target>" / "exclude <section> from <target>"
+        if re.search(r"never sync .+ to|exclude .+ from|skip .+ for|don.t sync .+ to", text):
+            section = _find_section(text)
+            targets = _find_targets(text)
+            if section and targets:
+                result: dict = {"skip_sections": {}}
+                for target in targets:
+                    result["skip_sections"][target] = [section]
+                return result
+            if section:
+                return {"skip_sections": [section]}
+
+        # Pattern: "only sync <section> to <target>"
+        if re.search(r"only sync .+ to|only .+ for|restrict .+ to", text):
+            section = _find_section(text)
+            targets = _find_targets(text)
+            if section and targets:
+                return {"only_sections": {t: [section] for t in targets}}
+            if section:
+                return {"only_sections": [section]}
+
+        # Pattern: "skip <section>" / "exclude <section>" (global)
+        if re.search(r"^(?:skip|exclude|never sync|omit|no)\s+\w", text):
+            section = _find_section(text)
+            if section:
+                return {"skip_sections": [section]}
+
+        # Pattern: "only <section>" (global)
+        if re.search(r"^only\s+\w", text):
+            section = _find_section(text)
+            if section:
+                return {"only_sections": [section]}
+
+        return {}
+
+    def parse_exclusion_to_harnesssync(self, description: str, project_dir=None) -> str:
+        """Parse NL exclusion and format as .harnesssync JSON snippet.
+
+        Convenience wrapper that returns the config as a formatted JSON string
+        suitable for appending/merging into the project's .harnesssync file.
+
+        Args:
+            description: Plain-English exclusion description.
+            project_dir: If provided, attempts to merge with existing config.
+
+        Returns:
+            JSON string with the exclusion config, or empty string if no match.
+        """
+        import json
+        config = self.parse_exclusion(description)
+        if not config:
+            return ""
+        return json.dumps(config, indent=2)

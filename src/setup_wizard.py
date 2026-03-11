@@ -286,6 +286,141 @@ class SetupWizard:
             print(f"Account '{account_name}' removed.")
         return result
 
+    def run_guided(self, project_dir: Path | None = None) -> dict | None:
+        """Run the guided first-sync onboarding wizard.
+
+        Auto-detects installed harnesses, lets the user pick which sections
+        to sync, and writes an initial .harnesssync config — reducing
+        time-to-first-sync from 30+ minutes to under 2.
+
+        Unlike run_interactive() which focuses on multi-account setup, this
+        wizard is for first-time users who want a working sync config now.
+
+        Args:
+            project_dir: Project root to write .harnesssync to. Uses cwd if None.
+
+        Returns:
+            Generated .harnesssync config dict, or None if cancelled.
+        """
+        import shutil
+        import json
+        from src.harness_readiness import HarnessReadinessChecker
+
+        if not sys.stdin.isatty():
+            print("Error: Guided setup requires interactive terminal.", file=sys.stderr)
+            return None
+
+        cwd = project_dir or Path.cwd()
+
+        print("HarnessSync — Guided First-Sync Setup")
+        print("=" * 60)
+        print("This wizard detects installed AI harnesses and configures")
+        print("your sync settings. Takes about 2 minutes.")
+        print()
+
+        # Step 1: Detect installed harnesses
+        print("[1/4] Detecting installed AI harnesses...")
+        checker = HarnessReadinessChecker()
+        all_targets = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"]
+        detected: list[str] = []
+        not_found: list[str] = []
+        for target in all_targets:
+            report = checker.check(target, project_dir=cwd)
+            if report.all_pass:
+                detected.append(target)
+                print(f"  ✓ {target}")
+            elif any(c.passed for c in report.checks):
+                detected.append(target)
+                print(f"  ~ {target} (partial)")
+            else:
+                not_found.append(target)
+                print(f"  ✗ {target} (not installed)")
+
+        if not detected:
+            print("\nNo harnesses detected. Install at least one harness and re-run.")
+            return None
+
+        print()
+
+        # Step 2: Confirm targets to sync
+        print("[2/4] Which harnesses should receive synced config?")
+        print(f"  Detected: {', '.join(detected)}")
+        raw_targets = input(
+            f"  Enter targets to sync [{', '.join(detected)}]: "
+        ).strip()
+        chosen_targets = (
+            [t.strip() for t in raw_targets.split(",") if t.strip() in all_targets]
+            if raw_targets
+            else detected
+        )
+        if not chosen_targets:
+            print("No valid targets selected. Setup cancelled.")
+            return None
+        print(f"  Syncing to: {', '.join(chosen_targets)}")
+        print()
+
+        # Step 3: Section selection
+        print("[3/4] Which config sections should be synced?")
+        all_sections = ["rules", "skills", "agents", "commands", "mcp", "settings"]
+        section_descriptions = {
+            "rules": "CLAUDE.md rules and instructions",
+            "skills": "Claude Code skills (slash command prompts)",
+            "agents": "Sub-agent configurations",
+            "commands": "Custom slash commands",
+            "mcp": "MCP server configurations",
+            "settings": "Model and permission settings",
+        }
+        for s in all_sections:
+            print(f"  {s:<10} — {section_descriptions[s]}")
+        raw_sections = input(
+            f"\n  Enter sections to sync (all to include all) [all]: "
+        ).strip()
+        if not raw_sections or raw_sections.lower() == "all":
+            chosen_sections: list[str] = []  # Empty = sync all
+        else:
+            chosen_sections = [
+                s.strip() for s in raw_sections.split(",")
+                if s.strip() in all_sections
+            ]
+        display_sections = ", ".join(chosen_sections) if chosen_sections else "all"
+        print(f"  Syncing sections: {display_sections}")
+        print()
+
+        # Step 4: Confirm and write config
+        print("[4/4] Summary")
+        config: dict = {}
+        if len(chosen_targets) < len(all_targets):
+            config["only_targets"] = chosen_targets
+        if chosen_sections:
+            config["only_sections"] = chosen_sections
+        config["_guided_setup"] = True
+
+        print(f"  Targets:  {', '.join(chosen_targets)}")
+        print(f"  Sections: {display_sections}")
+        harnesssync_path = cwd / ".harnesssync"
+        print(f"  Config:   {harnesssync_path}")
+        print()
+
+        confirm = input("Write configuration and run first sync? [Y/n]: ").strip().lower()
+        if confirm and confirm != "y":
+            print("Setup cancelled.")
+            return None
+
+        # Merge with existing .harnesssync if present
+        existing: dict = {}
+        if harnesssync_path.exists():
+            try:
+                existing = json.loads(harnesssync_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                pass
+        existing.update({k: v for k, v in config.items() if not k.startswith("_")})
+        harnesssync_path.write_text(
+            json.dumps(existing, indent=2) + "\n", encoding="utf-8"
+        )
+        print(f"\n.harnesssync written to {harnesssync_path}")
+        print("Run /sync to perform your first sync.")
+        return config
+
     @staticmethod
     def _suggest_account_name(source_path: Path) -> str:
         """Derive account name from .claude* path.

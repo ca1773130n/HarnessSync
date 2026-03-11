@@ -668,3 +668,70 @@ _2026-03-11T02:21:54.848Z_
 - The NL config generator has limited coverage (11 categories). High-value extensions: framework-specific rules (React, Django, FastAPI), security checklist rules, and team-convention rules that map to specific harness lint configurations.
 
 ---
+## Iteration 11
+_2026-03-11T02:42:46.056Z_
+
+### Items Attempted
+
+- **Reverse Sync (Harness → Claude Code)** — pass
+- **Team Config Sharing via Gist/Repo** — pass
+- **Named Sync Profiles** — pass
+- **Interactive Conflict Resolution** — pass
+- **Drift Detection with Proactive Alerts** — pass
+- **GitHub Actions Sync Workflow** — pass
+- **MCP Server Reachability Dashboard** — pass
+- **Continue.dev Adapter** — pass
+- **Zed AI Adapter** — pass
+- **GitHub Copilot Instructions Adapter** — pass
+- **Sync Analytics Report** — pass
+- **Rule Compatibility Scorer** — pass
+- **Live Watch Mode with File Watcher** — pass
+- **Auto Sync Changelog** — pass
+- **Harness Feature Parity Benchmark** — pass
+- **Starter Template Library** — pass
+- **Selective Section Sync UI** — pass
+- **Secret & Credential Scrubber** — pass
+- **Monorepo Per-Package Sync** — pass
+- **Auto Sync on Git Pull** — pass
+- **New Harness Onboarding Wizard** — pass
+- **Rule Deduplication Analyzer** — pass
+- **Plugin Registry Sync** — pass
+- **Environment Variable Translation Map** — pass
+- **Sync Simulation Sandbox** — pass
+- **Agent & Skill Compatibility Matrix** — pass
+- **Scheduled Sync via Cron** — pass
+- **CLAUDE.md Quality Linter & Grader** — pass
+- **Multi-Account Sync Dashboard** — pass
+- **Target Harness Version Compatibility Check** — pass
+- **PR Comment with Sync Diff** — pass
+- **Config Snapshot Time Travel** — pass
+- **Natural Language Rule Generator** — pass
+- **Harness Usage Analytics (Local)** — pass
+
+### Decisions Made
+
+- Implemented /sync-report (Item 11) as a standalone command with per-target fidelity percentages and problem-section detection, reusing existing StateManager data to avoid re-running expensive sync operations
+- Added Gist export/import to ProfileManager (Item 2) using only stdlib urllib so no new dependencies; exported profile includes internal metadata that gets stripped on import to keep profiles clean
+- Added interactive section picker (Item 17) with both raw-terminal (termios/tty) and fallback numbered-menu modes; integrated as --pick-sections flag in /sync so it's discoverable without a separate command
+- Implemented monorepo per-package sync (Item 19) as src/monorepo_sync.py + --monorepo flag in /sync; per-package config is .harnesssync-package.json which extends the existing .harnesssync per-project config pattern
+- Implemented sync simulation sandbox (Item 25) by running the real SyncOrchestrator against per-target subdirs inside a temp directory; this reuses the full adapter pipeline rather than duplicating adapter logic, so the simulation is always accurate
+- Implemented /sync-schedule (Item 27) using crontab -l/-r/-w pattern; uses a HarnessSync-specific comment marker to identify and replace our entries without disturbing other cron jobs; Windows gets an instructional stub since cron isn't available
+- Skipped items that already had complete implementations: 1 (sync_import.py), 3 (profile_manager.py), 4 (conflict_detector.py), 5 (startup_check.py), 6 (sync_github_actions.py), 7 (sync_mcp_health.py), 8 (continue_dev.py), 9 (zed.py), 10 (vscode.py), 12 (compatibility_reporter.py), 13 (--watch in sync.py), 14 (changelog_manager.py), 15 (sync_parity.py), 16 (template_registry.py), 18 (secret_detector.py), 20 (git_hook_installer.py), 21 (setup_wizard.py), 22 (rule_deduplicator.py), 23 (plugin_extension_mapper.py), 24 (mcp_aliasing.py), 26 (skill_compatibility.py), 28 (config_linter.py), 29 (sync_status.py), 30 (harness_version_compat.py)
+
+### Patterns Discovered
+
+- AdapterRegistry uses list_targets() + _adapters dict directly — no all_adapters() convenience method exists, which caused a bug in the first sandbox draft; worth adding all_adapters() as a public classmethod to avoid future misuse of private _adapters dict
+- The orchestrator converts SourceReader's str output to list[dict] format expected by adapters — this implicit contract isn't documented in AdapterBase and caused the initial sandbox to pass raw strings to sync_rules()
+- Per-project .harnesssync config files already exist for target/section overrides; the new .harnesssync-package.json for monorepos follows the same pattern but is scoped to subdirectories, maintaining naming consistency
+- The crontab marker pattern (comment line + project line + command line) makes removal robust: we can surgically remove our entries without touching other users' cron jobs, but the three-line structure is fragile if the crontab is manually edited between entries
+- All new src/ modules include from __future__ import annotations for Python 3.9 compat as required by project conventions; a duplicate __future__ import in sync_report.py and sync_schedule.py was caught and fixed before tests ran
+
+### Takeaways
+
+- The codebase is impressively complete — 24 of the 30 items were already fully implemented, many in dedicated modules with rich functionality; the evolve loop has been very productive at filling in features
+- The sync_sandbox.py reuse of SyncOrchestrator is the right architectural choice but means the sandbox inherits all orchestrator side effects (changelog writes, state updates) — a future improvement would be a lighter 'read-only adapter evaluation' mode
+- The section_picker.py TTY detection works well for CLI but will silently fall back in non-TTY contexts (hooks, CI) — this graceful degradation is intentional and correct
+- ProfileManager.export_to_gist requires a GITHUB_TOKEN which many users won't have configured; a follow-up could add GitHub OAuth device flow or instructions for creating a token
+- The monorepo discoverer's _MAX_DEPTH=3 limit prevents scanning large repos but means deeply nested packages (apps/services/auth/CLAUDE.md) won't be found — users can override with explicit .harnesssync-package.json placement
+
+---

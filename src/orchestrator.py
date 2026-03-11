@@ -161,6 +161,41 @@ class SyncOrchestrator:
         self._project_skip_targets = set(project_cfg.get("skip_targets", []))
         self._project_only_targets = set(project_cfg.get("only_targets", []))
 
+        # Apply git branch-aware profile overrides (most specific branch match wins)
+        try:
+            from src.branch_aware_sync import resolve_branch_profile, apply_branch_profile, describe_active_profile
+            branch_profile = resolve_branch_profile(self.project_dir, project_cfg)
+            if branch_profile and not branch_profile.is_empty:
+                import subprocess as _sp
+                branch_name = ""
+                try:
+                    r = _sp.run(
+                        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                        capture_output=True, text=True,
+                        cwd=str(self.project_dir), timeout=3,
+                    )
+                    branch_name = r.stdout.strip() if r.returncode == 0 else ""
+                except Exception:
+                    pass
+                (
+                    self.skip_sections,
+                    self.only_sections,
+                    self._project_skip_targets,
+                    self._project_only_targets,
+                    self.scope,
+                ) = apply_branch_profile(
+                    branch_profile,
+                    self.skip_sections,
+                    self.only_sections,
+                    self._project_skip_targets,
+                    self._project_only_targets,
+                    self.scope,
+                )
+                if branch_name:
+                    self.logger.info(describe_active_profile(branch_profile, branch_name))
+        except Exception as _e:
+            self.logger.warn(f"Branch profile resolution failed: {_e}")
+
     def sync_all(self) -> dict:
         """Sync all configuration to all registered adapters.
 
@@ -522,6 +557,34 @@ class SyncOrchestrator:
                     backup_manager.cleanup_old_backups(target, keep_count=10)
             except Exception as e:
                 self.logger.warn(f"Backup cleanup failed: {e}")
+
+        # --- POST-SYNC: INTEGRITY SIGNING (skip in dry-run) ---
+        if not self.dry_run:
+            try:
+                from src.sync_integrity import SyncIntegrityStore
+                from src.adapters.base import BaseAdapter
+                integrity_store = SyncIntegrityStore(project_dir=self.project_dir)
+                files_to_sign: list[Path] = []
+                for target, target_results in results.items():
+                    if target.startswith("_") or not isinstance(target_results, dict):
+                        continue
+                    # Collect written output files for each adapter
+                    for adapter in [a for a in targets if a == target]:
+                        pass  # adapters variable holds adapter objects, not names
+                # Sign well-known output files for each registered target
+                for t_name in list(results.keys()):
+                    if t_name.startswith("_"):
+                        continue
+                    from src.dead_config_detector import _TARGET_OUTPUT_FILES
+                    for rel in _TARGET_OUTPUT_FILES.get(t_name, []):
+                        candidate = self.project_dir / rel
+                        if candidate.is_file():
+                            files_to_sign.append(candidate)
+                signed_count = integrity_store.sign_target_files(files_to_sign)
+                if signed_count:
+                    self.logger.info(f"Integrity: signed {signed_count} synced file(s)")
+            except Exception as _ie:
+                self.logger.warn(f"Integrity signing failed: {_ie}")
 
         # Add conflicts to results if any were found
         if any(conflicts.values()):
