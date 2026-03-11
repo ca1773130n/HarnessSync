@@ -402,3 +402,76 @@ None
 None
 
 ---
+## Iteration 7
+_2026-03-11T01:33:31.891Z_
+
+### Items Attempted
+
+- **Sync Preview & Diff Mode** — pass
+- **Selective Target Sync** — pass
+- **Conflict Resolution Wizard** — pass
+- **Cline / Roo-Code Adapter** — pass
+- **Continue.dev Adapter** — pass
+- **Zed Editor AI Adapter** — pass
+- **Team Config Server / Shared Profiles** — pass
+- **Project-Type Sync Templates** — pass
+- **Dead Config Detector** — pass
+- **MCP Server Reachability Dashboard** — pass
+- **GitHub Actions Sync CI Integration** — pass
+- **Sync Audit Log Export** — pass
+- **Config Complexity Score** — pass
+- **Community Adapter SDK** — pass
+- **Sync on Git Commit Hook** — pass
+- **Sync Parity Score & Badge** — pass
+- **Rule Inheritance & Override Model** — pass
+- **Natural Language Rule Quality Translator** — pass
+- **Token Cost Estimator for Synced Rules** — pass
+- **Multi-Project Bulk Sync** — pass
+- **Skill Gap Analysis Across Harnesses** — pass
+- **Scheduled Auto-Sync (Cron Mode)** — pass
+- **Interactive Onboarding Wizard** — pass
+- **Permission Model Diff Report** — pass
+- **MCP Server Auto-Discovery** — pass
+- **Watch Mode with Desktop Notifications** — pass
+- **Config Time Travel / Point-in-Time Restore** — pass
+- **Sync Dry-Run HTML Report** — pass
+- **Neovim AI Adapter (avante.nvim / codecompanion)** — pass
+- **Dotfile Manager Integration** — pass
+- **Rule Deduplication & Consolidation** — pass
+- **Sync Impact Preview (Before/After Behavior)** — pass
+
+### Decisions Made
+
+- Added 4 new adapters (Cline/Roo-Code, Continue.dev, Zed, Neovim) following the existing AdapterBase pattern exactly — each writes to the tool's native config locations and is registered via @AdapterRegistry.register()
+- Cline adapter writes both .clinerules AND .roo/rules/harnesssync.md to support both Cline and Roo-Code simultaneously from a single adapter — reduces the adapter count while maximizing coverage
+- Continue.dev adapter preserves existing .continue/config.json non-MCP settings when writing mcpServers — uses load-then-merge pattern to avoid clobbering user model configuration
+- Zed adapter maps MCP servers to context_servers format (Zed's native schema) rather than the standard mcpServers format — this is the only adapter that requires format translation for MCP
+- Neovim adapter writes to both .avante/ and .codecompanion/ directories to cover both popular Neovim AI plugins without requiring the user to choose
+- Added --only-targets/--skip-targets CLI flags to /sync command with the same pattern as --only/--skip sections — these are highest-priority filters applied after per-project .harnesssync and profile filters
+- cli_only_targets and cli_skip_targets added to SyncOrchestrator.__init__ rather than computed at call site — keeps filtering logic centralized and makes multi-account sync also respect CLI target filters
+- Built-in ProfileManager templates (python-api, react-spa, go-cli, rust-crate, etc.) stored as a class-level dict rather than external JSON — no file I/O required, always available even on fresh installs
+- URL-based team profile fetching in ProfileManager uses urllib.request (stdlib) to avoid adding a requests dependency — timeout is configurable and network errors raise ValueError with context
+- Desktop notifications in watch mode use osascript (macOS) and notify-send (Linux) via subprocess — silently no-ops on unsupported platforms or if tools are missing, never blocks sync
+- HTML report generator is self-contained (embedded CSS/JS) — no external dependencies, shareable as a single file
+- DeadConfigDetector only flags files that contain the HarnessSync marker comment to avoid false positives on user-created files that happen to be in the same locations
+
+### Patterns Discovered
+
+- All adapters follow identical structure: __init__ sets paths, sync_rules/skills/agents/commands/mcp/settings methods, each returns SyncResult — copy-paste from cursor.py or aider.py works well as starting point
+- The _replace_managed_section() pattern (HarnessSync marker injection) is duplicated across multiple adapters rather than inherited from AdapterBase — this is a candidate for extraction to a mixin or base method
+- AdapterRegistry.list_targets() returns alphabetical sort — TARGETS list in sync_matrix.py was manually ordered and now has to be kept in sync with registered adapters (potential drift)
+- token_estimator.py has two separate dicts (CONTEXT_WINDOWS and INPUT_COST_PER_MTK) that need updating when adapters are added — easy to forget one
+- config_health.py _TARGET_NATIVE_FRACTIONS and sync_parity.py _SUPPORT_MATRIX are additional places that need new adapter entries — at least 5 files need updating per new adapter
+- The orchestrator's _get_target_rules_path() is a manual dict — not derived from adapter metadata — and must be updated separately when adding adapters
+
+### Takeaways
+
+- New adapter onboarding cost is high: adding one adapter requires updating 6+ files (adapter module, __init__.py, orchestrator.py, token_estimator.py, sync_matrix.py, sync_parity.py, config_health.py) — a registry-driven approach where adapters declare their own metadata would reduce this significantly
+- The Cline + Roo-Code dual-write approach (one adapter, two output locations) is a pattern worth using for other tools that are forks or close variants of each other
+- Continue.dev's config.json merge pattern (load existing, update mcpServers key, write back) is safer than overwriting the whole file — other adapters that write JSON settings files should adopt this pattern
+- ProfileManager templates solve the blank-page problem effectively — the built-in templates are immediately useful without any user configuration
+- Watch mode desktop notifications are a low-effort, high-value ergonomics improvement — the pattern (platform detection, osascript/notify-send, silent failure) can be reused for other notification points
+- HTML report generation (item 28) adds high value for teams — the single-file approach with embedded CSS avoids deployment complexity
+- The --only-targets flag was a natural extension of the existing --only sections pattern and required minimal code — high leverage for power users who use different harnesses for different workflows
+
+---

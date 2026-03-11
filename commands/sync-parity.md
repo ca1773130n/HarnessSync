@@ -4,6 +4,7 @@ description: Feature parity report — what each harness supports from your Clau
 
 Show a structured report of every Claude Code feature in use with per-target
 compatibility scores and specific gaps.
+Also available as: /sync-health parity
 
 Usage: /sync-parity [--scope user|project|all]
 

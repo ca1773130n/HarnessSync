@@ -123,11 +123,46 @@ def _format_target_health(
     return lines
 
 
+_SUBCOMMANDS = {
+    "status": "sync_status",
+    "parity": "sync_parity",
+}
+
+_USAGE = """\
+Usage: /sync-health [SUBCOMMAND] [OPTIONS]
+
+Subcommands:
+  (none)    Harness installation + config health dashboard (default)
+  status    Sync status and drift detection (alias for /sync-status)
+  parity    Feature parity report across targets (alias for /sync-parity)
+
+Options (default subcommand):
+  --score       Show config health score and recommendations
+  --readiness   Show harness readiness checklist
+  --skills      Show skill compatibility report
+  --all         Show everything (default)
+"""
+
+
 def main() -> None:
     """Entry point for /sync-health command."""
     import shlex as _shlex
     args_str = " ".join(sys.argv[1:])
     tokens = _shlex.split(args_str) if args_str.strip() else []
+
+    # Subcommand routing: /sync-health status [...] or /sync-health parity [...]
+    if tokens and tokens[0] in _SUBCOMMANDS:
+        subcommand = tokens.pop(0)
+        sys.argv = [f"sync-{subcommand}"] + tokens
+        module_name = _SUBCOMMANDS[subcommand]
+        import importlib
+        mod = importlib.import_module(f"src.commands.{module_name}")
+        mod.main()
+        return
+
+    if "--help" in tokens or "-h" in tokens:
+        print(_USAGE)
+        return
 
     show_skills = "--skills" in tokens
     show_readiness = "--readiness" in tokens

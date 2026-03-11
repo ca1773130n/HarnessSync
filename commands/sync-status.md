@@ -3,6 +3,7 @@ description: Show HarnessSync status and drift detection for all targets
 ---
 
 Show sync status, last sync time per target, and drift detection.
+Also available as: /sync-health status
 
 Usage: /sync-status [--account NAME] [--list-accounts]
 
