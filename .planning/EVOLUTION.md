@@ -502,3 +502,102 @@ _2026-03-11T01:41:26.541Z_
 - The command file format (.md with frontmatter + shell dispatch) is expressive but has no native subcommand concept — subcommand routing must live in the Python layer, not the .md file.
 
 ---
+## Iteration 9
+_2026-03-11T02:04:37.187Z_
+
+### Items Attempted
+
+- **Sync Preview & Diff Viewer** — pass
+- **Reverse Sync (Pull from Target Harnesses)** — pass
+- **Named Sync Profiles (Work / Personal / OSS)** — pass
+- **Auto-Detect Installed Harnesses** — pass
+- **Intelligent Config Conflict Resolution** — pass
+- **Sync History Timeline & Rollback** — pass
+- **Feature Compatibility Score per Harness** — pass
+- **Team Config Sync via Shared Repository** — pass
+- **MCP Server Compatibility Matrix** — pass
+- **CI/CD Sync — GitHub Action & Pre-commit Hook** — pass
+- **Per-Harness Override Layer** — pass
+- **Natural Language Config Editing (Claude-Powered)** — pass
+- **Sync Analytics & Drift Dashboard** — pass
+- **Shareable Config Snapshot (Gist / URL)** — pass
+- **Rules Deduplication & Conflict Analysis** — pass
+- **Plugin & Extension Sync Across Harnesses** — pass
+- **Config Templates Marketplace** — pass
+- **Auto-Sync When New Harness Is Installed** — pass
+- **Selective Sync — Choose What Goes Where** — pass
+- **Proactive Config Health Alerts** — pass
+- **Harness Update Impact Tracker** — pass
+- **Harness Migration Wizard** — pass
+- **Sync Dry-Run with Change Cost Estimate** — pass
+- **Config Inheritance & Composition** — pass
+- **Cross-Harness Config Search** — pass
+- **Sync Event Webhooks & Notifications** — pass
+- **Cloud Config Backup & Multi-Machine Sync** — pass
+- **Per-Harness Usage Attribution** — pass
+- **Context Switch Alert — Show Config Differences on Harness Switch** — pass
+- **Harness-Native Config Preview** — pass
+- **Capability Gap Report — What You're Losing Per Harness** — pass
+- **Sync Preview / Dry Run Mode** — pass
+- **Team Config Profiles via Git Remote** — pass
+- **Conflict Resolver for Pre-existing Target Configs** — pass
+- **Selective Category Sync Flags** — pass
+- **Drift Notifications with Auto-Alert** — pass
+- **Interactive Harness Capability Matrix** — pass
+- **Named Config Snapshots** — pass
+- **MCP Reachability Auto-Fix Suggestions** — pass
+- **New Harness Onboarding Wizard** — pass
+- **Secret / Env Var Masking in Synced Configs** — pass
+- **Sync Analytics Dashboard** — pass
+- **Per-Harness Rule Override Annotations** — pass
+- **Community Config Template Gallery** — pass
+- **Config Dependency Graph Visualizer** — pass
+- **GitHub Actions / CI Sync Integration** — pass
+- **Watch Mode Daemon with System Tray Status** — pass
+- **Config Lint with Auto-Fix** — pass
+- **Parity Score with Trend Tracking** — pass
+- **MCP Server Auto-Discovery Across Harnesses** — pass
+- **Skill Compatibility Pre-flight Checker** — pass
+- **Multi-Project Sync Orchestration** — pass
+- **Harness Migration Assistant** — pass
+- **Auto-Generated Sync Changelog** — pass
+- **Rule Tagging for Selective Target Routing** — pass
+- **Expose Sync as MCP Tool for Agent-Driven Sync** — pass
+- **Config Quality Scoring with Recommendations** — pass
+- **Rollback Preview Before Restoring** — pass
+- **Encrypted Config Values at Rest** — pass
+- **Auto-Detect Newly Installed Harnesses** — pass
+- **Config Split / Merge Refactor Tool** — pass
+- **Harness Version Compatibility Alerts** — pass
+- **Sync Scope Estimator (Files + Risk Score)** — pass
+
+### Decisions Made
+
+- Implemented MCP Server Compatibility Matrix as a standalone src/mcp_compat_matrix.py module with protocol-level analysis (stdio/http/ws/sse) rather than hard-coding per-server answers — this scales to new MCP servers automatically since the protocol determines transferability
+- Per-Harness Override Layer uses ~/.harnesssync/overrides/<harness>.json files rather than embedding overrides in .harnesssync — keeps override lifecycle independent of per-project config, survives project deletion
+- Natural Language Config Editing (sync_edit.py) routes to Claude Haiku for cost efficiency since config edits are structured/low-ambiguity tasks — uses a strict JSON output schema to avoid unparseable responses
+- Shareable Config Snapshot strips sensitive settings keys (apiKey, token, secret) before export but preserves all structural config — privacy-safe sharing without manual scrubbing
+- Plugin Extension Mapper uses a curated static database rather than dynamic discovery — accuracy over completeness, since incorrect mappings are worse than gaps. Unknown plugins report as NOT_AVAILABLE across all targets
+- Config Templates use append mode by default (not replace) to avoid destroying existing user config — users must explicitly opt into replace mode
+- DiffFormatter cost estimate was added as new methods (estimate_cost, format_with_cost, add_symlink_op, add_native_preview) without changing existing API signatures — fully backward compatible
+- Config Inheritance uses suppress directives (!override pattern) rather than a separate exclusion config file — keeps suppression context-local to where the override is declared
+- Usage Attribution reads shell history files directly rather than requiring a daemon — zero-cost for users without history files, falls back gracefully
+- Native Config Preview generates content via pure Python string rendering rather than running adapter code in a temp directory — faster and avoids side effects, at the cost of slight divergence if adapter logic changes
+
+### Patterns Discovered
+
+- Atomic write via NamedTemporaryFile + Path.replace() is used consistently across backup_manager, profile_manager, and now harness_override — good pattern that prevents partial writes on crash
+- The MANAGED_START/MANAGED_END marker pattern is duplicated across codex.py, gemini.py, native_preview.py and sync_import.py — should be extracted to a shared constants module in a future refactor
+- Per-module __import__ testing without pytest catches syntax errors early and is faster than full pytest for new modules
+- The command modules (sync_edit, sync_snapshot, sync_template) all follow the same pattern: argparse parser builder + subcommand handlers + main() with CLAUDE_ARGS env fallback — consistent CLI pattern
+- src/harness_adoption.py has grown to ~530 lines by accumulating UsageAttributionAnalyzer — this file is reaching the upper limit of single-responsibility and could be split into harness_adoption.py + usage_attribution.py
+
+### Takeaways
+
+- The diff_formatter.py edit introduced a stray `@dataclass_like = None` line during editing that caused a syntax error — careful review of multi-block edits is needed when making non-contiguous changes to a file
+- The 14 existing integration tests are narrowly scoped to adapter config format correctness — new functional modules have no test coverage yet. High-value test targets: McpCompatMatrix.analyze(), HarnessOverride.apply_rules_override(), ConfigInheritance.compose()
+- The plugin extension database in plugin_extension_mapper.py will become outdated as harnesses evolve — consider adding a version field and a community-maintained update mechanism similar to template_registry.py
+- NativePreview renders TOML/JSON without the full adapter stack, so it can diverge from actual output if adapter logic changes. A future improvement would be to run adapters against a tmp Path and read the output
+- Config Inheritance's suppress directive (!override) is a novel pattern not seen in other config systems — may confuse users; consider adding a /sync-inherit explain command with examples
+
+---

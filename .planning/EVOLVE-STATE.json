@@ -1,33 +1,9 @@
 {
-  "iteration": 8,
-  "timestamp": "2026-03-11T01:41:26.541Z",
+  "iteration": 9,
+  "timestamp": "2026-03-11T02:04:37.188Z",
   "milestone": "",
   "pick_pct": 50,
   "selected_groups": [
-    {
-      "id": "improve-features/api-consolidation",
-      "theme": "api-consolidation",
-      "dimension": "improve-features",
-      "title": "Api Consolidation (improve-features)",
-      "items": [
-        {
-          "id": "improve-features/consolidate-sync-commands",
-          "dimension": "improve-features",
-          "slug": "consolidate-sync-commands",
-          "title": "Consider consolidating sync-* commands (5 commands)",
-          "description": "There are 5 commands with prefix \"sync-\": sync-health.md, sync-parity.md, sync-restore.md, sync-setup.md, sync-status.md. Consider whether some could be subcommands of a single parent command for a cleaner UX.",
-          "effort": "large",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        }
-      ],
-      "priority": 13,
-      "effort": "small",
-      "status": "selected"
-    }
-  ],
-  "remaining_groups": [
     {
       "id": "product-ideation/miscellaneous",
       "theme": "miscellaneous",
@@ -374,13 +350,366 @@
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-preview-dry-run",
+          "dimension": "product-ideation",
+          "slug": "sync-preview-dry-run",
+          "title": "Sync Preview / Dry Run Mode",
+          "description": "Before executing a sync, show a colored diff of every file that would be created, modified, or deleted across all target harnesses. Solves the 'I don't know what's about to change' anxiety that makes users reluctant to sync after big config refactors.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/team-shared-config-profiles",
+          "dimension": "product-ideation",
+          "slug": "team-shared-config-profiles",
+          "title": "Team Config Profiles via Git Remote",
+          "description": "Pull a shared CLAUDE.md / rules set from a remote Git URL and sync it to all local harnesses. Teams can maintain a canonical config repo and every developer runs /sync-pull to stay aligned. Solves the 'we have 10 devs with 10 different AGENTS.md files' drift problem.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/config-conflict-resolver",
+          "dimension": "product-ideation",
+          "slug": "config-conflict-resolver",
+          "title": "Conflict Resolver for Pre-existing Target Configs",
+          "description": "When a target harness already has its own AGENTS.md or rules, detect the conflict and present a three-way merge UI (keep target / keep source / merge interactively) instead of silently overwriting. Prevents HarnessSync from destroying handcrafted configs users already had.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/selective-category-sync",
+          "dimension": "product-ideation",
+          "slug": "selective-category-sync",
+          "title": "Selective Category Sync Flags",
+          "description": "Let users sync only specific categories: /sync --only rules,mcp or /sync --skip skills. Today the all-or-nothing approach blocks adoption when users want HarnessSync for MCP servers but not for their hand-tuned per-harness rules. Granular control unlocks partial adopters.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/drift-notifications",
+          "dimension": "product-ideation",
+          "slug": "drift-notifications",
+          "title": "Drift Notifications with Auto-Alert",
+          "description": "After any file-write in .claude/, automatically detect whether targets are now out of date and surface a terminal notification or status bar badge. Solves the 'I forgot to sync and Gemini CLI has been stale for three days' problem that defeats the whole purpose of the tool.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/capability-matrix-explorer",
+          "dimension": "product-ideation",
+          "slug": "capability-matrix-explorer",
+          "title": "Interactive Harness Capability Matrix",
+          "description": "A /sync-capabilities command that renders an ASCII or HTML table showing which features (MCP servers, env vars, tool permissions, skills, hooks) each target harness actually supports. Helps users understand what gets translated vs silently dropped — currently a black box.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/config-snapshot-versioning",
+          "dimension": "product-ideation",
+          "slug": "config-snapshot-versioning",
+          "title": "Named Config Snapshots",
+          "description": "Let users tag the current state: /sync-snapshot save 'before-project-x-refactor'. Snapshots are stored locally and can be diffed or restored by name. The existing /sync-rollback only goes one step back — named snapshots let users experiment boldly and always have a named checkpoint.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/mcp-reachability-auto-fix",
+          "dimension": "product-ideation",
+          "slug": "mcp-reachability-auto-fix",
+          "title": "MCP Reachability Auto-Fix Suggestions",
+          "description": "When /sync-health reports an MCP server unreachable, suggest concrete fixes: check if the binary is in PATH, validate the port, offer to remove the broken entry from targets. Today it just reports red — users don't know what to do next.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/harness-onboarding-wizard",
+          "dimension": "product-ideation",
+          "slug": "harness-onboarding-wizard",
+          "title": "New Harness Onboarding Wizard",
+          "description": "A guided /sync-setup flow that detects which harnesses are installed, shows what would be synced, asks about conflicts, and runs the first sync — all in one interactive session. Reduces the time-to-first-sync from 'read the README' to under 2 minutes.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/env-var-secret-masking",
+          "dimension": "product-ideation",
+          "slug": "env-var-secret-masking",
+          "title": "Secret / Env Var Masking in Synced Configs",
+          "description": "When syncing env vars or MCP server configs that contain API keys, automatically replace secret values with ${ENV_VAR_NAME} placeholders in target files and add the real values to .env files (gitignored). Prevents accidental credential leaks when users commit synced configs.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-analytics-history",
+          "dimension": "product-ideation",
+          "slug": "sync-analytics-history",
+          "title": "Sync Analytics Dashboard",
+          "description": "Track what changed in each sync: which rules were updated, which skills were added, which harnesses drifted. Surface trends like 'MCP servers change 3x per week' or 'Codex rules haven't drifted in 30 days'. Helps users understand their own config evolution.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/per-harness-rule-overrides",
+          "dimension": "product-ideation",
+          "slug": "per-harness-rule-overrides",
+          "title": "Per-Harness Rule Override Annotations",
+          "description": "Let users annotate sections of CLAUDE.md with <!-- harness:codex --> markers to include/exclude content for specific targets. Solves the case where one rule makes sense for Claude Code but is confusing or invalid in Gemini CLI format — without needing separate files.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/community-config-templates",
+          "dimension": "product-ideation",
+          "slug": "community-config-templates",
+          "title": "Community Config Template Gallery",
+          "description": "A curated set of starter CLAUDE.md + rules templates for common workflows (Python backend, React frontend, data science, DevOps) that users can install with /sync-template install python-backend. Solves the blank-page problem for new Claude Code users who don't know what to put in CLAUDE.md.",
+          "effort": "large",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/config-dependency-graph",
+          "dimension": "product-ideation",
+          "slug": "config-dependency-graph",
+          "title": "Config Dependency Graph Visualizer",
+          "description": "Show which skills reference which agents, which hooks trigger which commands, and how MCP servers are used across rules. Surfaced via /sync-map --full as a Mermaid or ASCII graph. Helps users understand blast radius before deleting a skill that something else depends on.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/github-actions-sync-ci",
+          "dimension": "product-ideation",
+          "slug": "github-actions-sync-ci",
+          "title": "GitHub Actions / CI Sync Integration",
+          "description": "A generated GitHub Actions workflow that runs HarnessSync on every push to main and commits updated target configs back to the repo. Teams can enforce that all harness configs are always in sync as part of their CI pipeline.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-watch-mode-daemon",
+          "dimension": "product-ideation",
+          "slug": "sync-watch-mode-daemon",
+          "title": "Watch Mode Daemon with System Tray Status",
+          "description": "A background daemon that watches .claude/ for changes and syncs immediately, with a minimal status indicator (menu bar icon on macOS or terminal notifier). Removes the need for users to remember to run /sync — zero-friction always-on sync.",
+          "effort": "large",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/config-lint-autofix",
+          "dimension": "product-ideation",
+          "slug": "config-lint-autofix",
+          "title": "Config Lint with Auto-Fix",
+          "description": "Extend /sync-lint beyond reporting to actually fix common issues: trailing whitespace in CLAUDE.md, malformed YAML in opencode.json, missing required fields in plugin manifests. /sync-lint --fix applies safe corrections automatically.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/harness-parity-score",
+          "dimension": "product-ideation",
+          "slug": "harness-parity-score",
+          "title": "Parity Score with Trend Tracking",
+          "description": "Assign each target harness a numeric parity score (0-100%) based on how much of the source config is faithfully represented. Track this score over time and surface regressions. Users can see 'Codex went from 94% to 71% after yesterday's sync' and investigate why.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/mcp-server-auto-discovery",
+          "dimension": "product-ideation",
+          "slug": "mcp-server-auto-discovery",
+          "title": "MCP Server Auto-Discovery Across Harnesses",
+          "description": "Scan all harness configs for MCP server definitions (not just Claude Code) and consolidate them into a unified server registry. If Cursor has an MCP server that Claude Code doesn't know about, prompt the user to add it. Bridges the gap for users who configure MCP servers in multiple places.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/skill-compatibility-checker",
+          "dimension": "product-ideation",
+          "slug": "skill-compatibility-checker",
+          "title": "Skill Compatibility Pre-flight Checker",
+          "description": "Before syncing skills to a target harness, validate that the skill's tool calls, frontmatter fields, and referenced commands are supported by that harness. Show a compatibility report instead of syncing a skill that will silently fail in Gemini CLI.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/multi-project-sync-orchestration",
+          "dimension": "product-ideation",
+          "slug": "multi-project-sync-orchestration",
+          "title": "Multi-Project Sync Orchestration",
+          "description": "A single command to sync configs across all local Claude Code projects at once, with per-project override support. Power users with 10+ projects spend time running /sync in each one manually — this batches it with a summary of what changed where.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/harness-migration-assistant",
+          "dimension": "product-ideation",
+          "slug": "harness-migration-assistant",
+          "title": "Harness Migration Assistant",
+          "description": "An interactive wizard to migrate a user's primary harness FROM another tool (e.g., Cursor) TO Claude Code, importing existing rules and MCP configs and reformatting them as proper CLAUDE.md sections. Solves the chicken-and-egg problem for users who want to adopt HarnessSync but don't start in Claude Code.",
+          "effort": "large",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-changelog-auto-generate",
+          "dimension": "product-ideation",
+          "slug": "sync-changelog-auto-generate",
+          "title": "Auto-Generated Sync Changelog",
+          "description": "After each sync, append a human-readable entry to SYNC_CHANGELOG.md describing what changed (e.g., 'Added 3 MCP servers to Codex, updated Gemini rules from 12 → 15 lines'). Gives teams an audit trail of config evolution without manual documentation.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/rule-tagging-selective-targets",
+          "dimension": "product-ideation",
+          "slug": "rule-tagging-selective-targets",
+          "title": "Rule Tagging for Selective Target Routing",
+          "description": "Let users tag rules with @target:codex or @exclude:gemini inline in CLAUDE.md. HarnessSync respects these tags during sync, routing content to appropriate targets. Solves the case where a rule mentions Claude-specific behavior and should never appear in competitor harnesses.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-as-mcp-tool",
+          "dimension": "product-ideation",
+          "slug": "sync-as-mcp-tool",
+          "title": "Expose Sync as MCP Tool for Agent-Driven Sync",
+          "description": "Make the sync engine available as an MCP tool so other agents (not just Claude Code) can programmatically trigger syncs, check parity, or query the harness registry. Unlocks orchestration scenarios where an automation agent keeps configs aligned without human intervention.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/harness-config-scoring-recommendations",
+          "dimension": "product-ideation",
+          "slug": "harness-config-scoring-recommendations",
+          "title": "Config Quality Scoring with Recommendations",
+          "description": "Analyze CLAUDE.md and rules for quality signals: length, specificity, redundancy, missing sections (no permissions block, no style section). Surface a score and actionable recommendations. Users often don't know their configs are thin or contradictory until they see an AI-generated quality report.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/rollback-with-preview",
+          "dimension": "product-ideation",
+          "slug": "rollback-with-preview",
+          "title": "Rollback Preview Before Restoring",
+          "description": "Before executing /sync-rollback, show a diff of what will be restored vs the current state. Today users have to trust that the previous state was better — a preview lets them confirm before committing, reducing fear of rolling back to something worse.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/config-encryption-at-rest",
+          "dimension": "product-ideation",
+          "slug": "config-encryption-at-rest",
+          "title": "Encrypted Config Values at Rest",
+          "description": "Allow users to mark specific config values as sensitive, encrypting them in synced target files using a local key. Synced configs can safely be committed to shared repos without exposing tokens, connection strings, or internal URLs.",
+          "effort": "large",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/harness-install-detector",
+          "dimension": "product-ideation",
+          "slug": "harness-install-detector",
+          "title": "Auto-Detect Newly Installed Harnesses",
+          "description": "Background check (or on startup) that detects when a new AI harness is installed (Cursor, Aider, Windsurf) and proactively offers to sync to it. Removes the need for users to re-run /sync-setup every time they try a new tool.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/config-split-merge-refactor",
+          "dimension": "product-ideation",
+          "slug": "config-split-merge-refactor",
+          "title": "Config Split / Merge Refactor Tool",
+          "description": "A /sync-refactor command that helps users restructure large CLAUDE.md files by extracting sections into separate rule files, or consolidating scattered rules into CLAUDE.md. Reduces friction for users whose config has grown organically and become hard to maintain.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/harness-feature-deprecation-alerts",
+          "dimension": "product-ideation",
+          "slug": "harness-feature-deprecation-alerts",
+          "title": "Harness Version Compatibility Alerts",
+          "description": "Track known breaking changes in Codex/Gemini/OpenCode CLI versions and alert users when their synced config uses a field or format that the installed version no longer supports. Prevents silent failures after harness updates.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-cost-estimator",
+          "dimension": "product-ideation",
+          "slug": "sync-cost-estimator",
+          "title": "Sync Scope Estimator (Files + Risk Score)",
+          "description": "Before syncing, show: N files to write, N symlinks to create, N files to delete, and a risk score based on how many pre-existing files would be overwritten. Helps users calibrate how risky the pending sync operation is before pulling the trigger.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
         }
       ],
-      "priority": 12.935483870967742,
+      "priority": 13.095238095238095,
       "effort": "large",
-      "status": "pending"
+      "status": "selected"
     }
   ],
+  "remaining_groups": [],
   "completed_groups": [
     {
       "id": "product-ideation/miscellaneous",
@@ -802,8 +1131,8 @@
     }
   ],
   "failed_groups": [],
-  "all_items_count": 34,
-  "groups_count": 2,
+  "all_items_count": 35,
+  "groups_count": 1,
   "history": [
     {
       "iteration": 1,
@@ -857,6 +1186,13 @@
     {
       "iteration": 8,
       "timestamp": "2026-03-11T01:41:26.541Z",
+      "selected_count": 1,
+      "completed_count": 2,
+      "failed_count": 0
+    },
+    {
+      "iteration": 9,
+      "timestamp": "2026-03-11T02:04:37.188Z",
       "selected_count": 1,
       "completed_count": 2,
       "failed_count": 0

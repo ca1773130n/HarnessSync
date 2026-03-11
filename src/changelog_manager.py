@@ -1,12 +1,19 @@
 from __future__ import annotations
 
-"""Sync changelog feed.
+"""Sync changelog feed with analytics.
 
 Maintains a human-readable ``.harness-sync/changelog.md`` file that logs
 every sync event with timestamps, what changed, and which targets were
 updated. Provides an audit trail for teams.
+
+Analytics (item 17):
+``analytics()`` parses the changelog to surface patterns: most-changed
+files, sync frequency per harness, error rates, and harness activity
+trends — helping users audit and optimize their multi-harness setup.
 """
 
+import re
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -75,6 +82,144 @@ class ChangelogManager:
         if self._root_path is None or not self._root_path.exists():
             return ""
         return self._root_path.read_text(encoding="utf-8")
+
+    def analytics(self) -> dict:
+        """Parse the changelog and return sync analytics insights.
+
+        Scans the changelog for patterns: sync frequency per harness,
+        success/fail rates, most-changed files, and harness activity trends.
+
+        Returns:
+            Dict with keys:
+                total_syncs: int
+                targets: {target -> {syncs, failures, success_rate}}
+                most_synced_target: str | None
+                least_synced_active: str | None  (active = at least 1 sync)
+                file_change_counts: {filename -> count}  (top 10)
+                insights: list[str]  human-readable observations
+        """
+        content = self.read()
+        if not content:
+            return {
+                "total_syncs": 0,
+                "targets": {},
+                "most_synced_target": None,
+                "least_synced_active": None,
+                "file_change_counts": {},
+                "insights": ["No sync history found. Run /sync to start tracking."],
+            }
+
+        # Parse sync entries
+        # Entry format: ## <timestamp>  scope=<scope>  [account=<acct>]
+        # Target lines: - **<target>** ✓/✗  synced=N skipped=N failed=N
+        target_re = re.compile(
+            r"^- \*\*(\w+)\*\*\s+[✓✗]\s+synced=(\d+)\s+skipped=(\d+)\s+failed=(\d+)",
+            re.MULTILINE,
+        )
+        file_re = re.compile(r"^\s+- `([^`]+)`", re.MULTILINE)
+        entry_re = re.compile(r"^## \d{4}-\d{2}-\d{2}", re.MULTILINE)
+
+        total_syncs = len(entry_re.findall(content))
+        target_stats: dict[str, dict] = defaultdict(
+            lambda: {"syncs": 0, "failures": 0, "total_synced": 0}
+        )
+        file_counts: dict[str, int] = defaultdict(int)
+
+        for m in target_re.finditer(content):
+            target = m.group(1)
+            synced = int(m.group(2))
+            failed = int(m.group(4))
+            target_stats[target]["syncs"] += 1
+            target_stats[target]["total_synced"] += synced
+            if failed > 0:
+                target_stats[target]["failures"] += 1
+
+        for m in file_re.finditer(content):
+            fname = m.group(1).strip()
+            if fname:
+                file_counts[fname] += 1
+
+        # Compute success rates
+        for target, stats in target_stats.items():
+            n = stats["syncs"]
+            stats["success_rate"] = round(
+                (n - stats["failures"]) / n * 100, 1
+            ) if n > 0 else 100.0
+
+        # Top 10 most changed files
+        top_files = dict(
+            sorted(file_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+        )
+
+        # Identify most/least active
+        active = {t: s for t, s in target_stats.items() if s["syncs"] > 0}
+        most_synced = max(active, key=lambda t: active[t]["syncs"], default=None)
+        least_synced = min(active, key=lambda t: active[t]["syncs"], default=None)
+
+        # Build insights
+        insights: list[str] = []
+        if total_syncs == 0:
+            insights.append("No sync history. Run /sync to begin tracking.")
+        else:
+            insights.append(f"Total syncs recorded: {total_syncs}")
+            if most_synced and active[most_synced]["syncs"] > 3:
+                share = active[most_synced]["syncs"] / total_syncs * 100
+                insights.append(
+                    f"Most synced target: {most_synced} "
+                    f"({active[most_synced]['syncs']} syncs, {share:.0f}% of all syncs)"
+                )
+            # Flag high error rate targets
+            for t, s in active.items():
+                if s["failures"] > 0 and s["success_rate"] < 80:
+                    insights.append(
+                        f"⚠ {t} has {s['failures']} failure(s) "
+                        f"({s['success_rate']:.0f}% success rate) — investigate sync errors"
+                    )
+            # Flag rarely synced targets (low engagement)
+            if least_synced and least_synced != most_synced:
+                least_syncs = active[least_synced]["syncs"]
+                most_syncs = active[most_synced]["syncs"] if most_synced else 1
+                if least_syncs * 5 < most_syncs:
+                    insights.append(
+                        f"Low activity: {least_synced} synced only {least_syncs}x "
+                        f"vs {most_synced}'s {most_syncs}x — is {least_synced} still needed?"
+                    )
+
+        return {
+            "total_syncs": total_syncs,
+            "targets": dict(target_stats),
+            "most_synced_target": most_synced,
+            "least_synced_active": least_synced,
+            "file_change_counts": top_files,
+            "insights": insights,
+        }
+
+    def format_analytics(self) -> str:
+        """Return a formatted analytics summary string for display."""
+        data = self.analytics()
+        lines = ["Sync Analytics & Insights", "=" * 45, ""]
+        for insight in data["insights"]:
+            lines.append(f"  {insight}")
+
+        if data["targets"]:
+            lines.append("\nPer-target sync stats:")
+            for target, stats in sorted(
+                data["targets"].items(),
+                key=lambda kv: kv[1]["syncs"],
+                reverse=True,
+            ):
+                lines.append(
+                    f"  {target:<12} {stats['syncs']:>3} syncs  "
+                    f"{stats['success_rate']:.0f}% success  "
+                    f"{stats['total_synced']} items synced"
+                )
+
+        if data["file_change_counts"]:
+            lines.append("\nMost frequently synced files (top 10):")
+            for fname, count in data["file_change_counts"].items():
+                lines.append(f"  {count:>3}x  {fname}")
+
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Private helpers

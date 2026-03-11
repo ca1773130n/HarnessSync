@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-"""Pre-sync configuration linter.
+"""Pre-sync configuration linter with custom rule support.
 
 Validates CLAUDE.md and settings.json before sync and returns a list of
 human-readable error/warning strings. Invalid configs are reported but
 never block sync — the caller decides how to surface them.
 
-Checks:
+Built-in checks:
 - CLAUDE.md: non-empty, no obviously broken markdown code fences
 - settings.json: valid JSON, no unknown top-level keys that indicate corruption
 - Skill/agent references that point to missing directories
@@ -17,12 +17,52 @@ Auto-fix support (suggest_fixes / apply_fixes):
 - Close unclosed sync tags
 - Rewrite non-portable tool references into portable equivalents
 - Suggest rewrites for Markdown patterns that translate poorly
+
+Custom lint rules (item 18):
+Users and teams can define custom lint rules in
+``.harness-sync/lint-rules.json``. Each rule specifies a pattern to
+check and a message to show when the check fails. Rules are loaded by
+``ConfigLinter.lint()`` and run alongside built-in checks.
+
+Custom rule schema:
+    [
+        {
+            "id": "require-testing-section",
+            "description": "CLAUDE.md must include a ## Testing section",
+            "type": "require_heading",
+            "value": "Testing",
+            "severity": "error"
+        },
+        {
+            "id": "require-rule-rationale",
+            "description": "Each rule bullet must have a rationale (ends with '— <reason>')",
+            "type": "pattern_must_not_match",
+            "pattern": "^- (?!.*—).*\\.",
+            "severity": "warning"
+        },
+        {
+            "id": "mcp-must-specify-tools",
+            "description": "MCP server entries should specify allowed tools",
+            "type": "mcp_field_required",
+            "field": "tools",
+            "severity": "warning"
+        }
+    ]
+
+Supported rule types:
+    require_heading:          CLAUDE.md must contain a heading with 'value'
+    pattern_must_match:       rules content must match 'pattern'
+    pattern_must_not_match:   rules content must NOT match 'pattern'
+    max_lines:                rules content must be <= 'value' lines
+    min_section_count:        CLAUDE.md must have >= 'value' ## headings
+    mcp_field_required:       each MCP server must have key 'field'
 """
 
 import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 # Top-level keys we expect in Claude Code settings.json (non-exhaustive)
@@ -87,7 +127,48 @@ class LintFix:
 
 
 class ConfigLinter:
-    """Validates HarnessSync source configuration before sync."""
+    """Validates HarnessSync source configuration before sync.
+
+    Custom rules are loaded from ``.harness-sync/lint-rules.json`` in the
+    project directory. Use ``load_custom_rules()`` to inspect what's loaded,
+    or ``add_custom_rule()`` to register rules programmatically.
+    """
+
+    # Default path for custom rules file (relative to project_dir)
+    CUSTOM_RULES_FILE = ".harness-sync/lint-rules.json"
+
+    def __init__(self) -> None:
+        self._custom_rules: list[dict[str, Any]] = []
+
+    def load_custom_rules(self, project_dir: Path) -> list[dict]:
+        """Load custom lint rules from .harness-sync/lint-rules.json.
+
+        Args:
+            project_dir: Project root directory.
+
+        Returns:
+            List of loaded rule dicts. Empty if file missing or invalid.
+        """
+        rules_path = project_dir / self.CUSTOM_RULES_FILE
+        if not rules_path.is_file():
+            return []
+        try:
+            data = json.loads(rules_path.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                self._custom_rules = [r for r in data if isinstance(r, dict)]
+            else:
+                self._custom_rules = []
+        except (json.JSONDecodeError, OSError):
+            self._custom_rules = []
+        return self._custom_rules
+
+    def add_custom_rule(self, rule: dict[str, Any]) -> None:
+        """Register a custom lint rule programmatically.
+
+        Args:
+            rule: Rule dict with at minimum 'id', 'description', 'type' keys.
+        """
+        self._custom_rules.append(rule)
 
     def lint(
         self,
@@ -97,9 +178,12 @@ class ConfigLinter:
     ) -> list[str]:
         """Run all lint checks against discovered source data.
 
+        Loads custom rules from ``<project_dir>/.harness-sync/lint-rules.json``
+        (if project_dir is provided) and runs them alongside built-in checks.
+
         Args:
             source_data: Output of ``SourceReader.discover_all()``.
-            project_dir: Project root (used for file existence checks).
+            project_dir: Project root (used for file existence checks and custom rules).
             cc_home: Claude Code config directory (used for file existence checks).
 
         Returns:
@@ -112,7 +196,112 @@ class ConfigLinter:
         issues.extend(self._lint_skills(source_data.get("skills", {})))
         issues.extend(self._lint_agents(source_data.get("agents", {})))
 
+        # Run custom lint rules if project_dir provided
+        if project_dir:
+            self.load_custom_rules(project_dir)
+        if self._custom_rules:
+            issues.extend(self._run_custom_rules(source_data))
+
         return issues
+
+    def _run_custom_rules(self, source_data: dict) -> list[str]:
+        """Execute all registered custom rules against source_data.
+
+        Args:
+            source_data: Output of SourceReader.discover_all().
+
+        Returns:
+            List of violation messages. Empty list if all rules pass.
+        """
+        issues: list[str] = []
+
+        # Build combined rules text for content checks
+        rules_raw = source_data.get("rules", "")
+        if isinstance(rules_raw, list):
+            combined = "\n".join(r.get("content", "") for r in rules_raw if isinstance(r, dict))
+        else:
+            combined = rules_raw or ""
+
+        mcp_servers = source_data.get("mcp_servers", {})
+
+        for rule in self._custom_rules:
+            rule_id = rule.get("id", "custom")
+            description = rule.get("description", rule_id)
+            severity = rule.get("severity", "warning").upper()
+            rule_type = rule.get("type", "")
+
+            try:
+                violation = self._evaluate_custom_rule(
+                    rule_type, rule, combined, mcp_servers, source_data
+                )
+            except Exception as exc:
+                issues.append(f"[custom:{rule_id}] Rule evaluation error: {exc}")
+                continue
+
+            if violation:
+                issues.append(f"[{severity}][custom:{rule_id}] {description}")
+
+        return issues
+
+    def _evaluate_custom_rule(
+        self,
+        rule_type: str,
+        rule: dict,
+        combined_rules: str,
+        mcp_servers: dict,
+        source_data: dict,
+    ) -> bool:
+        """Evaluate a single custom rule. Returns True if there is a violation.
+
+        Args:
+            rule_type: The rule type string.
+            rule: Full rule definition dict.
+            combined_rules: All CLAUDE.md rules text concatenated.
+            mcp_servers: MCP server config dict.
+            source_data: Full source data from SourceReader.
+
+        Returns:
+            True if the rule is violated (an issue should be reported).
+        """
+        if rule_type == "require_heading":
+            heading = rule.get("value", "")
+            heading_re = re.compile(
+                r"^#{1,4}\s+" + re.escape(heading), re.MULTILINE | re.IGNORECASE
+            )
+            return not heading_re.search(combined_rules)
+
+        if rule_type == "pattern_must_match":
+            pattern = rule.get("pattern", "")
+            if not pattern:
+                return False
+            return not re.search(pattern, combined_rules, re.MULTILINE)
+
+        if rule_type == "pattern_must_not_match":
+            pattern = rule.get("pattern", "")
+            if not pattern:
+                return False
+            return bool(re.search(pattern, combined_rules, re.MULTILINE))
+
+        if rule_type == "max_lines":
+            limit = int(rule.get("value", 500))
+            return len(combined_rules.splitlines()) > limit
+
+        if rule_type == "min_section_count":
+            minimum = int(rule.get("value", 1))
+            heading_count = len(re.findall(r"^#{1,4}\s+\S", combined_rules, re.MULTILINE))
+            return heading_count < minimum
+
+        if rule_type == "mcp_field_required":
+            field_name = rule.get("field", "")
+            if not field_name or not mcp_servers:
+                return False
+            return any(
+                isinstance(cfg, dict) and field_name not in cfg
+                for cfg in mcp_servers.values()
+            )
+
+        # Unknown rule type — skip silently
+        return False
 
     # ------------------------------------------------------------------
     # Private helpers

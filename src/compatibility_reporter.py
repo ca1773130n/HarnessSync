@@ -404,6 +404,124 @@ class CompatibilityReporter:
 
         return "\n".join(lines)
 
+    def calculate_coverage_score(self, results: dict, source_data: dict) -> dict:
+        """Calculate per-harness sync coverage score after a sync operation.
+
+        Coverage score answers: "What % of your Claude Code capabilities are
+        reflected in each target harness?"
+
+        Formula:
+            coverage = (supported_features / total_source_features) * 100
+        where supported_features counts non-empty source items that synced
+        successfully (synced + adapted > 0).
+
+        Args:
+            results: Dict mapping target_name -> {config_type: SyncResult}
+            source_data: Output of SourceReader.discover_all(), used to
+                         determine total source item counts per category.
+
+        Returns:
+            Dict mapping target_name -> {
+                "score": float,           # 0–100
+                "label": str,             # "high" | "medium" | "low"
+                "supported": int,         # categories with coverage
+                "total": int,             # total non-empty categories
+                "gaps": list[str],        # categories with zero coverage
+                "partial": list[str],     # categories with partial coverage
+            }
+        """
+        # Count non-empty source categories
+        source_counts: dict[str, int] = {
+            "rules": 1 if source_data.get("rules") else 0,
+            "skills": len(source_data.get("skills", {})),
+            "agents": len(source_data.get("agents", {})),
+            "commands": len(source_data.get("commands", {})),
+            "mcp": len(source_data.get("mcp_servers", {})),
+            "settings": 1 if source_data.get("settings") else 0,
+        }
+        non_empty_categories = [k for k, v in source_counts.items() if v > 0]
+        total_non_empty = len(non_empty_categories)
+
+        coverage: dict = {}
+
+        for target_name, target_results in results.items():
+            if target_name.startswith("_") or not isinstance(target_results, dict):
+                continue
+
+            gaps: list[str] = []
+            partial: list[str] = []
+            supported_count = 0
+
+            for category in non_empty_categories:
+                result = target_results.get(category)
+                if not isinstance(result, SyncResult):
+                    gaps.append(category)
+                    continue
+
+                if result.failed > 0 and result.synced == 0 and result.adapted == 0:
+                    gaps.append(category)
+                elif result.skipped > 0 and result.synced == 0 and result.adapted == 0:
+                    gaps.append(category)
+                elif result.adapted > 0 and result.synced == 0:
+                    partial.append(category)
+                    supported_count += 1  # partial still counts as coverage
+                else:
+                    supported_count += 1
+
+            score = (supported_count / total_non_empty * 100) if total_non_empty > 0 else 100.0
+            score = round(score, 1)
+
+            if score >= 80:
+                label = "high"
+            elif score >= 50:
+                label = "medium"
+            else:
+                label = "low"
+
+            coverage[target_name] = {
+                "score": score,
+                "label": label,
+                "supported": supported_count,
+                "total": total_non_empty,
+                "gaps": gaps,
+                "partial": partial,
+            }
+
+        return coverage
+
+    def format_coverage_scores(self, coverage: dict) -> str:
+        """Format per-harness coverage scores for post-sync output.
+
+        Args:
+            coverage: Dict from calculate_coverage_score().
+
+        Returns:
+            Formatted string for display after sync completes.
+        """
+        if not coverage:
+            return ""
+
+        lines = ["\nSync Coverage Scores", "=" * 40]
+        for target, data in sorted(coverage.items()):
+            score = data["score"]
+            label = data["label"]
+            supported = data["supported"]
+            total = data["total"]
+            gaps = data.get("gaps", [])
+            partial_cats = data.get("partial", [])
+
+            bar_len = int(score / 5)
+            bar = "█" * bar_len + "░" * (20 - bar_len)
+            lines.append(f"\n{target.upper()}: {score:.0f}% coverage [{label}]")
+            lines.append(f"  [{bar}]  {supported}/{total} categories")
+            if gaps:
+                lines.append(f"  ✗ unsupported: {', '.join(gaps)}")
+            if partial_cats:
+                lines.append(f"  ~ partial:     {', '.join(partial_cats)}")
+
+        lines.append("")
+        return "\n".join(lines)
+
     def has_issues(self, report: dict) -> bool:
         """
         Check if report contains adapted or failed items.

@@ -137,6 +137,129 @@ def _score(support: dict[str, str]) -> float:
     return round(100 * total / max(len(support), 1), 1)
 
 
+# ANSI color helpers
+_RESET = "\033[0m"
+_BOLD = "\033[1m"
+_RED = "\033[31m"
+_YELLOW = "\033[33m"
+_GREEN = "\033[32m"
+_CYAN = "\033[36m"
+_DIM = "\033[2m"
+
+
+def _color(text: str, code: str, use_color: bool) -> str:
+    return f"{code}{text}{_RESET}" if use_color else text
+
+
+def _status_color(status: str, text: str, use_color: bool) -> str:
+    """Colorize a cell based on support status."""
+    if not use_color:
+        return text
+    if status == "full":
+        return f"{_GREEN}{text}{_RESET}"
+    if status in ("partial", "via-translation"):
+        return f"{_YELLOW}{text}{_RESET}"
+    if status == "none":
+        return f"{_RED}{text}{_RESET}"
+    return text
+
+
+def _score_color(score: float, text: str, use_color: bool) -> str:
+    """Colorize a score based on its value."""
+    if not use_color:
+        return text
+    if score >= 80:
+        return f"{_GREEN}{text}{_RESET}"
+    if score >= 50:
+        return f"{_YELLOW}{text}{_RESET}"
+    return f"{_RED}{text}{_RESET}"
+
+
+def _format_heatmap(source_data: dict, targets: list[str], use_color: bool = True) -> str:
+    """Render a color-coded terminal heatmap table of feature support per harness.
+
+    Each cell shows: full (green ✓), partial (yellow ~), none (red ✗),
+    or via-translation (yellow ~). A per-target score column shows overall
+    coverage at a glance.
+
+    Args:
+        source_data: Discovered source config from SourceReader.
+        targets: Registered harness target names.
+        use_color: Emit ANSI escape codes (default True, auto-disabled for non-TTY).
+
+    Returns:
+        Formatted heatmap string ready for terminal output.
+    """
+    features = ["rules", "skills", "agents", "commands", "mcp", "settings"]
+    STATUS_CELL = {
+        "full": "  ✓  ",
+        "partial": "  ~  ",
+        "via-translation": "  ~  ",
+        "none": "  ✗  ",
+    }
+
+    # Header
+    col_w = 7  # width of each feature column
+    target_w = 12
+    score_w = 8
+
+    header_cells = [f"{f:^{col_w}}" for f in features]
+    header_line = (
+        f"{'Target':<{target_w}}"
+        + "".join(header_cells)
+        + f"{'Score':>{score_w}}"
+    )
+    sep = "-" * len(header_line)
+
+    lines: list[str] = []
+    title = "HarnessSync Feature Parity Heatmap"
+    lines.append(_color(title, _BOLD, use_color))
+    lines.append(_color(sep, _DIM, use_color))
+    lines.append(_color(header_line, _BOLD, use_color))
+    lines.append(_color(sep, _DIM, use_color))
+
+    for target in sorted(targets):
+        support = _SUPPORT_MATRIX.get(target, {})
+        score = _score(support)
+        row_cells: list[str] = []
+        for feature in features:
+            status = support.get(feature, "?")
+            raw_cell = STATUS_CELL.get(status, "  ?  ")
+            row_cells.append(_status_color(status, f"{raw_cell:^{col_w}}", use_color))
+
+        target_col = f"{target:<{target_w}}"
+        score_str = f"{score:>6.0f}%"
+        score_col = _score_color(score, score_str, use_color)
+
+        lines.append(target_col + "".join(row_cells) + f"  {score_col}")
+
+    lines.append(_color(sep, _DIM, use_color))
+
+    # Legend
+    legend = (
+        f"  {_status_color('full', '✓ full', use_color)}   "
+        f"{_status_color('partial', '~ partial/translation', use_color)}   "
+        f"{_status_color('none', '✗ not supported', use_color)}"
+    )
+    lines.append(legend)
+
+    # Feature inventory counts
+    rules = source_data.get("rules", "")
+    rules_count = len(rules.splitlines()) if isinstance(rules, str) else sum(
+        len(r.get("content", "").splitlines()) for r in (rules or []) if isinstance(r, dict)
+    )
+    inventory = (
+        f"\nYour config: {rules_count} rule-lines  "
+        f"{len(source_data.get('skills', {}))!s} skills  "
+        f"{len(source_data.get('agents', {}))!s} agents  "
+        f"{len(source_data.get('commands', {}))!s} commands  "
+        f"{len(source_data.get('mcp_servers', {}))!s} MCP servers"
+    )
+    lines.append(_color(inventory, _CYAN, use_color))
+
+    return "\n".join(lines)
+
+
 def _format_report(source_data: dict, targets: list[str]) -> str:
     """Build the parity report string."""
     lines: list[str] = ["HarnessSync Feature Parity Report", "=" * 60, ""]
@@ -199,6 +322,14 @@ def main() -> None:
         description="Feature parity report across harness targets"
     )
     parser.add_argument("--scope", choices=["user", "project", "all"], default="all")
+    parser.add_argument(
+        "--heatmap", action="store_true",
+        help="Render a color-coded terminal heatmap table instead of the full text report"
+    )
+    parser.add_argument(
+        "--no-color", action="store_true",
+        help="Disable ANSI colors in heatmap output"
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -210,7 +341,12 @@ def main() -> None:
     source_data = reader.discover_all()
 
     targets = AdapterRegistry.list_targets()
-    print(_format_report(source_data, targets))
+
+    if args.heatmap:
+        use_color = not args.no_color and sys.stdout.isatty()
+        print(_format_heatmap(source_data, targets, use_color=use_color))
+    else:
+        print(_format_report(source_data, targets))
 
 
 if __name__ == "__main__":

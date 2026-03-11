@@ -205,11 +205,50 @@ class SyncOrchestrator:
                 'scope': rf.get('scope', 'project'),
             })
 
+        # --- PRE-SYNC: PROJECT-TYPE ADAPTIVE SYNC ---
+        # Auto-detect project type and apply relevant config filtering defaults.
+        # Only applied when user hasn't manually set only_sections/skip_sections.
+        if not self.only_sections and not self.skip_sections:
+            try:
+                from src.project_detector import ProjectTypeDetector
+                detector = ProjectTypeDetector(self.project_dir)
+                profile = detector.detect()
+                if profile and profile.suggested_skip_sections:
+                    self.skip_sections = set(profile.suggested_skip_sections)
+                    self.logger.info(
+                        f"Project type '{profile.project_type}' detected — "
+                        f"auto-skipping sections: {', '.join(sorted(self.skip_sections))}"
+                    )
+            except Exception:
+                pass  # Adaptive sync is best-effort, never blocks
+
         # Translate key: SourceReader uses 'mcp_servers', adapters expect 'mcp'
         adapter_data = dict(source_data)
         adapter_data['mcp'] = adapter_data.pop('mcp_servers', {})
         # Pass scoped MCP data for v2.0 scope-aware adapters
         adapter_data['mcp_scoped'] = source_data.get('mcp_servers_scoped', {})
+
+        # --- PRE-SYNC: SYNC IMPACT PREDICTION ---
+        # Predict behavioral impact of pending changes (informational, never blocks)
+        if self.dry_run:
+            try:
+                from src.sync_impact_predictor import SyncImpactPredictor
+                from src.state_manager import StateManager as _SM
+                _prev_source: dict = {}
+                try:
+                    # Attempt to reconstruct previous source from state snapshot
+                    _sm_prev = _SM()
+                    _prev_snap = _sm_prev.get_all_status().get("last_source_snapshot", {})
+                    if isinstance(_prev_snap, dict):
+                        _prev_source = _prev_snap
+                except Exception:
+                    pass
+                predictor = SyncImpactPredictor(self.project_dir)
+                impact_report = predictor.predict(source_data, _prev_source)
+                if not impact_report.is_empty:
+                    self.logger.info(impact_report.format())
+            except Exception:
+                pass  # Impact prediction is informational, never blocks
 
         # --- PRE-SYNC: MCP REACHABILITY CHECK ---
         # Warn (but do not block) if any MCP servers are unreachable
@@ -439,13 +478,21 @@ class SyncOrchestrator:
             except ImportError as e:
                 self.logger.warn(f"SymlinkCleaner unavailable: {e}")
 
-        # --- POST-SYNC: COMPATIBILITY REPORT ---
+        # --- POST-SYNC: COMPATIBILITY REPORT + COVERAGE SCORE ---
         try:
             compatibility_reporter = CompatibilityReporter()
             report = compatibility_reporter.generate(results)
 
             if compatibility_reporter.has_issues(report):
                 results['_compatibility_report'] = compatibility_reporter.format_report(report)
+
+            # Coverage score: what % of source capabilities made it to each target
+            coverage = compatibility_reporter.calculate_coverage_score(results, source_data)
+            if coverage:
+                results['_coverage_scores'] = coverage
+                coverage_str = compatibility_reporter.format_coverage_scores(coverage)
+                if coverage_str.strip():
+                    self.logger.info(coverage_str)
         except ImportError as e:
             self.logger.warn(f"CompatibilityReporter unavailable: {e}")
 
