@@ -13,6 +13,7 @@ A pre-sync health check catches this early.
 import shutil
 import socket
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 
@@ -108,10 +109,25 @@ class McpReachabilityChecker:
         Returns:
             List of McpReachabilityResult for each server.
         """
+        if not mcp_servers:
+            return []
+
         results: list[McpReachabilityResult] = []
-        for name, cfg in mcp_servers.items():
-            result = self._check_server(name, cfg)
-            results.append(result)
+        with ThreadPoolExecutor(max_workers=min(len(mcp_servers), 8)) as pool:
+            futures = {
+                pool.submit(self._check_server, name, cfg): name
+                for name, cfg in mcp_servers.items()
+            }
+            for fut in as_completed(futures):
+                name = futures[fut]
+                try:
+                    results.append(fut.result())
+                except Exception:
+                    results.append(McpReachabilityResult(
+                        name=name,
+                        reachable=False,
+                        reason=str(fut.exception()),
+                    ))
         return results
 
     def get_warnings(self, results: list[McpReachabilityResult]) -> list[str]:

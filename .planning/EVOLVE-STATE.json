@@ -1,33 +1,9 @@
 {
-  "iteration": 38,
-  "timestamp": "2026-03-12T05:36:44.449Z",
+  "iteration": 39,
+  "timestamp": "2026-03-12T05:54:23.242Z",
   "milestone": "",
   "pick_pct": 50,
   "selected_groups": [
-    {
-      "id": "product-ideation/mcp-tool-bindings",
-      "theme": "mcp-tool-bindings",
-      "dimension": "product-ideation",
-      "title": "Mcp Tool Bindings (product-ideation)",
-      "items": [
-        {
-          "id": "product-ideation/mcp-tool-compatibility-matrix",
-          "dimension": "product-ideation",
-          "slug": "mcp-tool-compatibility-matrix",
-          "title": "MCP Tool Compatibility Matrix",
-          "description": "Show which MCP tools work in which harnesses and flag tools that will silently fail. Users waste hours debugging why an MCP capability works in Claude Code but not in Gemini.",
-          "effort": "small",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        }
-      ],
-      "priority": 14,
-      "effort": "small",
-      "status": "selected"
-    }
-  ],
-  "remaining_groups": [
     {
       "id": "product-ideation/miscellaneous",
       "theme": "miscellaneous",
@@ -374,13 +350,388 @@
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/conflict-aware-merge-resolver",
+          "dimension": "product-ideation",
+          "slug": "conflict-aware-merge-resolver",
+          "title": "Conflict-Aware Merge Resolver",
+          "description": "When a target harness has been manually edited since last sync, detect the conflict and present a three-way merge UI (source, target, last-synced baseline) instead of blindly overwriting. Solves the pain of losing manual tweaks made directly in Codex/Gemini configs when the next sync runs.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/harness-preview-mode",
+          "dimension": "product-ideation",
+          "slug": "harness-preview-mode",
+          "title": "Harness Preview Mode",
+          "description": "Before syncing, render exactly what a target harness config will look like post-sync — including translated rules, resolved env vars, and omitted unsupported sections. Users currently have no visibility into what the sync will produce, leading to surprises. A /sync-preview <target> command closes this gap.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/ai-rule-idiom-translator",
+          "dimension": "product-ideation",
+          "slug": "ai-rule-idiom-translator",
+          "title": "AI-Assisted Rule Idiom Translator",
+          "description": "Use Claude to semantically translate CLAUDE.md rules into the native idiom of each target harness rather than verbatim copying. 'Always use TypeScript strict mode' means something subtly different to Gemini vs. Codex. This produces more native-feeling configs that the target harness actually respects.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-profiles",
+          "dimension": "product-ideation",
+          "slug": "sync-profiles",
+          "title": "Named Sync Profiles",
+          "description": "Let users define multiple named sync profiles (work, oss, client-x) with different target sets, exclusions, and overrides. Switch profiles with /sync --profile work. Solves the problem of needing different sync behavior per project context without maintaining separate configs.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/new-harness-auto-onboarding",
+          "dimension": "product-ideation",
+          "slug": "new-harness-auto-onboarding",
+          "title": "New Harness Auto-Onboarding",
+          "description": "Detect when a new AI harness is installed on the system (polling ~/.cursor, ~/.gemini, etc.) and automatically run initial sync + show a 'New harness detected' notification. Eliminates the manual step of remembering to set up a new tool after installation.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/team-sync-templates",
+          "dimension": "product-ideation",
+          "slug": "team-sync-templates",
+          "title": "Team Sync Templates",
+          "description": "Allow teams to publish and subscribe to a shared sync configuration via a git URL or registry. One command adopts the team's agreed harness targets, exclusion rules, and override policies. Solves the 'everyone has slightly different sync setups' problem in engineering teams.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/mcp-server-compatibility-report",
+          "dimension": "product-ideation",
+          "slug": "mcp-server-compatibility-report",
+          "title": "MCP Server Compatibility Report",
+          "description": "Before syncing MCP server configs, test each server's reachability and check whether the target harness supports its transport type (stdio/SSE/HTTP). Surface a clear report of which MCP tools will work, which will silently fail, and which need reconfiguration. Prevents phantom MCP tools that appear configured but never execute.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/skill-gap-analyzer",
+          "dimension": "product-ideation",
+          "slug": "skill-gap-analyzer",
+          "title": "Skill Gap Analyzer",
+          "description": "Compare Claude Code's installed skills against each target harness's skill system and produce a gap report: skills with no equivalent, partial mappings, and skills that can be auto-adapted. Helps users understand what they're giving up when switching harnesses and prioritize what to manually port.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/config-drift-alerts",
+          "dimension": "product-ideation",
+          "slug": "config-drift-alerts",
+          "title": "Config Drift Alerts",
+          "description": "Monitor target harness configs in the background and alert when they've drifted from what HarnessSync last wrote — indicating someone edited them manually or another tool modified them. Keeps users informed without requiring manual /sync-status checks.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/conditional-sync-rules",
+          "dimension": "product-ideation",
+          "slug": "conditional-sync-rules",
+          "title": "Conditional Sync Rules",
+          "description": "Support expressions that control sync behavior based on context: git branch name, project type (detected from package.json/Cargo.toml), or environment variable. Example: 'sync cursor rules only on feature/* branches.' Solves the problem of needing different harness configs for different workflow modes.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/harness-specific-overlay-files",
+          "dimension": "product-ideation",
+          "slug": "harness-specific-overlay-files",
+          "title": "Per-Harness Overlay Files",
+          "description": "Allow CLAUDE.gemini.md and CLAUDE.codex.md files to define additive overrides that get merged into the synced output for that specific target. Users can add harness-native instructions without polluting the master CLAUDE.md. Solves the tension between 'one source of truth' and harness-specific needs.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-impact-score",
+          "dimension": "product-ideation",
+          "slug": "sync-impact-score",
+          "title": "Sync Impact Score",
+          "description": "When running a dry-run or preview, calculate and display an impact score: files changed, rules added/removed, MCP servers affected, estimated behavior delta. Helps users decide whether to sync now or wait, and surfaces unintended large changes before they happen.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/environment-variable-mapper",
+          "dimension": "product-ideation",
+          "slug": "environment-variable-mapper",
+          "title": "Environment Variable Name Mapper",
+          "description": "Maintain a mapping table of env var names across harnesses (e.g., ANTHROPIC_API_KEY vs. CLAUDE_API_KEY vs. what Codex expects). Auto-translate env var references in synced configs rather than copying them verbatim. Prevents silent failures when a synced config references a var the target harness doesn't recognize.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/cross-harness-session-handoff",
+          "dimension": "product-ideation",
+          "slug": "cross-harness-session-handoff",
+          "title": "Cross-Harness Session Handoff",
+          "description": "Package the current Claude Code session context (active files, recent commands, task description) into a portable format and open it in another harness. /sync-handoff gemini would launch Gemini CLI with the equivalent context loaded. Enables seamless mid-task harness switching.",
+          "effort": "large",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/harness-feature-parity-tracker",
+          "dimension": "product-ideation",
+          "slug": "harness-feature-parity-tracker",
+          "title": "Harness Feature Parity Tracker",
+          "description": "Maintain a live matrix of which features each harness supports (MCP, hooks, agents, skills, streaming, etc.) and update it when harnesses release new versions. Surface upgrade opportunities: 'Gemini CLI 2.3 now supports hooks — re-sync to enable.' Users currently discover capability changes by accident.",
+          "effort": "large",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-audit-log",
+          "dimension": "product-ideation",
+          "slug": "sync-audit-log",
+          "title": "Compliance-Grade Sync Audit Log",
+          "description": "Structured, append-only log of every sync operation: what changed, when, by which trigger (hook/manual/schedule), and the resulting state hash per target. Enables rollback to any point, supports security audits, and helps debug 'why did my Codex config change?'",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/interactive-setup-wizard",
+          "dimension": "product-ideation",
+          "slug": "interactive-setup-wizard",
+          "title": "Interactive First-Run Setup Wizard",
+          "description": "A guided /sync-setup wizard that detects installed harnesses, explains what will be synced, lets users toggle targets and exclusions interactively, and performs an initial dry-run before committing. Reduces the friction of getting started for new users who don't want to read documentation.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-webhook-integration",
+          "dimension": "product-ideation",
+          "slug": "sync-webhook-integration",
+          "title": "Sync Webhooks",
+          "description": "Fire configurable webhooks (or GitHub Actions events) when a sync completes, fails, or detects drift. Enables CI/CD pipelines to verify config consistency, send Slack alerts when syncs fail, or trigger downstream automation. Solves the 'is sync actually running?' problem in team environments.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/rule-effectiveness-insights",
+          "dimension": "product-ideation",
+          "slug": "rule-effectiveness-insights",
+          "title": "Rule Effectiveness Insights",
+          "description": "Track which CLAUDE.md rules Claude Code applies most frequently and surface insights: unused rules that could be removed, frequently-triggered rules that should be strengthened, and rules that never translate to target harnesses. Makes the rules file a living document rather than accumulated cruft.",
+          "effort": "large",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/community-sync-recipes",
+          "dimension": "product-ideation",
+          "slug": "community-sync-recipes",
+          "title": "Community Sync Recipes Registry",
+          "description": "A curated registry of sync configurations for popular stacks (Next.js, Rust/Cargo, Python/UV, monorepos). /sync-recipe nextjs installs the community-recommended rules, exclusions, and harness mappings. Solves the blank-slate problem for new projects where users don't know what to sync.",
+          "effort": "large",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/config-optimizer",
+          "dimension": "product-ideation",
+          "slug": "config-optimizer",
+          "title": "Config Optimizer & Deduplicator",
+          "description": "Analyze CLAUDE.md and rules files for redundant, conflicting, or overly verbose instructions before syncing. Suggest consolidations that produce equivalent behavior with fewer tokens — reducing context overhead in every harness. Addresses the 'CLAUDE.md grew to 5000 lines' problem.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/plugin-portability-analyzer",
+          "dimension": "product-ideation",
+          "slug": "plugin-portability-analyzer",
+          "title": "Plugin Portability Analyzer",
+          "description": "For each installed Claude Code plugin, analyze how much of its value (commands, skills, hooks, MCP tools) can be replicated in target harnesses and produce a portability score. Helps users understand their 'Claude Code lock-in' and prioritize which plugins to build native equivalents for.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/harness-ab-testing",
+          "dimension": "product-ideation",
+          "slug": "harness-ab-testing",
+          "title": "Harness A/B Testing Mode",
+          "description": "Given a specific coding task description, run it through two harnesses with equivalent config and surface a structured comparison of the outputs. Helps users make informed decisions about which harness to use for specific task types and validates that synced configs produce equivalent behavior.",
+          "effort": "large",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-on-pr-merge",
+          "dimension": "product-ideation",
+          "slug": "sync-on-pr-merge",
+          "title": "PR Merge Auto-Sync Trigger",
+          "description": "Install a git post-merge hook that triggers sync automatically when a PR touching CLAUDE.md, .claude/, or .mcp.json is merged. Ensures the team's config changes propagate to all harnesses without anyone remembering to run /sync. Eliminates the 'I forgot to sync after the config PR landed' problem.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/harness-config-exporter",
+          "dimension": "product-ideation",
+          "slug": "harness-config-exporter",
+          "title": "Universal Config Exporter",
+          "description": "Export the current Claude Code configuration in any target harness format as a standalone file, without writing to disk. Useful for documentation, onboarding new team members, or sharing config snippets. /sync-export gemini > my-gemini-config.md gives a shareable artifact.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-schedule-per-target",
+          "dimension": "product-ideation",
+          "slug": "sync-schedule-per-target",
+          "title": "Per-Target Sync Schedules",
+          "description": "Allow different sync frequencies per target harness. Codex config is sensitive — sync only on explicit command. Gemini can auto-sync on every save. Aider needs a daily refresh. Solves the all-or-nothing problem where users disable auto-sync entirely because one target is too noisy.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/harness-version-compatibility-warnings",
+          "dimension": "product-ideation",
+          "slug": "harness-version-compatibility-warnings",
+          "title": "Harness Version Compatibility Warnings",
+          "description": "Detect the installed version of each target harness and warn when syncing features it doesn't support yet, or when the harness is outdated enough to cause silent failures. 'Gemini CLI 1.8 doesn't support agents — upgrade to 2.0 or disable agent sync.' Prevents phantom configurations.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/multi-workspace-sync",
+          "dimension": "product-ideation",
+          "slug": "multi-workspace-sync",
+          "title": "Multi-Workspace Sync Orchestrator",
+          "description": "Sync Claude Code config across multiple project workspaces simultaneously — useful for monorepo users with multiple project dirs or consultants managing client environments. /sync --all-workspaces applies the current profile to every registered workspace in one operation.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/config-snapshot-gallery",
+          "dimension": "product-ideation",
+          "slug": "config-snapshot-gallery",
+          "title": "Config Snapshot Gallery",
+          "description": "Maintain a visual timeline of configuration states across all harnesses, with the ability to diff any two snapshots side by side. When something breaks, users can immediately see what changed between 'last known good' and now, rather than hunting through git history.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/natural-language-sync-query",
+          "dimension": "product-ideation",
+          "slug": "natural-language-sync-query",
+          "title": "Natural Language Sync Query",
+          "description": "Ask questions about your sync state in plain English: 'Which of my Gemini rules mention TypeScript?', 'What would change if I added Cursor as a target?', 'Show me everything that differs between my Codex and OpenCode configs.' Surfaces insights without requiring users to parse raw config files.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/harness-migration-assistant",
+          "dimension": "product-ideation",
+          "slug": "harness-migration-assistant",
+          "title": "Harness Migration Assistant",
+          "description": "When a user wants to switch primary harness (e.g., from Claude Code to Gemini CLI), generate a migration plan: what can be auto-converted, what needs manual work, and what will be lost. Produces a checklist and runs the conversion. Enables harness transitions without starting from scratch.",
+          "effort": "large",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-notification-digest",
+          "dimension": "product-ideation",
+          "slug": "sync-notification-digest",
+          "title": "Daily Sync Digest",
+          "description": "Send a configurable daily summary (terminal notification or file) of all sync activity: what changed, which targets drifted, any failures, and pending manual actions. Replaces the need to proactively check /sync-status by pushing a concise summary to the user's attention.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/harness-permission-translator",
+          "dimension": "product-ideation",
+          "slug": "harness-permission-translator",
+          "title": "Permission Model Translator",
+          "description": "Translate Claude Code's allowed/denied tools and permissions into the closest equivalent for each target harness, with explicit callouts where the mapping is imperfect. Prevents the security-relevant mismatch where Claude Code is locked down but Gemini gets an unrestricted equivalent config.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-blame",
+          "dimension": "product-ideation",
+          "slug": "sync-blame",
+          "title": "Sync Blame — Trace Any Config Line",
+          "description": "Given any line in a target harness config file, trace it back to the exact source in Claude Code config that produced it, including the transform applied. /sync-blame gemini GEMINI.md:42 shows 'came from CLAUDE.md line 15, identity transform.' Eliminates 'where did this rule come from?' debugging.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
         }
       ],
-      "priority": 13,
+      "priority": 13.092307692307692,
       "effort": "large",
-      "status": "pending"
+      "status": "selected"
     }
   ],
+  "remaining_groups": [],
   "completed_groups": [
     {
       "id": "product-ideation/miscellaneous",
@@ -825,7 +1176,7 @@
   ],
   "failed_groups": [],
   "all_items_count": 36,
-  "groups_count": 2,
+  "groups_count": 1,
   "history": [
     {
       "iteration": 1,
@@ -1089,6 +1440,13 @@
     {
       "iteration": 38,
       "timestamp": "2026-03-12T05:36:44.449Z",
+      "selected_count": 1,
+      "completed_count": 3,
+      "failed_count": 0
+    },
+    {
+      "iteration": 39,
+      "timestamp": "2026-03-12T05:54:23.242Z",
       "selected_count": 1,
       "completed_count": 3,
       "failed_count": 0

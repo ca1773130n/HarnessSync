@@ -280,6 +280,7 @@ def main(argv: list[str] | None = None) -> int:
 
     logger = Logger()
     project_dir = args.project_dir or Path.cwd()
+    cc_home = Path(os.environ.get("CLAUDE_HOME", Path.home() / ".claude"))
 
     # Get instruction from args or stdin
     instruction = args.instruction
@@ -297,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
     # Locate CLAUDE.md
     claude_md_path = project_dir / "CLAUDE.md"
     if not claude_md_path.exists():
-        claude_md_path = Path.home() / ".claude" / "CLAUDE.md"
+        claude_md_path = cc_home / "CLAUDE.md"
 
     claude_md_content = ""
     if claude_md_path.exists():
@@ -351,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
     elif target_file == "settings.json":
         settings_path = project_dir / ".claude" / "settings.json"
         if not settings_path.exists():
-            settings_path = Path.home() / ".claude" / "settings.json"
+            settings_path = cc_home / "settings.json"
         success, message = _apply_edit_to_settings(settings_path, edit_plan)
         if not success:
             print(f"Error applying edit: {message}", file=sys.stderr)

@@ -22,7 +22,6 @@ Usage:
 
 import getpass
 import json
-import shutil
 import socket
 import subprocess
 import tempfile

@@ -100,6 +100,7 @@ def cmd_export(args, logger: Logger) -> int:
 
 def cmd_import(args, logger: Logger) -> int:
     project_dir = args.project_dir or Path.cwd()
+    cc_home = Path(os.environ.get("CLAUDE_HOME", Path.home() / ".claude"))
     source = args.source
 
     snapper = ConfigSnapshot()
@@ -138,7 +139,7 @@ def cmd_import(args, logger: Logger) -> int:
     # Apply to CLAUDE.md
     claude_md_path = project_dir / "CLAUDE.md"
     if not claude_md_path.exists():
-        claude_md_path = Path.home() / ".claude" / "CLAUDE.md"
+        claude_md_path = cc_home / "CLAUDE.md"
 
     if snapshot.get("rules"):
         snapper.apply_to_claude_md(snapshot, claude_md_path)

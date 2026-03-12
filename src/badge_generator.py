@@ -23,7 +23,6 @@ Usage:
 CLI integration: /sync --badges writes badges to .harnesssync/badges/
 """
 
-import json
 import re
 import time
 from dataclasses import dataclass

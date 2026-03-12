@@ -28,6 +28,8 @@ Or from the CLI (sync-compare command):
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.utils.constants import EXTENDED_TARGETS
+
 # Harness-specific feature support matrix:
 # Maps feature_category -> set of targets that support it.
 # "partial" means some approximation exists but with lower fidelity.
@@ -140,10 +142,7 @@ class HarnessConfigComparison:
     harness binary.
     """
 
-    ALL_TARGETS = (
-        "codex", "gemini", "opencode", "cursor", "aider", "windsurf",
-        "cline", "continue", "zed", "neovim",
-    )
+    ALL_TARGETS = EXTENDED_TARGETS
 
     def compare(
         self,

@@ -16,6 +16,11 @@ import tempfile
 from pathlib import Path
 
 
+def default_cc_home(cc_home: Path | None = None) -> Path:
+    """Resolve cc_home with standard fallback. Use instead of inline `cc_home or Path.home() / '.claude'`."""
+    return cc_home if cc_home is not None else Path.home() / ".claude"
+
+
 def ensure_dir(path: Path) -> None:
     """
     Create directory with all parent directories.

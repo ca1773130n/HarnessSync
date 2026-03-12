@@ -50,6 +50,8 @@ Integration point: skill adapters and the orchestrator call
 import re
 from pathlib import Path
 
+from src.utils.constants import EXTENDED_TARGETS
+
 try:
     import yaml as _yaml
     _HAS_YAML = True
@@ -57,10 +59,7 @@ except ImportError:
     _HAS_YAML = False
 
 # Canonical list of all known targets
-_ALL_TARGETS = frozenset({
-    "codex", "gemini", "opencode", "cursor", "aider", "windsurf",
-    "vscode", "cline", "continue", "zed", "neovim",
-})
+_ALL_TARGETS = frozenset(EXTENDED_TARGETS + ("vscode",))
 
 # Regex to strip an ``exclude-TARGET`` shorthand value
 _EXCLUDE_RE = re.compile(r"^exclude-([a-z0-9_-]+(?:,[a-z0-9_-]+)*)$", re.IGNORECASE)

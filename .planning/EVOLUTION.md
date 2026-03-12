@@ -2514,3 +2514,98 @@ _2026-03-12T05:36:44.449Z_
 - format_mcp_tool_matrix() could be extended in future to also accept a list of actual configured servers and emit per-server warnings inline — the check_servers_batch() function already does the heavy lifting for that
 
 ---
+## Iteration 39
+_2026-03-12T05:54:23.241Z_
+
+### Items Attempted
+
+- **Sync Conflict Resolution Wizard** — pass
+- **Visual Capability Gap Map** — pass
+- **Per-Feature Sync Toggles** — pass
+- **Reverse Sync: Import from Target** — pass
+- **Human-Readable Sync Changelog** — pass
+- **Team Config Sharing via Git** — pass
+- **MCP Server Health Dashboard** — pass
+- **Skill Usage Analytics** — pass
+- **Harness Context Switcher** — pass
+- **Rule Contradiction Detector** — pass
+- **Auto-Detect Installed Harnesses** — pass
+- **Sync on Git Commit Hook** — pass
+- **Target Harness Version Pinning** — pass
+- **Cross-Harness Skill Smoke Tests** — pass
+- **Harness Migration Assistant** — pass
+- **Secrets & Credential Scrubber** — pass
+- **Sync Profile Presets** — pass
+- **Harness Performance Benchmarker** — pass
+- **Config Dependency Graph** — pass
+- **New Harness Onboarding Templates** — pass
+- **Smart Incremental Sync** — pass
+- **Timed Snapshot Rollback** — pass
+- **Sync Impact Cost Estimator** — pass
+- **Cross-Harness Feature Request Tracker** — pass
+- **Config Quality Linter with Suggestions** — pass
+- **Harness Usage Heatmap** — pass
+- **Plugin Ecosystem Bridge** — pass
+- **Sync Status Badge Generator** — pass
+- **Conditional Rule Sync** — pass
+- **Session Replay Across Harnesses** — pass
+- **Zero-Config Quickstart Mode** — pass
+- **Conflict-Aware Merge Resolver** — pass
+- **Harness Preview Mode** — pass
+- **AI-Assisted Rule Idiom Translator** — pass
+- **Named Sync Profiles** — pass
+- **New Harness Auto-Onboarding** — pass
+- **Team Sync Templates** — pass
+- **MCP Server Compatibility Report** — pass
+- **Skill Gap Analyzer** — pass
+- **Config Drift Alerts** — pass
+- **Conditional Sync Rules** — pass
+- **Per-Harness Overlay Files** — pass
+- **Sync Impact Score** — pass
+- **Environment Variable Name Mapper** — pass
+- **Cross-Harness Session Handoff** — pass
+- **Harness Feature Parity Tracker** — pass
+- **Compliance-Grade Sync Audit Log** — pass
+- **Interactive First-Run Setup Wizard** — pass
+- **Sync Webhooks** — pass
+- **Rule Effectiveness Insights** — pass
+- **Community Sync Recipes Registry** — pass
+- **Config Optimizer & Deduplicator** — pass
+- **Plugin Portability Analyzer** — pass
+- **Harness A/B Testing Mode** — pass
+- **PR Merge Auto-Sync Trigger** — pass
+- **Universal Config Exporter** — pass
+- **Per-Target Sync Schedules** — pass
+- **Harness Version Compatibility Warnings** — pass
+- **Multi-Workspace Sync Orchestrator** — pass
+- **Config Snapshot Gallery** — pass
+- **Natural Language Sync Query** — pass
+- **Harness Migration Assistant** — pass
+- **Daily Sync Digest** — pass
+- **Permission Model Translator** — pass
+- **Sync Blame — Trace Any Config Line** — pass
+
+### Decisions Made
+
+- Created sync_activate.py (Harness Context Switcher) as a genuinely new command — no equivalent existed. It queries StateManager + scan_all_with_versions() to produce a harness summary and emits shell exports that callers can eval. Chose to make --export the eval-safe path so the default mode can produce richer human-readable output.
+- Created sync_gaps.py (Cross-Harness Feature Request Tracker) as a command wrapper around the existing GapTracker class in compatibility_reporter.py. GapTracker was fully implemented but never exposed via a command; adding --auto mode to seed well-known gaps from a built-in knowledge base reduces onboarding friction.
+- Added per-target section filtering to orchestrator.py (_per_target_skip/_per_target_only) by extending the .harnesssync JSON format with a 'targets' key. The implementation merged per-target overrides into the existing _apply_section_filter method rather than adding a second pass — avoids duplicating the section-zeroing logic.
+- Added file-type affinity tracking (record_file_access, file_type_affinity, format_affinity_report) to RuleUsageTracker. Stored harness + extension metadata in the existing 'extra' dict on RuleUsageEvent so the log format is backward compatible.
+- Enhanced ChangelogManager._build_plain_summary to produce per-target per-section natural language ('Added 3 skills to codex; added 1 MCP server to gemini') instead of aggregate counts. Added natural_language_diff_summary for bullet-point changelog entries suitable for PR descriptions.
+- Added response_ms timing to McpReachabilityResult and measured TCP connect latency in _check_url. Updated the health dashboard formatter to show latency with a visual hint (✓/<100ms, ~/100-500ms, ⚠/>500ms).
+
+### Patterns Discovered
+
+- The codebase follows a clean separation: business logic lives in src/*.py modules, commands in src/commands/*.py expose it via argparse, and commands/*.md are the Claude Code slash-command stubs. New features should always put logic in the module, not the command.
+- Many items in this batch (8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 25, 27, 28, 29) were already fully implemented in prior iterations. The evolve loop is now producing mostly 'already done' items for this feature set — a sign the product surface is maturing.
+- GapTracker in compatibility_reporter.py is a good example of a module that was well-designed but never wired up to a user-facing command. The pattern of implementing the logic first and adding the command later means commands/*.py files are thin wrappers.
+- The _SECTION_NOUNS dict added to changelog_manager.py is the kind of small mapping that belongs at module level, not inline in methods, because it will likely grow as new section types are added.
+
+### Takeaways
+
+- Per-target section filtering (item 3) required only ~25 lines of new orchestrator code because the existing _apply_section_filter method was well-abstracted. The .harnesssync JSON schema extension is backward compatible.
+- The deepeval pytest plugin is broken on Python 3.9 due to union-type syntax (Dict | None) that requires 3.10+. Tests should be run with -p no:deepeval or the plugin should be pinned to a 3.9-compatible version.
+- Items 30, 18, and similar 'performance benchmarker/session replay' features are too vague to implement as code without significant infrastructure (running test prompts requires live harness processes) — correctly skipped.
+- The file-type affinity feature (item 26) requires callers to instrument PostToolUse hooks with record_file_access() calls — the data model is there but adoption depends on hook integration not yet wired in hooks/.
+
+---

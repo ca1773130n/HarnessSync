@@ -21,8 +21,10 @@ CLI usage (via /sync command)::
 
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
+
+from src.utils.constants import CORE_TARGETS
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +68,7 @@ HARNESS_ORDER_SEMANTICS: dict[str, str] = {
     "windsurf": "unordered",
 }
 
-# All known targets
+# All known targets (derived from HARNESS_ORDER_SEMANTICS, subset of CORE_TARGETS)
 _ALL_TARGETS = list(HARNESS_ORDER_SEMANTICS.keys())
 
 
@@ -229,14 +231,17 @@ class RulePrioritySorter:
         blocks: Current ordered list of rule blocks.
     """
 
-    def __init__(self, source_file: Path | None = None, project_dir: Path | None = None) -> None:
+    def __init__(self, source_file: Path | None = None, project_dir: Path | None = None,
+                 cc_home: Path | None = None) -> None:
         """Initialise the sorter.
 
         Args:
             source_file: Path to CLAUDE.md to sort. Auto-detected if None.
             project_dir: Project root for auto-detection. Defaults to cwd.
+            cc_home: Claude Code config directory (default: ~/.claude).
         """
         self.project_dir = project_dir or Path.cwd()
+        self.cc_home = cc_home if cc_home is not None else Path.home() / ".claude"
 
         if source_file is not None:
             self.source_file = source_file
@@ -244,7 +249,7 @@ class RulePrioritySorter:
             candidates = [
                 self.project_dir / "CLAUDE.md",
                 self.project_dir / ".claude" / "CLAUDE.md",
-                Path.home() / ".claude" / "CLAUDE.md",
+                self.cc_home / "CLAUDE.md",
             ]
             self.source_file = next((p for p in candidates if p.exists()), candidates[0])
 

@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from src.utils.constants import CORE_TARGETS
+
 
 # Pattern to extract CLAUDE.md sections
 _HEADING_RE = re.compile(r"^(#{1,3})\s+(.+?)(?:\s+#+)?$", re.MULTILINE)
@@ -42,7 +44,7 @@ _HEADING_RE = re.compile(r"^(#{1,3})\s+(.+?)(?:\s+#+)?$", re.MULTILINE)
 _COMMENT_RE = re.compile(r"^\s*<!--\s*(.+?)\s*-->", re.MULTILINE)
 
 # Known harness targets for coverage matrix
-_HARNESSES = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"]
+_HARNESSES = list(CORE_TARGETS)
 
 
 @dataclass

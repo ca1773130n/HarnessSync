@@ -20,12 +20,11 @@ The ``resolve_three_way_interactive()`` method presents this UI on a TTY.
 import difflib
 import hmac
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from src.state_manager import StateManager
 from src.utils.hashing import hash_file_sha256
-from src.utils.logger import Logger
 
 
 # ---------------------------------------------------------------------------

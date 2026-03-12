@@ -12,7 +12,6 @@ Usage:
     print(benchmarker.format_results(results))
 """
 
-import shlex
 import shutil
 import subprocess
 import time

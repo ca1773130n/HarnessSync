@@ -23,6 +23,8 @@ from src.orchestrator import SyncOrchestrator
 from src.lock import sync_lock, should_debounce, LOCK_FILE_DEFAULT
 from src.state_manager import StateManager
 from src.adapters.result import SyncResult
+from src.source_reader import SourceReader
+from src.desktop_notifier import notify_from_results, DesktopNotifier
 
 
 def _detect_git_root(cwd: Path) -> Path | None:
@@ -360,6 +362,13 @@ def main():
                 if "CLAUDE_PROJECT_DIR" not in os.environ:
                     project_dir = git_root
 
+            # --- SHARED SOURCE READER (created once, reused everywhere) ---
+            source_reader = SourceReader(
+                scope=getattr(args, "scope", "all"),
+                project_dir=project_dir,
+            )
+            source_data = source_reader.discover_all()
+
             # --- PRE-SYNC: INTERACTIVE CONFLICT RESOLUTION ---
             if not args.dry_run and not args.no_interactive:
                 import sys
@@ -371,6 +380,7 @@ def main():
                         if any(conflicts.values()):
                             use_section_wizard = getattr(args, "section_wizard", False)
                             use_three_way = getattr(args, "three_way", False)
+                            source_content = source_data.get("rules", "")
                             if use_section_wizard:
                                 # Per-section conflict resolution wizard
                                 # For each conflicted file, break into sections and
@@ -380,16 +390,6 @@ def main():
                                 section_merged: dict[str, str] = {}
                                 for _target_name, target_conflicts in conflicts.items():
                                     for conflict in target_conflicts:
-                                        from src.source_reader import SourceReader
-                                        try:
-                                            sr = SourceReader(
-                                                scope=getattr(args, "scope", "all"),
-                                                project_dir=project_dir,
-                                            )
-                                            source_data = sr.discover_all()
-                                            source_content = source_data.get("rules", "")
-                                        except Exception:
-                                            source_content = ""
                                         file_path = conflict.get("file_path", "")
                                         current_content = ""
                                         try:
@@ -415,14 +415,6 @@ def main():
                                 keep_files: list[str] = []
                                 for target_name, target_conflicts in conflicts.items():
                                     for conflict in target_conflicts:
-                                        from src.source_reader import SourceReader
-                                        try:
-                                            sr = SourceReader(scope=getattr(args, "scope", "all"),
-                                                              project_dir=project_dir)
-                                            source_data = sr.discover_all()
-                                            source_content = source_data.get("rules", "")
-                                        except Exception:
-                                            source_content = ""
                                         three_way = cd.three_way_diff(source_content, conflict)
                                         if three_way["has_real_conflict"]:
                                             resolution, _ = cd.resolve_three_way_interactive(
@@ -447,19 +439,15 @@ def main():
                     from src.native_preview import (
                         build_sync_preview, confirm_sync, get_all_native_previews
                     )
-                    from src.source_reader import SourceReader
-                    _sr = SourceReader(scope=getattr(args, "scope", "all"),
-                                       project_dir=project_dir)
-                    _source_data = _sr.discover_all()
-                    _rules = _source_data.get("rules", "")
+                    _rules = source_data.get("rules", "")
                     if isinstance(_rules, list):
                         _rules = "\n\n".join(
                             r.get("content", "") for r in _rules if isinstance(r, dict)
                         )
                     _preview_all = get_all_native_previews(
                         rules_content=_rules,
-                        mcp_servers=_source_data.get("mcp_servers", {}),
-                        settings=_source_data.get("settings", {}),
+                        mcp_servers=source_data.get("mcp_servers", {}),
+                        settings=source_data.get("settings", {}),
                     )
                     _preview_changes = build_sync_preview(
                         preview_all=_preview_all,
@@ -502,7 +490,8 @@ def main():
                 results = orchestrator.sync_all()
                 elapsed = time.time() - start_time
 
-                _display_results(results, args, elapsed, account=args.account)
+                _display_results(results, args, elapsed, account=args.account,
+                                 source_data=source_data, project_dir=project_dir)
             else:
                 # Auto-detect: sync all accounts if configured, else v1 behavior
                 orchestrator = SyncOrchestrator(
@@ -537,13 +526,15 @@ def main():
                                 if any(k.startswith('_') or isinstance(v, (dict,)) for k, v in first_val.items()):
                                     # Account-keyed results
                                     for acct_name, acct_results in all_results.items():
-                                        _display_results(acct_results, args, None, account=acct_name)
+                                        _display_results(acct_results, args, None, account=acct_name,
+                                                         source_data=source_data, project_dir=project_dir)
                                         print()
                                     print(f"All accounts synced in {elapsed:.1f}s")
                                     return
 
                         # Fallback: single results dict (v1 behavior from fallback)
-                        _display_results(all_results, args, elapsed)
+                        _display_results(all_results, args, elapsed,
+                                         source_data=source_data, project_dir=project_dir)
                         return
                 except Exception:
                     pass
@@ -551,7 +542,8 @@ def main():
                 # v1 behavior: no accounts configured
                 results = orchestrator.sync_all()
                 elapsed = time.time() - start_time
-                _display_results(results, args, elapsed)
+                _display_results(results, args, elapsed,
+                                 source_data=source_data, project_dir=project_dir)
 
     except BlockingIOError:
         print("Sync already in progress, skipping")
@@ -565,7 +557,8 @@ def main():
         sys.exit(1)
 
 
-def _display_results(results: dict, args, elapsed: float = None, account: str = None):
+def _display_results(results: dict, args, elapsed: float = None, account: str = None,
+                     source_data: dict = None, project_dir: Path = None):
     """Display sync results.
 
     Args:
@@ -573,6 +566,8 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
         args: Parsed arguments
         elapsed: Elapsed time in seconds
         account: Account name for display
+        source_data: Pre-computed source data from SourceReader.discover_all()
+        project_dir: Project root directory
     """
     # Check for blocked sync (secret detection)
     if results.get('_blocked'):
@@ -591,29 +586,27 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
                 print(target_results["preview"])
         # --- TERRAFORM-STYLE PLAN SUMMARY (item 1) ---
         # Show consolidated "+ created / ~ modified / = unchanged" counts.
-        try:
-            from src.native_preview import (
-                get_all_native_previews, build_sync_preview, format_sync_preview
-            )
-            from src.source_reader import SourceReader as _SR
-            _sr2 = _SR(scope=getattr(args, "scope", "all"), project_dir=project_dir)
-            _sd2 = _sr2.discover_all()
-            _rules2 = _sd2.get("rules", "")
-            if isinstance(_rules2, list):
-                _rules2 = "\n\n".join(
-                    r.get("content", "") for r in _rules2 if isinstance(r, dict)
+        if source_data is not None and project_dir is not None:
+            try:
+                from src.native_preview import (
+                    get_all_native_previews, build_sync_preview, format_sync_preview
                 )
-            _pall = get_all_native_previews(
-                rules_content=_rules2,
-                mcp_servers=_sd2.get("mcp_servers", {}),
-                settings=_sd2.get("settings", {}),
-            )
-            _pchanges = build_sync_preview(preview_all=_pall, project_dir=project_dir)
-            if _pchanges:
-                print()
-                print(format_sync_preview(_pchanges))
-        except Exception:
-            pass  # Preview summary is best-effort
+                _rules = source_data.get("rules", "")
+                if isinstance(_rules, list):
+                    _rules = "\n\n".join(
+                        r.get("content", "") for r in _rules if isinstance(r, dict)
+                    )
+                _pall = get_all_native_previews(
+                    rules_content=_rules,
+                    mcp_servers=source_data.get("mcp_servers", {}),
+                    settings=source_data.get("settings", {}),
+                )
+                _pchanges = build_sync_preview(preview_all=_pall, project_dir=project_dir)
+                if _pchanges:
+                    print()
+                    print(format_sync_preview(_pchanges))
+            except Exception:
+                pass  # Preview summary is best-effort
 
         print("\n(dry-run complete, no files modified)")
 
@@ -626,7 +619,7 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
                 write_html_report(
                     dry_run_results=results,
                     output_path=report_path,
-                    project_dir=Path(os.getcwd()),
+                    project_dir=project_dir or Path(os.getcwd()),
                     scope=getattr(args, 'scope', 'all'),
                     account=account,
                 )
@@ -659,18 +652,8 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
             print()
             print(results['_upgrade_notices'])
 
-        # --- AUTO-GENERATED SYNC CHANGELOG ---
-        if not getattr(args, "no_changelog", False):
-            try:
-                from src.changelog_manager import ChangelogManager
-                cm = ChangelogManager(project_dir=Path(os.getcwd()))
-                cm.record(
-                    results,
-                    scope=getattr(args, "scope", "all"),
-                    account=account,
-                )
-            except Exception:
-                pass  # Changelog write is best-effort
+        # Note: Changelog recording is handled by the orchestrator (see orchestrator.py).
+        # Do NOT call ChangelogManager.record() here to avoid duplicate writes.
 
         # --- SYNC ANOMALY CHECK (post-sync, for next-run awareness) ---
         # Record source length for future shrinkage detection
@@ -687,27 +670,7 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
 
         # --- DESKTOP NOTIFICATION (regular sync, not just watch mode) ---
         try:
-            _total_synced = sum(
-                sum(getattr(r, "synced", 0) for r in tr.values() if hasattr(r, "synced"))
-                for tr in results.values()
-                if isinstance(tr, dict) and not str(list(tr.keys())[:1]).startswith("['_")
-            )
-            _total_failed = sum(
-                sum(getattr(r, "failed", 0) for r in tr.values() if hasattr(r, "failed"))
-                for tr in results.values()
-                if isinstance(tr, dict) and not str(list(tr.keys())[:1]).startswith("['_")
-            )
-            _targets_synced = [k for k in results if not k.startswith("_")]
-            _notif_msg = (
-                f"{_total_synced} file(s) synced to {len(_targets_synced)} target(s)"
-                if _total_failed == 0
-                else f"{_total_synced} synced, {_total_failed} failed"
-            )
-            _send_desktop_notification(
-                "HarnessSync",
-                _notif_msg,
-                is_error=_total_failed > 0,
-            )
+            notify_from_results(results)
         except Exception:
             pass  # Desktop notifications are always best-effort
 
@@ -749,7 +712,8 @@ def _run_monorepo_sync(project_dir: Path, args) -> None:
     print(format_monorepo_results(results))
 
 
-def _run_watch_mode(project_dir: Path, args, only_sections, skip_sections) -> None:
+def _run_watch_mode(project_dir: Path, args, only_sections, skip_sections,
+                     cc_home: Path = None) -> None:
     """Watch Claude Code config files and sync on change.
 
     Uses polling (stat mtime) since fswatch/inotify may not be available.
@@ -760,8 +724,12 @@ def _run_watch_mode(project_dir: Path, args, only_sections, skip_sections) -> No
         args: Parsed sync arguments
         only_sections: Section filter from --only
         skip_sections: Section filter from --skip
+        cc_home: Claude Code config directory (default: ~/.claude)
     """
     import time as _time
+
+    if cc_home is None:
+        cc_home = Path.home() / ".claude"
 
     # Files and dirs to watch
     watch_targets = [
@@ -769,8 +737,8 @@ def _run_watch_mode(project_dir: Path, args, only_sections, skip_sections) -> No
         project_dir / ".claude",
         project_dir / ".mcp.json",
         project_dir / ".harness-sync",
-        Path.home() / ".claude" / "settings.json",
-        Path.home() / ".mcp.json",
+        cc_home / "settings.json",
+        cc_home.parent / ".mcp.json",
     ]
 
     def _collect_mtimes() -> dict:
@@ -788,6 +756,8 @@ def _run_watch_mode(project_dir: Path, args, only_sections, skip_sections) -> No
     print("=" * 50)
     print("Watching Claude Code config files for changes...")
     print("Press Ctrl+C to stop.\n")
+
+    _notifier = DesktopNotifier()
 
     last_mtimes = _collect_mtimes()
 
@@ -829,61 +799,18 @@ def _run_watch_mode(project_dir: Path, args, only_sections, skip_sections) -> No
                         if isinstance(tr, dict) and not str(tr).startswith('_')
                     )
                     print(f"[{ts}] Sync complete.\n")
-                    _send_desktop_notification(
-                        "HarnessSync", "Sync complete", is_error=False
+                    _notifier.notify_sync_complete(
+                        targets_updated=[k for k in results if not k.startswith("_")],
+                        targets_skipped=[],
+                        errors=[],
                     )
                 except Exception as e:
                     print(f"[{ts}] Sync error: {e}\n")
-                    _send_desktop_notification(
-                        "HarnessSync", f"Sync error: {e}", is_error=True
-                    )
+                    _notifier.notify_sync_error("watch", str(e))
 
                 last_mtimes = current_mtimes
     except KeyboardInterrupt:
         print("\nWatch mode stopped.")
-
-
-def _send_desktop_notification(title: str, message: str, is_error: bool = False) -> None:
-    """Send a desktop notification on macOS or Linux.
-
-    Uses osascript (macOS) or notify-send (Linux) if available.
-    Silently no-ops if no notification system is found.
-
-    Args:
-        title: Notification title.
-        message: Notification body text.
-        is_error: If True, uses error sound/icon on macOS.
-    """
-    import platform
-    import subprocess as _subprocess
-
-    system = platform.system()
-    try:
-        if system == "Darwin":
-            # macOS: use osascript to show a notification
-            subtitle = "Error" if is_error else "Success"
-            sound = "Basso" if is_error else "Glass"
-            script = (
-                f'display notification "{message}" '
-                f'with title "{title}" subtitle "{subtitle}" sound name "{sound}"'
-            )
-            _subprocess.run(
-                ["osascript", "-e", script],
-                capture_output=True,
-                timeout=3,
-            )
-        elif system == "Linux":
-            # Linux: use notify-send if available
-            import shutil as _shutil
-            if _shutil.which("notify-send"):
-                urgency = "critical" if is_error else "normal"
-                _subprocess.run(
-                    ["notify-send", "-u", urgency, title, message],
-                    capture_output=True,
-                    timeout=3,
-                )
-    except Exception:
-        pass  # Desktop notifications are best-effort
 
 
 if __name__ == "__main__":

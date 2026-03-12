@@ -28,6 +28,8 @@ Usage::
 import re
 from dataclasses import dataclass
 
+from src.utils.constants import EXTENDED_TARGETS
+
 
 # ---------------------------------------------------------------------------
 # Support level constants
@@ -43,10 +45,7 @@ UNKNOWN = "unknown"
 # All known harnesses (display order matches sync_matrix.py)
 # ---------------------------------------------------------------------------
 
-ALL_HARNESSES: list[str] = [
-    "codex", "gemini", "opencode", "cursor", "aider",
-    "windsurf", "cline", "continue", "zed", "neovim", "vscode",
-]
+ALL_HARNESSES: list[str] = list(EXTENDED_TARGETS) + ["vscode"]
 
 
 # ---------------------------------------------------------------------------

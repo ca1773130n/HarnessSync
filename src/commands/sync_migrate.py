@@ -30,8 +30,9 @@ PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__
 sys.path.insert(0, PLUGIN_ROOT)
 
 from src.migration_assistant import MigrationAssistant
+from src.utils.constants import CORE_TARGETS
 
-SUPPORTED_HARNESSES = ["cursor", "aider", "gemini", "codex", "opencode", "windsurf"]
+SUPPORTED_HARNESSES = list(CORE_TARGETS)
 
 
 def main():

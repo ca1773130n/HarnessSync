@@ -18,7 +18,7 @@ Or as a blocking watch mode:
 
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -266,12 +266,8 @@ def _default_alert_callback(alert: DriftAlert) -> None:
 def send_os_notification(title: str, body: str) -> bool:
     """Send a native OS desktop notification (item 29).
 
-    Attempts to deliver a desktop notification using the best available
-    mechanism for the current platform:
-      - macOS: ``osascript`` (AppleScript) via display notification
-      - Linux: ``notify-send`` (libnotify, available in most distros)
-      - Windows: ``PowerShell`` with BurntToast or basic balloon tip
-      - Fallback: prints to stderr (no-op, never raises)
+    Delegates to :class:`src.desktop_notifier.DesktopNotifier` which handles
+    macOS (osascript), Linux (notify-send), and graceful fallback.
 
     CRITICAL: Never includes file content or hashes in the notification body —
     only filenames and harness names to avoid leaking sensitive config data.
@@ -283,54 +279,12 @@ def send_os_notification(title: str, body: str) -> bool:
     Returns:
         True if notification was sent successfully, False otherwise.
     """
-    import platform
-    import subprocess
-    import shutil
-
-    system = platform.system()
     try:
-        if system == "Darwin":
-            # macOS: use AppleScript display notification
-            script = f'display notification "{body}" with title "{title}"'
-            result = subprocess.run(
-                ["osascript", "-e", script],
-                capture_output=True,
-                timeout=5,
-            )
-            return result.returncode == 0
-
-        elif system == "Linux":
-            # Linux: use notify-send (libnotify)
-            if shutil.which("notify-send"):
-                result = subprocess.run(
-                    ["notify-send", "--urgency=normal", title, body],
-                    capture_output=True,
-                    timeout=5,
-                )
-                return result.returncode == 0
-
-        elif system == "Windows":
-            # Windows: use PowerShell with basic balloon notification
-            ps_script = (
-                "Add-Type -AssemblyName System.Windows.Forms; "
-                "$n = New-Object System.Windows.Forms.NotifyIcon; "
-                "$n.Icon = [System.Drawing.SystemIcons]::Information; "
-                "$n.Visible = $true; "
-                f"$n.ShowBalloonTip(5000, '{title}', '{body}', [System.Windows.Forms.ToolTipIcon]::Info); "
-                "Start-Sleep -Seconds 6; "
-                "$n.Dispose()"
-            )
-            result = subprocess.run(
-                ["powershell", "-Command", ps_script],
-                capture_output=True,
-                timeout=10,
-            )
-            return result.returncode == 0
-
+        from src.desktop_notifier import DesktopNotifier
+        notifier = DesktopNotifier(enabled=True)
+        return notifier._send(title, body)
     except Exception:
-        pass  # Notifications are best-effort; never raise
-
-    return False
+        return False
 
 
 def send_slack_notification(webhook_url: str, title: str, body: str) -> bool:

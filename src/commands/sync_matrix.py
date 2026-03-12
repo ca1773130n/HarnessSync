@@ -14,6 +14,7 @@ PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__
 sys.path.insert(0, PLUGIN_ROOT)
 
 from src.mcp_tool_compat import format_mcp_tool_matrix
+from src.utils.constants import EXTENDED_TARGETS
 
 
 # Support level constants
@@ -142,8 +143,7 @@ CAPABILITY_MATRIX: list[dict] = [
 ]
 
 # Display order for targets
-TARGETS = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf",
-           "cline", "continue", "zed", "neovim"]
+TARGETS = list(EXTENDED_TARGETS)
 
 # Level display config: (symbol, display label)
 LEVEL_DISPLAY = {

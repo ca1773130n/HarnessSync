@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from src.utils.constants import CORE_TARGETS
+
 
 class EnvSupport(str, Enum):
     """How well a target harness supports a given env var."""
@@ -210,7 +212,7 @@ class EnvVarMatrix:
         targets: Harness names to include. Defaults to all registered targets.
     """
 
-    ALL_TARGETS = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"]
+    ALL_TARGETS = list(CORE_TARGETS)
 
     def __init__(self, targets: list[str] | None = None):
         self.targets = targets or self.ALL_TARGETS

@@ -48,8 +48,10 @@ Untagged content is included in all targets (default passthrough).
 
 import re
 
+from src.utils.constants import CORE_TARGETS
+
 # Supported target names
-KNOWN_TARGETS = ("codex", "gemini", "opencode", "cursor", "aider", "windsurf")
+KNOWN_TARGETS = CORE_TARGETS
 
 # Classic tag pattern (backward compat)
 _CLASSIC_TAG_RE = re.compile(

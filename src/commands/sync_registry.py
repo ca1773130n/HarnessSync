@@ -78,7 +78,7 @@ def main() -> None:
 
     action = args.action or "list"
     project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
-    cc_home = Path.home() / ".claude"
+    cc_home = Path(os.environ.get("CLAUDE_HOME", Path.home() / ".claude"))
 
     fetch_remote = not getattr(args, "no_remote", False)
     registry = McpRegistry(cc_home=cc_home, project_dir=project_dir, fetch_remote=fetch_remote)
