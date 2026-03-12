@@ -13,6 +13,8 @@ import sys
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PLUGIN_ROOT)
 
+from src.mcp_tool_compat import format_mcp_tool_matrix
+
 
 # Support level constants
 NATIVE = "native"      # Full native support — round-trips cleanly
@@ -219,9 +221,29 @@ def format_matrix(show_notes: bool = False) -> str:
 
 
 def main() -> None:
-    """Entry point for /sync-matrix command."""
+    """Entry point for /sync-matrix command.
+
+    Flags:
+        --notes / -n        Show per-cell detail notes under the section table
+        --mcp-tools         Show MCP tool compatibility matrix (transports,
+                            capability types, config features) instead of the
+                            default config-section matrix
+        --mcp-section SEC   Which MCP sub-table to show: transport, capabilities,
+                            features, or all (default: all)
+    """
     show_notes = "--notes" in sys.argv or "-n" in sys.argv
-    print(format_matrix(show_notes=show_notes))
+    show_mcp_tools = "--mcp-tools" in sys.argv
+
+    if show_mcp_tools:
+        # Determine which MCP sub-section to show
+        mcp_section = "all"
+        if "--mcp-section" in sys.argv:
+            idx = sys.argv.index("--mcp-section")
+            if idx + 1 < len(sys.argv):
+                mcp_section = sys.argv[idx + 1]
+        print(format_mcp_tool_matrix(section=mcp_section))
+    else:
+        print(format_matrix(show_notes=show_notes))
 
 
 if __name__ == "__main__":

@@ -2415,3 +2415,72 @@ _2026-03-12T05:09:13.244Z_
 - session_handoff.py solves a real pain point with zero dependencies — it's pure stdlib and will work in any environment where HarnessSync is installed
 
 ---
+## Iteration 37
+_2026-03-12T05:24:26.029Z_
+
+### Items Attempted
+
+- **Sync Conflict Resolution Wizard** — pass
+- **Sync Preview / Dry-Run Mode** — pass
+- **Harness Capability Gap Report** — pass
+- **MCP Server Reachability Dashboard** — pass
+- **Team Sync Broadcast** — pass
+- **New Harness Bootstrap** — pass
+- **Skill Compatibility Matrix** — pass
+- **Auto-Generate Sync Changelog PR** — pass
+- **Sync Profiles / Partial Sync** — pass
+- **Rule Deduplication Analysis** — pass
+- **Harness Usage Analytics** — pass
+- **Environment Variable Audit** — pass
+- **Sync-on-Git-Commit Integration** — pass
+- **AI-Assisted Rule Translation** — pass
+- **Target-Specific Override Layer** — pass
+- **Visual Sync Rollback Timeline** — pass
+- **MCP Server Portability Checker** — pass
+- **Config Size Budget Warnings** — pass
+- **Cross-Harness Command Alias Sync** — pass
+- **Sync Notification Digest** — pass
+- **Harness Parity Score** — pass
+- **Per-Project Sync Ignore Rules** — pass
+- **Live Sync Watcher Status Indicator** — pass
+- **Harness Feature Gap Tracker** — pass
+- **Semantic Rule Conflict Detection** — pass
+- **Sync Impact Preview in PR Comments** — pass
+- **Cross-Harness Prompt Benchmark** — pass
+- **Skill Usage Frequency Prioritization** — pass
+- **Config Version Locking** — pass
+- **Multi-Workspace Sync Map** — pass
+- **Harness-Specific Secret Injection** — pass
+- **Human-Readable Sync Diff Explanations** — pass
+- **Agent Capability Translation Layer** — pass
+- **Scheduled Sync Health Check** — pass
+- **Personalized Harness Adoption Guide** — pass
+
+### Decisions Made
+
+- Added check_harness_budgets() to ConfigSizeOptimizer rather than a new module — it naturally belongs next to the existing verbosity analysis since both concern config size.
+- SemanticConflictDetector uses compiled regex pairs rather than LLM calls — deterministic, fast, zero API cost, and sufficient for the most common contradiction patterns in CLAUDE.md files.
+- Fixed same-line false positive in SemanticConflictDetector: when both patterns hit the same line, fall back to next alternative match rather than reporting a spurious conflict.
+- SyncDigestCollector added to desktop_notifier.py rather than a new file — it's a notification concern and reuses DesktopNotifier._send() cleanly.
+- GapTracker and calculate_parity_score() added to compatibility_reporter.py — gap tracking is a capability-reporting concern that belongs alongside the fidelity/coverage scoring.
+- format_status_line() is a module-level function in drift_watcher.py (not a method) so callers who only have a status dict (e.g. from a serialised state) don't need a live DriftWatcher instance.
+- scan_project_env_vars() builds on existing check_env_portability() rather than duplicating logic — it just handles file discovery and text extraction, delegating analysis to the established function.
+- Per-harness token budgets in _HARNESS_TOKEN_BUDGETS set at 25% of each harness context window — a conservative rule-file budget that leaves room for conversation and code context.
+
+### Patterns Discovered
+
+- The codebase follows a consistent pattern: dataclass for reports, class for analyzers, module-level convenience functions for callers without a class instance.
+- All modules use from __future__ import annotations for Python 3.9 forward-reference compat — critical pattern to maintain.
+- Heavy use of Optional/None defaults with lazy fallback initialisation (e.g. state_manager or StateManager()) throughout the codebase — keeps test injection clean.
+- The compatibility_reporter.py had no dataclass import despite growing into a module that naturally needs them for GapTracker — added during this iteration.
+- Local imports inside functions (e.g. from collections import Counter inside format_digest) are used to avoid top-level import cost in rarely-called paths — acceptable pattern here but should be kept consistent.
+
+### Takeaways
+
+- Most of the 30 product ideas were already implemented in existing modules — the codebase is remarkably feature-complete. Future product-ideation passes should audit existing modules before proposing new ones.
+- config_size_optimizer.py and token_estimator.py had overlapping concerns (both deal with token counts and context limits) but were not integrated — adding check_harness_budgets() as a bridge is the right incremental step.
+- The SemanticConflictDetector pattern (compiled regex pairs) is extensible — new contradiction patterns can be added to _CONTRADICTION_PATTERNS without touching the detection logic.
+- GapTracker persists to ~/.harnesssync/gaps.json using the same convention as profiles and overrides — consistent with the home-dir config pattern used throughout the project.
+- drift_watcher.py's format_status_line() fills a genuine UX gap: the existing is_running()/get_alert_history() API exposed the data but there was no formatting layer for shell prompt or status bar integration.
+
+---

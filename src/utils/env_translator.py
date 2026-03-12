@@ -29,10 +29,20 @@ import re
 VAR_PATTERN = re.compile(r'\$\{([A-Z_][A-Z0-9_]*)(:-([^}]+))?\}')
 
 # Transport support matrix per target CLI
+# Covers all harnesses HarnessSync syncs to.
+# Empty set means the harness writes config but never executes MCP servers.
 TRANSPORT_SUPPORT = {
-    "codex": {"stdio", "http"},
-    "gemini": {"stdio", "http", "sse"},
+    "codex":    {"stdio", "http"},
+    "gemini":   {"stdio", "http", "sse"},
     "opencode": {"stdio", "http"},
+    "cursor":   {"stdio", "http", "sse"},
+    "aider":    set(),               # Name written to .aider.conf.yml only
+    "windsurf": {"stdio", "http", "sse"},
+    "cline":    {"stdio", "http", "sse"},
+    "continue": {"stdio", "http"},
+    "zed":      {"stdio", "http"},
+    "neovim":   {"stdio", "http", "sse"},
+    "vscode":   set(),               # No MCP support in VS Code AI extensions
 }
 
 
