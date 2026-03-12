@@ -27,7 +27,7 @@ import socket
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.secret_detector import SecretDetector
@@ -348,3 +348,64 @@ class TeamBroadcast:
             files_included=files_written,
             errors=errors,
         )
+
+    def check_and_auto_pull(
+        self,
+        repo: str,
+        branch: str = "team-config",
+        max_age_hours: float = 24.0,
+    ) -> BroadcastResult | None:
+        """Pull from the team broadcast repo if the local copy is stale.
+
+        Reads the last-pull timestamp from ``.harnesssync-broadcast-state.json``
+        in the project directory. If the timestamp is older than ``max_age_hours``
+        (or no timestamp exists), pulls the team config automatically.
+
+        This method is designed to be called from session-start hooks so that
+        every developer's harnesses stay current without manual intervention.
+
+        Args:
+            repo: Shared repository URL or local path.
+            branch: Branch to pull from (default: "team-config").
+            max_age_hours: Re-pull if last pull is older than this many hours.
+
+        Returns:
+            BroadcastResult if a pull was performed, None if still fresh.
+        """
+        state_path = self.project_dir / ".harnesssync-broadcast-state.json"
+        now = datetime.now(timezone.utc)
+
+        if state_path.exists():
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                last_pull_str = state.get("last_pull_at", "")
+                if last_pull_str:
+                    last_pull = datetime.fromisoformat(last_pull_str)
+                    # Ensure timezone-aware for comparison
+                    if last_pull.tzinfo is None:
+                        last_pull = last_pull.replace(tzinfo=timezone.utc)
+                    age = now - last_pull
+                    if age < timedelta(hours=max_age_hours):
+                        return None  # Still fresh — skip pull
+            except (OSError, ValueError, KeyError):
+                pass  # Corrupt state — proceed with pull
+
+        result = self.pull(repo, branch=branch)
+
+        # Persist the pull timestamp regardless of success so we don't
+        # hammer a broken repo on every session start.
+        try:
+            state_data = {
+                "last_pull_at": now.isoformat(),
+                "repo": repo,
+                "branch": branch,
+                "success": result.success,
+                "files_pulled": result.files_included,
+            }
+            state_path.write_text(
+                json.dumps(state_data, indent=2), encoding="utf-8"
+            )
+        except OSError:
+            pass
+
+        return result

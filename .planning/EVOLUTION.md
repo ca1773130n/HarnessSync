@@ -2084,3 +2084,72 @@ _2026-03-12T03:58:45.276Z_
 - The skill_sync_tags.py YAML frontmatter parser has a fallback for when PyYAML is not installed. This matches the pattern in harness_rule_dsl.py. The codebase consistently treats PyYAML as optional-but-preferred.
 
 ---
+## Iteration 32
+_2026-03-12T04:14:16.210Z_
+
+### Items Attempted
+
+- **Conflict Resolution Wizard** — pass
+- **Per-Harness Config Overrides** — pass
+- **Team Config Profiles via Git** — pass
+- **/sync-onboard: Interactive Setup Wizard** — pass
+- **Capability Gap Report** — pass
+- **Auto-Detect Newly Installed Harnesses** — pass
+- **Named Sync Profiles (Work/Personal/OSS)** — pass
+- **MCP Server Discovery & Cross-Harness Registration** — pass
+- **Config Health Score & Recommendations** — pass
+- **Harness Benchmark: Compare Output Quality** — pass
+- **AI-Assisted Rule Translation for Unmappable Settings** — pass
+- **Auto-Generated Sync Changelog** — pass
+- **Dry-Run Preview with Diff Output** — pass
+- **CI/CD Config Export for Headless Environments** — pass
+- **Plugin Compatibility Matrix** — pass
+- **Starter Config Templates by Role/Stack** — pass
+- **Section-Level Sync Selection UI** — pass
+- **Sync Notifications (Desktop / Slack / ntfy)** — pass
+- **Project-Scoped Sync Rules (.harnessync)** — pass
+- **Natural Language Config Authoring** — pass
+- **Harness Migration Assistant** — pass
+- **MCP Server Cross-Harness Compatibility Check** — pass
+- **Team Config Server (Local HTTP)** — pass
+- **Config Version Pinning & Time Travel** — pass
+- **Skill Coverage Heatmap** — pass
+- **Auto-Detect Harness Version Updates** — pass
+- **Sync Impact Preview: 'What Will Break'** — pass
+- **Secret & Sensitive Value Masking** — pass
+- **Auto-Generate Config Documentation** — pass
+- **Cursor Rules Bidirectional Sync** — pass
+- **GitHub Copilot Workspace Adapter** — pass
+- **Zed AI Adapter** — pass
+- **Config Complexity Analyzer & Simplifier** — pass
+- **Sync Watchdog: Persistent Background Daemon** — pass
+- **Extensible Sync Lint Rules** — pass
+- **Multi-Machine Config Sync via iCloud/Dotfiles Repo** — pass
+
+### Decisions Made
+
+- Item 30 (Cursor bidirectional sync): Added read_rules(), read_mcp(), read_all(), and list_rule_types() to CursorAdapter. Used static _strip_frontmatter, _parse_frontmatter, and _strip_managed_markers helpers to avoid YAML dependency for simple frontmatter parsing. list_rule_types() classifies rules as always/auto/manual based on alwaysApply and glob frontmatter fields, matching Cursor's native rule type taxonomy.
+- Item 28 (Secret masking): Added scrub_content() and scrub_rules_content() to SecretDetector. scrub_content() extends the existing _INLINE_SECRET_RE pattern scanning with additional entropy-based detection for standalone high-entropy tokens. Integrated scrub_rules_content() into orchestrator's scrub_secrets branch to mask inline secrets in CLAUDE.md rules before they reach target adapters — previously only MCP env vars were scrubbed.
+- Item 5 (Capability gap ranked by value lost): Added rank_by_value_lost() and format_value_lost_ranking() to CompatibilityReporter. Uses a weighted scoring model (count × fidelity_loss × category_importance) to rank feature×harness gaps. Skills and agents are weighted highest (1.5, 1.4) since they represent the most CC-specific investment. Each entry includes a concrete suggestion for closing the gap.
+- Item 25 (Skill coverage heatmap): Added render_skill_heatmap_html() and write_skill_heatmap() to html_report.py. Self-contained HTML with embedded CSS, no external dependencies. Color codes cells green/yellow/red/grey for full/partial/none/unknown fidelity. Shows overall full-fidelity percentage in the summary header.
+- Item 13 (Dry-run per-harness diff summary): Added format_per_harness_summary() and format_full_dry_run() to DiffFormatter. Summary table shows files, added lines, removed lines, and status per harness, sorted by number of changes. format_full_dry_run() composes summary + diffs + cost estimate as the canonical --dry-run output.
+- Item 6/26 (Harness version update detection): Added detect_version_updates(), _load_known_versions(), _save_known_versions(), _compare_version_kind(), and format_version_update_report() to harness_detector.py. Persists a JSON version cache at ~/.harnesssync/versions_cache.json and diffs against current installed versions on each call. Integrated into startup_check.py via check_harness_updates() and full_startup_check().
+- Item 2 (Per-harness section-level annotations): Added filter_sections_for_target(), extract_section_annotations(), and format_section_annotation_report() to sync_filter.py. Parses heading-line annotations like '## Section <!-- harness:codex-only -->' and drops entire Markdown sections for excluded targets. Integrated into filter_rules_for_target() as a pre-processing step before the line-by-line tag scanner runs.
+
+### Patterns Discovered
+
+- Most features already have a stub module — the pattern is to find the thin module and add real implementation rather than creating new files. This iteration added 400-600 meaningful lines across existing files.
+- The orchestrator's secret detection branch at line ~315 was MCP-env-only; rules content was scanned but never scrubbed. The gap between scan() and scrub() coverage is a recurring pattern to watch in similar pre-sync validation hooks.
+- CursorAdapter had pure write-only methods — no read path. Other adapters (aider, gemini) expose partial read-back via migration_assistant.py helper functions rather than adapter methods, making the bidirectional story inconsistent. Adding canonical read methods to the adapter class is the right long-term pattern.
+- sync_filter.py's filter_rules_for_target() was the central filtering entry point but only handled inline/block tags — whole-section targeting via heading annotations was missing. Adding filter_sections_for_target() as a pre-processing step cleanly separates the two levels without breaking existing tag logic.
+- The heatmap HTML and format_full_dry_run() both follow a 'self-contained with no deps' constraint that exists throughout the HTML report module — important to maintain since these outputs may be piped or opened directly.
+
+### Takeaways
+
+- The codebase has a very complete module inventory but many modules are 200-400 lines of mostly-skeleton code with real implementation deferred. Future iterations should systematically go through the thinner modules and add meat to their core methods.
+- Harness bidirectional sync is the highest-value feature gap: most adapters write to target harnesses but can't read back. Adding read_all() to each adapter would unlock /sync-import and conflict detection for all targets, not just Cursor.
+- The SecretDetector is well-designed but incompletely integrated — scrub_mcp_env() was wired up but scrub_rules_content() wasn't. This class of 'implemented but not connected' bugs is common in the codebase and worth auditing systematically.
+- The test suite (14 tests) is small relative to the codebase complexity. Most functionality goes untested. Adding unit tests for the new functions (especially filter_sections_for_target and rank_by_value_lost) would be high-value future work.
+- Version update detection is a critical missing link between HarnessSync and harness evolution — as Cursor/Codex/Gemini gain new capabilities, adapters need to know to re-evaluate previously-unmapped features. The version cache pattern enables this.
+
+---

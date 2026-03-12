@@ -9,6 +9,7 @@ unavailable servers, hooks that reference Claude Code internals.
 Shows a compatibility score per skill per harness.
 """
 
+import dataclasses
 import re
 from pathlib import Path
 
@@ -121,10 +122,164 @@ class SkillCompatibilityReport:
             self.target_scores[target] = max(0, min(100, score))
 
 
+@dataclasses.dataclass
+class RulePortabilityIssue:
+    """A single portability issue found in a CLAUDE.md rule."""
+
+    rule_index: int        # 1-based index into the rules list
+    rule_preview: str      # first 80 chars of the rule text
+    pattern_desc: str      # human-readable description of the issue
+
+
+@dataclasses.dataclass
+class ProjectPortabilityScore:
+    """Aggregate portability score for the whole project (rules + skills).
+
+    Scores are in the range 0-100 per target:
+    - 90-100: Excellent — most content will transfer faithfully
+    - 70-89:  Good — minor degradation expected
+    - 50-69:  Fair — noticeable capability loss on some targets
+    - 0-49:   Poor — significant config investment won't carry over
+
+    The project score is a weighted average: rules carry 40% of the weight
+    (they affect all harnesses), skills carry 60%.
+    """
+
+    target_scores: dict[str, int]        # target -> 0-100
+    rule_issues: list[RulePortabilityIssue]
+    skill_reports: list[SkillCompatibilityReport]
+    total_rules: int
+    total_skills: int
+
+    @property
+    def overall_score(self) -> int:
+        """Return the mean score across all configured targets."""
+        if not self.target_scores:
+            return 100
+        return round(sum(self.target_scores.values()) / len(self.target_scores))
+
+    def format_summary(self) -> str:
+        """Return a concise summary of the project portability score."""
+        lines: list[str] = []
+        lines.append("Harness Portability Score")
+        lines.append("=" * 40)
+        lines.append(f"  Overall: {self.overall_score}/100")
+        lines.append("")
+        for target, score in sorted(self.target_scores.items(), key=lambda x: -x[1]):
+            bar = "#" * (score // 5) + "." * (20 - score // 5)
+            lines.append(f"  {target:<12} {score:>3}/100  [{bar}]")
+        lines.append("")
+        lines.append(f"  Rules checked:  {self.total_rules}")
+        lines.append(f"  Rule issues:    {len(self.rule_issues)}")
+        lines.append(f"  Skills checked: {self.total_skills}")
+        skill_issues = sum(len(r.issues) for r in self.skill_reports)
+        lines.append(f"  Skill issues:   {skill_issues}")
+        if self.rule_issues:
+            lines.append("")
+            lines.append("  Top rule portability issues:")
+            for issue in self.rule_issues[:5]:
+                lines.append(f"    Rule {issue.rule_index}: {issue.pattern_desc}")
+                lines.append(f"      > {issue.rule_preview}")
+        return "\n".join(lines)
+
+
 class SkillCompatibilityChecker:
     """Analyzes Claude Code skills for cross-harness compatibility."""
 
     ALL_PATTERNS = CLAUDE_SPECIFIC_PATTERNS + HOOK_PATTERNS + MCP_PATTERNS
+
+    # Patterns that reduce portability when found in raw rule text
+    RULE_PORTABILITY_PATTERNS = [
+        (r"mcp__\w+__\w+", "MCP tool call — not available outside Claude Code"),
+        (r"\$CLAUDE_PLUGIN_ROOT", "Claude plugin path — CC-specific"),
+        (r"PostToolUse|PreToolUse|UserPromptSubmit|SessionStart|SessionEnd",
+         "Hook event name — CC-specific lifecycle"),
+        (r"\.claude/hooks", "Claude hooks directory — CC-specific path"),
+        (r"hooks\.json", "hooks.json reference — CC-specific"),
+        (r"\bTodoWrite\b", "TodoWrite tool — CC-specific"),
+        (r"\bWebFetch\b|\bWebSearch\b", "CC-specific web tool reference"),
+        (r"CLAUDE\.md", "CLAUDE.md filename reference — target-specific"),
+    ]
+
+    def check_rules_portability(
+        self,
+        rules: list[str | dict],
+        targets: list[str] | None = None,
+    ) -> list[RulePortabilityIssue]:
+        """Scan a list of rules from CLAUDE.md for portability issues.
+
+        Args:
+            rules: List of rule strings, or dicts with a "content" key.
+            targets: Target harness names (defaults to all registered targets).
+
+        Returns:
+            List of RulePortabilityIssue for rules that reference CC-specific features.
+        """
+        import re as _re
+
+        issues: list[RulePortabilityIssue] = []
+        for idx, rule in enumerate(rules, 1):
+            text = rule.get("content", "") if isinstance(rule, dict) else str(rule)
+            for pattern, desc in self.RULE_PORTABILITY_PATTERNS:
+                if _re.search(pattern, text, _re.IGNORECASE):
+                    preview = text.strip()[:80].replace("\n", " ")
+                    issues.append(RulePortabilityIssue(idx, preview, desc))
+                    break  # one issue per rule
+        return issues
+
+    def compute_project_score(
+        self,
+        rules: list[str | dict],
+        skills: dict[str, Path] | None = None,
+    ) -> ProjectPortabilityScore:
+        """Compute a holistic portability score for the entire project.
+
+        Combines rule portability (40% weight) with skill portability (60%)
+        into a per-target score and an overall project score.
+
+        Args:
+            rules: List of rule strings or dicts from SourceReader.
+            skills: Optional dict mapping skill name → skill path.
+
+        Returns:
+            ProjectPortabilityScore with per-target scores and issue details.
+        """
+        from src.adapters import AdapterRegistry
+        targets = AdapterRegistry.list_targets()
+
+        skill_reports: list[SkillCompatibilityReport] = []
+        if skills:
+            skill_reports = self.check_all_skills(skills)
+
+        rule_issues = self.check_rules_portability(rules, targets)
+
+        # --- Per-target score ---
+        # Rules: deduct 5 points per CC-specific issue (capped at 40 deduction)
+        # Skills: use average skill score per target
+        target_scores: dict[str, int] = {}
+        for target in targets:
+            rule_deduction = min(40, len(rule_issues) * 5)
+            rule_score = 100 - rule_deduction
+
+            if skill_reports:
+                skill_target_scores = [
+                    r.target_scores.get(target, 100) for r in skill_reports
+                ]
+                skill_score = round(sum(skill_target_scores) / len(skill_target_scores))
+            else:
+                skill_score = 100
+
+            # Weighted average: rules 40%, skills 60%
+            combined = round(0.4 * rule_score + 0.6 * skill_score)
+            target_scores[target] = max(0, min(100, combined))
+
+        return ProjectPortabilityScore(
+            target_scores=target_scores,
+            rule_issues=rule_issues,
+            skill_reports=skill_reports,
+            total_rules=len(rules),
+            total_skills=len(skills) if skills else 0,
+        )
 
     def check_skill(self, skill_name: str, skill_path: Path) -> SkillCompatibilityReport:
         """Check a single skill for compatibility issues.

@@ -13,7 +13,7 @@ Example output (when drift detected):
     [HarnessSync] 2 target(s) out of sync (codex, gemini) — run /sync to update
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from src.state_manager import StateManager
@@ -191,11 +191,127 @@ def check_harness_updates(cache_dir: Path | None = None) -> str | None:
         return None
 
 
+def check_team_broadcast(project_dir: Path | None = None) -> str | None:
+    """Auto-pull team broadcast config if the local copy is stale.
+
+    Reads the configured ``team_broadcast_repo`` and ``team_broadcast_branch``
+    from the project's ``.harnesssync`` file. If present and the last pull is
+    older than ``team_broadcast_max_age_hours`` (default: 24), pulls the team
+    config and returns a summary notice.
+
+    This is intentionally silent on success to keep session start non-intrusive.
+    It only surfaces a notice when a pull actually occurs or when an error happens.
+
+    Args:
+        project_dir: Project root directory (uses cwd if None).
+
+    Returns:
+        Notice string if a pull was performed or failed, None if fresh or not configured.
+    """
+    project_dir = project_dir or Path.cwd()
+    config_path = project_dir / ".harnesssync"
+    if not config_path.exists():
+        return None
+
+    try:
+        import json as _json
+        cfg = _json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+    repo = cfg.get("team_broadcast_repo", "")
+    if not repo:
+        return None
+
+    branch = cfg.get("team_broadcast_branch", "team-config")
+    max_age_hours = float(cfg.get("team_broadcast_max_age_hours", 24.0))
+
+    try:
+        from src.team_broadcast import TeamBroadcast
+        broadcaster = TeamBroadcast(project_dir)
+        result = broadcaster.check_and_auto_pull(
+            repo=repo,
+            branch=branch,
+            max_age_hours=max_age_hours,
+        )
+    except Exception as e:
+        return f"[HarnessSync] Team broadcast check failed: {e}"
+
+    if result is None:
+        return None  # Still fresh
+
+    if result.success:
+        count = len(result.files_included)
+        return (
+            f"[HarnessSync] Team config pulled from {branch} "
+            f"({count} file(s) updated) — run /sync to apply"
+        )
+    else:
+        errs = "; ".join(result.errors[:2])
+        return f"[HarnessSync] Team broadcast pull failed: {errs}"
+
+
+def check_schedule_staleness(project_dir: Path | None = None) -> str | None:
+    """Warn if the scheduled sync interval has elapsed without a sync.
+
+    Reads the sync schedule config from ``.harnesssync`` and compares the
+    last sync timestamp from StateManager. If the scheduled interval has
+    elapsed, returns a warning encouraging the user to sync.
+
+    Args:
+        project_dir: Project root directory (uses cwd if None).
+
+    Returns:
+        Warning string if sync is overdue, None otherwise.
+    """
+    project_dir = project_dir or Path.cwd()
+
+    # Read sync_interval_hours from .harnesssync if present
+    sync_interval_hours: float | None = None
+    config_path = project_dir / ".harnesssync"
+    if config_path.exists():
+        try:
+            import json as _json
+            cfg = _json.loads(config_path.read_text(encoding="utf-8"))
+            interval = cfg.get("sync_interval_hours")
+            if interval is not None:
+                sync_interval_hours = float(interval)
+        except (OSError, ValueError):
+            pass
+
+    if sync_interval_hours is None:
+        return None  # No schedule configured
+
+    try:
+        state = StateManager()
+        last_sync_str = state.last_sync
+        if not last_sync_str:
+            return (
+                f"[HarnessSync] Sync scheduled every {sync_interval_hours:.0f}h "
+                f"but no sync has been run yet — run /sync"
+            )
+        last_sync = datetime.fromisoformat(last_sync_str)
+        if last_sync.tzinfo is None:
+            last_sync = last_sync.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - last_sync
+        if age > timedelta(hours=sync_interval_hours):
+            hours_ago = round(age.total_seconds() / 3600, 1)
+            return (
+                f"[HarnessSync] Sync is {hours_ago}h overdue "
+                f"(scheduled every {sync_interval_hours:.0f}h) — run /sync"
+            )
+    except Exception:
+        pass
+
+    return None
+
+
 def full_startup_check(project_dir: Path | None = None) -> list[str]:
     """Run all startup checks and return a list of notice strings.
 
-    Combines drift detection and harness version update detection into a
-    single call suitable for use in SessionStart hooks or shell prompts.
+    Combines drift detection, harness version update detection, team broadcast
+    auto-pull, and schedule staleness warnings into a single call suitable for
+    use in SessionStart hooks or shell prompts.
 
     Args:
         project_dir: Project root directory (optional).
@@ -213,5 +329,13 @@ def full_startup_check(project_dir: Path | None = None) -> list[str]:
     update_msg = check_harness_updates()
     if update_msg:
         notices.append(update_msg)
+
+    broadcast_msg = check_team_broadcast(project_dir)
+    if broadcast_msg:
+        notices.append(broadcast_msg)
+
+    staleness_msg = check_schedule_staleness(project_dir)
+    if staleness_msg:
+        notices.append(staleness_msg)
 
     return notices
