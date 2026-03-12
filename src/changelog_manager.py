@@ -13,12 +13,57 @@ trends — helping users audit and optimize their multi-harness setup.
 """
 
 import re
+import subprocess
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
 from src.adapters.result import SyncResult
 from src.utils.paths import ensure_dir
+
+
+def _get_git_attribution(project_dir: Path | None = None) -> dict[str, str]:
+    """Return the current git author and HEAD commit for attribution (item 30).
+
+    Calls ``git log -1`` and ``git config user.name`` / ``user.email``
+    in ``project_dir`` (or cwd).  Returns empty strings for each field
+    when git is unavailable or the directory is not a git repo — so the
+    rest of the changelog pipeline is unaffected.
+
+    Args:
+        project_dir: Git repo root to query.  Defaults to cwd.
+
+    Returns:
+        Dict with keys: ``author``, ``email``, ``commit_sha``, ``commit_subject``
+        (all strings, possibly empty).
+    """
+    cwd = str(project_dir) if project_dir else None
+    result: dict[str, str] = {"author": "", "email": "", "commit_sha": "", "commit_subject": ""}
+
+    try:
+        name_proc = subprocess.run(
+            ["git", "config", "user.name"],
+            capture_output=True, text=True, cwd=cwd, timeout=3,
+        )
+        email_proc = subprocess.run(
+            ["git", "config", "user.email"],
+            capture_output=True, text=True, cwd=cwd, timeout=3,
+        )
+        result["author"] = name_proc.stdout.strip()
+        result["email"] = email_proc.stdout.strip()
+
+        log_proc = subprocess.run(
+            ["git", "log", "-1", "--format=%h %s"],
+            capture_output=True, text=True, cwd=cwd, timeout=3,
+        )
+        if log_proc.returncode == 0 and log_proc.stdout.strip():
+            parts = log_proc.stdout.strip().split(" ", 1)
+            result["commit_sha"] = parts[0]
+            result["commit_subject"] = parts[1] if len(parts) > 1 else ""
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+
+    return result
 
 
 class ChangelogManager:
@@ -342,7 +387,12 @@ class ChangelogManager:
     # ------------------------------------------------------------------
 
     def _build_entry(self, results: dict, scope: str, account: str | None) -> list[str]:
-        """Build Markdown lines for a single sync event."""
+        """Build Markdown lines for a single sync event.
+
+        Includes git attribution (author + HEAD commit) when available so
+        every changelog entry is traceable to who changed the source config
+        and what the triggering commit was (item 30 — Config Change Attribution).
+        """
         now = datetime.now().isoformat(timespec="seconds")
         header_parts = [f"## {now}"]
         if account:
@@ -350,6 +400,19 @@ class ChangelogManager:
         header_parts.append(f"  scope={scope}")
 
         lines: list[str] = [" ".join(header_parts), ""]
+
+        # Append git attribution metadata
+        attr = _get_git_attribution(self._project_dir)
+        if attr["author"] or attr["commit_sha"]:
+            attr_parts: list[str] = []
+            if attr["author"]:
+                email_suffix = f" <{attr['email']}>" if attr["email"] else ""
+                attr_parts.append(f"author: {attr['author']}{email_suffix}")
+            if attr["commit_sha"]:
+                subject = f" — {attr['commit_subject']}" if attr["commit_subject"] else ""
+                attr_parts.append(f"commit: {attr['commit_sha']}{subject}")
+            lines.append(f"<!-- attribution: {' | '.join(attr_parts)} -->")
+            lines.append("")
 
         blocked = results.get("_blocked", False)
         if blocked:

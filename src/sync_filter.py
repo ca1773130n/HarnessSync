@@ -754,3 +754,91 @@ def extract_compliance_pinned(content: str) -> str:
             collected.append(line)
 
     return "".join(collected).strip()
+
+
+# ── Rule Effectiveness Annotations (item 18) ──────────────────────────────
+#
+# Authors annotate rules with effectiveness notes that propagate to all target
+# configs as comments. This lets teams share institutional knowledge about
+# WHY rules exist without polluting the rule text itself.
+#
+# Syntax in CLAUDE.md:
+#
+#   - Always use TypeScript <!-- @effectiveness: reduced type errors by ~40% in Go services -->
+#
+#   <!-- @effectiveness: this rule prevented 3 CI failures per week -->
+#   - Never import lodash directly; use specific submodule imports
+#
+# The annotation is stripped from the active rule text when writing to targets
+# that don't support HTML comments (Aider CONVENTIONS.md), and preserved as
+# a regular comment for targets that do (Cursor .mdc, GEMINI.md, AGENTS.md).
+
+_EFFECTIVENESS_RE = re.compile(
+    r"<!--\s*@effectiveness:\s*(.*?)\s*-->",
+    re.IGNORECASE,
+)
+
+
+def extract_effectiveness_annotations(content: str) -> list[dict]:
+    """Extract all effectiveness annotations from CLAUDE.md content.
+
+    Args:
+        content: Full CLAUDE.md text.
+
+    Returns:
+        List of dicts with keys:
+            line_number: 1-based line number of the annotation
+            annotation: Raw annotation text (stripped)
+            context: The line containing the annotation (for display)
+    """
+    results = []
+    for i, line in enumerate(content.splitlines(), start=1):
+        m = _EFFECTIVENESS_RE.search(line)
+        if m:
+            results.append({
+                "line_number": i,
+                "annotation": m.group(1).strip(),
+                "context": line.strip(),
+            })
+    return results
+
+
+def propagate_effectiveness_annotations(
+    content: str,
+    target: str,
+    strip_comments: bool = False,
+) -> str:
+    """Transform effectiveness annotations for a target harness.
+
+    For targets that support HTML comments (Cursor, Gemini, Codex, OpenCode,
+    Windsurf) the annotations are kept as-is.  For plain-text targets (Aider)
+    the annotations are rewritten as ``> Effectiveness note: …`` blockquotes
+    so the information is still visible.  When ``strip_comments=True`` the
+    annotations are removed entirely (useful for display-only modes).
+
+    Args:
+        content: CLAUDE.md text.
+        target: Target harness name.
+        strip_comments: If True, remove annotations completely.
+
+    Returns:
+        Transformed content string.
+    """
+    # Targets that render HTML comments as invisible metadata
+    html_comment_targets = {"cursor", "gemini", "opencode", "codex", "windsurf", "vscode", "cline"}
+    # Plain-text targets that should see annotations as readable text
+    plain_text_targets = {"aider", "neovim", "zed"}
+
+    target_lower = target.lower()
+
+    if strip_comments:
+        return _EFFECTIVENESS_RE.sub("", content)
+
+    if target_lower in plain_text_targets:
+        # Convert to blockquote-style readable notes
+        def _to_blockquote(m: re.Match) -> str:
+            return f"> Effectiveness note: {m.group(1).strip()}"
+        return _EFFECTIVENESS_RE.sub(_to_blockquote, content)
+
+    # All other targets: keep as HTML comments (default passthrough)
+    return content

@@ -431,3 +431,96 @@ class MigrationAssistant:
 
         lines.append("\nRun with --apply to write these changes to disk.")
         return "\n".join(lines)
+
+    # ── Skills scaffold generation ─────────────────────────────────────────
+
+    def generate_skills_scaffold(self, plan: MigrationPlan) -> list[dict]:
+        """Generate Claude Code skill scaffold entries from migrated rules.
+
+        Analyses migrated rule items and produces a list of skill scaffold
+        definitions — each a dict ready to write as a ``.claude/skills/<name>/``
+        directory with a ``SKILL.md`` file.
+
+        The heuristic is:
+        - Rules that look like workflows (contain verbs like "always", "run",
+          "execute", "generate", "review") are wrapped into named skills.
+        - Rules from Cursor ``.mdc`` files get the stem as the skill name.
+        - Rules from Aider CONVENTIONS.md get generic ``migrated-rule-N`` names.
+
+        Args:
+            plan: MigrationPlan returned by scan().
+
+        Returns:
+            List of dicts with keys:
+                name: Skill directory name (slug)
+                skill_md: Content for SKILL.md
+                source: Original source file name
+        """
+        scaffolds: list[dict] = []
+        rule_items = [i for i in plan.items if i.item_type == "rule"]
+
+        for idx, item in enumerate(rule_items, start=1):
+            source_path = Path(item.source_file)
+            stem = source_path.stem
+
+            # Derive a skill name: prefer file stem unless it's generic
+            generic_names = {"CONVENTIONS", "CLAUDE", "GEMINI", "AGENTS", "windsurfrules"}
+            if stem.upper() in generic_names or not stem:
+                skill_name = f"migrated-rule-{idx:02d}"
+            else:
+                # Slugify: lowercase, replace non-alphanumeric with hyphens
+                import re as _re
+                skill_name = _re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")
+
+            # Determine trigger description from content heuristics
+            content = item.proposed_content.strip()
+            first_line = content.splitlines()[0].lstrip("#- ").strip() if content else ""
+            trigger_desc = first_line[:80] if first_line else f"Rules migrated from {source_path.name}"
+
+            skill_md = (
+                f"---\n"
+                f"name: {skill_name}\n"
+                f"description: {trigger_desc}\n"
+                f"# Migrated from {item.source_harness} ({source_path.name}) "
+                f"by HarnessSync migration assistant\n"
+                f"---\n\n"
+                f"# {skill_name}\n\n"
+                f"{content}\n"
+            )
+
+            scaffolds.append({
+                "name": skill_name,
+                "skill_md": skill_md,
+                "source": str(source_path.name),
+            })
+
+        return scaffolds
+
+    def apply_skills_scaffold(
+        self,
+        scaffolds: list[dict],
+        dry_run: bool = True,
+        skills_dir: Path | None = None,
+    ) -> list[str]:
+        """Write skill scaffold files to ``.claude/skills/``.
+
+        Args:
+            scaffolds: List from generate_skills_scaffold().
+            dry_run:   If True, return paths without writing.
+            skills_dir: Override for ``.claude/skills/`` directory.
+
+        Returns:
+            List of written (or would-be-written) file paths.
+        """
+        target_dir = skills_dir or (self.project_dir / ".claude" / "skills")
+        written: list[str] = []
+
+        for scaffold in scaffolds:
+            skill_dir = target_dir / scaffold["name"]
+            skill_md_path = skill_dir / "SKILL.md"
+            if not dry_run:
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                skill_md_path.write_text(scaffold["skill_md"], encoding="utf-8")
+            written.append(str(skill_md_path))
+
+        return written

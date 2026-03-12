@@ -1814,3 +1814,69 @@ _2026-03-12T02:45:52.994Z_
 - The deepeval pytest plugin conflicts with the test runner; always pass -p no:deepeval when running pytest.
 
 ---
+## Iteration 28
+_2026-03-12T03:03:46.542Z_
+
+### Items Attempted
+
+- **Branch-Aware Sync Profiles** — pass
+- **Team Config Bundles** — pass
+- **Feature Parity Heatmap** — pass
+- **Secret-Safe MCP Config Sync** — pass
+- **Config Drift Notifications** — pass
+- **Config Recipe Marketplace** — pass
+- **MCP Server Auto-Discovery and Sync** — pass
+- **PR Merge Sync Trigger** — pass
+- **Config Sandbox Testing** — pass
+- **Rules Effectiveness Scoring** — pass
+- **Cross-Project Config Federation** — pass
+- **Interactive Onboarding Wizard** — pass
+- **Skill Translation Fidelity Report** — pass
+- **Agent Mesh Sync** — pass
+- **Config Changelog Auto-Generation** — pass
+- **Harness Performance Benchmark** — pass
+- **Visual Rollback Timeline** — pass
+- **Claude Code Plugin Registry Sync** — pass
+- **Environment Variable Compatibility Matrix** — pass
+- **Context Budget Sync** — pass
+- **Sync Health Badge for READMEs** — pass
+- **Conditional Sync Rules Engine** — pass
+- **Natural Language Config Editor** — pass
+- **Merge Conflict Resolution for Config** — pass
+- **Harness Migration Assistant** — pass
+- **Smart Sync Scheduling** — pass
+- **Cross-Harness Cost Optimization Advisor** — pass
+- **GitHub Actions Sync Action** — pass
+- **Task-Based Harness Router** — pass
+- **Dotfile Conflict Detector** — pass
+- **Sync Impact Estimator** — pass
+- **VS Code / IDE Workspace Sync** — pass
+- **Sync Receipt Notifications** — pass
+
+### Decisions Made
+
+- Created agent_mesh_sync.py with per-target translation fidelity scores and target-specific writers (GEMINI.md sections, opencode.json agents array, AGENTS.md prose, Cursor .mdc, Aider CONVENTIONS.md, .windsurfrules) — fidelity degrades gracefully from 75% (Gemini) to 20% (Aider) based on what each target can express
+- Built env_var_matrix.py as a pure data registry (no subprocess calls) using an EnvVarSpec list; masked secret values via keyword heuristic to avoid exposing API keys in terminal output; analysis distinguishes NATIVE/MAPPED/PARTIAL/NONE/INFERRED support levels per (var, harness) pair
+- migration_assistant.py uses a reader-per-harness architecture (_READERS dict) so new harness readers can be added without changing the main MigrationAssistant class; apply() is always dry_run by default to prevent accidental overwrites
+- harness_cost_advisor.py keeps model pricing as a static dict rather than fetching live prices — avoids network dependency and pricing changes; uses _model_tier() to classify Opus/Sonnet/Flash/etc. for advice generation without hardcoding specific model names
+- task_router.py uses regex keyword scoring rather than an LLM — zero latency, no API cost, deterministic output; harness detection checks filesystem presence of known config files rather than PATH lookups to avoid slow subprocess calls
+- sync_merge.py command wraps the existing ConflictDetector (already implemented) and adds --auto-ours / --auto-theirs flags plus an interactive TTY branch; kept the command thin and delegated detection logic entirely to the existing module
+- All 5 command files follow the exact pattern of sync_sandbox.py: PLUGIN_ROOT path insertion, argparse, shlex.split for single-string args from Claude Code slash commands
+
+### Patterns Discovered
+
+- Every src/*.py module follows the same structure: module-level registry dicts, dataclasses for structured data, a main class with an analyze()/route()/scan() method, and a format_*() method for human-readable output — consistent with existing modules like harness_comparison.py and badge_generator.py
+- Command files are thin wrappers: they parse argparse, instantiate the corresponding src/ module, call the main method, and print — no business logic lives in commands/
+- The codebase avoids external dependencies almost entirely — all new modules use only stdlib (json, re, os, dataclasses, pathlib) matching the existing pattern; no new requirements
+- All new files include `from __future__ import annotations` for Python 3.9 compatibility as required by the project's known pitfall
+- Fidelity/support matrices are declared as module-level constants rather than class attributes — same pattern as _FEATURE_SUPPORT in harness_comparison.py and _PROTOCOL_SUPPORT in mcp_compat_matrix.py
+
+### Takeaways
+
+- The codebase has very consistent patterns across ~100 modules — new modules that deviate from the dataclass+format_*() pattern would stick out; the pattern is strong enough to guide contribution without explicit documentation
+- Many of the 30 feature ideas were already partially implemented in prior iterations — items 1-13 and 15-18 all had corresponding modules; this iteration filled the 6 genuine gaps (14, 19, 24, 25, 27, 29)
+- The task_router's keyword classifier is simple but effective for the routing use case — the categories map well to the installed-harness check and the scoring matrix provides meaningful differentiation (e.g. Aider scores 10/10 for refactoring, Gemini scores 10/10 for web_search)
+- The migration assistant design choice to default dry_run=True in apply() is important — migration is destructive (appends to CLAUDE.md) and users should always preview first; the --apply flag makes intent explicit
+- Cost advisor identified that CLAUDE.md file size is the most universally impactful cost lever since it injects context into every single session across all harnesses — this cross-cutting concern wasn't obvious without building the advisor
+
+---

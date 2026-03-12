@@ -51,6 +51,8 @@ def main():
                         help="Write migration to disk (default: show plan only)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show plan without writing (default)")
+    parser.add_argument("--scaffold-skills", action="store_true",
+                        help="Generate Claude Code skill scaffold from migrated rules")
     parser.add_argument("--project-dir", default=None)
     parser.add_argument("--cc-home", default=None)
     parser.add_argument("--json", dest="output_json", action="store_true")
@@ -99,8 +101,28 @@ def main():
         print(f"\n✓ Migration applied. Files written:")
         for f in written:
             print(f"  {f}")
+
+        if args.scaffold_skills:
+            scaffolds = assistant.generate_skills_scaffold(plan)
+            if scaffolds:
+                skill_files = assistant.apply_skills_scaffold(scaffolds, dry_run=False)
+                print(f"\n✓ Skills scaffold generated ({len(scaffolds)} skill(s)):")
+                for sf in skill_files:
+                    print(f"  {sf}")
+                print("  Edit each SKILL.md to refine the trigger description and content.")
+            else:
+                print("\nNo rule items found for skills scaffold generation.")
+
         print("\nReview CLAUDE.md for migrated content and adjust as needed.")
     else:
+        if args.scaffold_skills:
+            scaffolds = assistant.generate_skills_scaffold(plan)
+            if scaffolds:
+                print(f"\n[DRY RUN] Would generate {len(scaffolds)} skill scaffold(s):")
+                for s in scaffolds:
+                    print(f"  .claude/skills/{s['name']}/SKILL.md  (from {s['source']})")
+            else:
+                print("\nNo rule items found for skills scaffold generation.")
         print("\nRun with --apply to write these changes to disk.")
 
 

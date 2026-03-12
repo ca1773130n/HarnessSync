@@ -55,6 +55,8 @@ class AiderAdapter(AdapterBase):
         if not rule_contents:
             return SyncResult(skipped=1, skipped_files=[f"{CONVENTIONS_MD}: empty rules"])
 
+        # Apply effectiveness annotation propagation before joining
+        rule_contents = [self.prepare_rules_content(c) for c in rule_contents]
         concatenated = "\n\n---\n\n".join(rule_contents)
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 

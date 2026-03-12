@@ -277,3 +277,23 @@ class AdapterBase(ABC):
             )
 
         return results
+
+    def prepare_rules_content(self, content: str) -> str:
+        """Transform rule content for this target, including effectiveness annotations.
+
+        Called by adapters before writing rules to disk. Applies:
+        1. Effectiveness annotation propagation — converts ``<!-- @effectiveness: ... -->``
+           markers to target-appropriate format (kept as HTML comments for most targets,
+           converted to blockquotes for plain-text targets like Aider).
+
+        Args:
+            content: Rule text (combined from one or more source files).
+
+        Returns:
+            Transformed content ready for the target file.
+        """
+        try:
+            from src.sync_filter import propagate_effectiveness_annotations
+            return propagate_effectiveness_annotations(content, self.target_name)
+        except Exception:
+            return content
