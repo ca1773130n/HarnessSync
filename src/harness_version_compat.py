@@ -73,6 +73,161 @@ _DEFAULT_VERSIONS: dict[str, str] = {
 _GLOBAL_VERSIONS_FILE = Path.home() / ".harnesssync" / "versions.json"
 
 
+# ---------------------------------------------------------------------------
+# Deprecated config fields registry (item 20)
+# ---------------------------------------------------------------------------
+
+# Fields that HarnessSync adapters may write, but which have been deprecated
+# by the target harness.  Format:
+#   {harness: {field_name: (deprecated_since, migration_hint)}}
+#
+# ``deprecated_since`` is the first harness version where the field is
+# deprecated (not necessarily removed — removed means the adapter must be
+# updated separately).
+#
+# ``migration_hint`` is shown verbatim in the warning message.
+DEPRECATED_FIELDS: dict[str, dict[str, tuple[str, str]]] = {
+    "cursor": {
+        # Example: cursor deprecated the 'description' frontmatter key in 0.41
+        # in favour of the structured 'title' field.
+        "description": (
+            "0.41",
+            "Use 'title' frontmatter instead of 'description' in .mdc files",
+        ),
+        # Legacy cursor rules file — replaced by .cursor/rules/*.mdc in 0.42
+        ".cursorrules": (
+            "0.42",
+            "Migrate rules from .cursorrules to .cursor/rules/*.mdc files",
+        ),
+    },
+    "codex": {
+        # 'model' at top level was deprecated in 1.1; use 'provider.model'
+        "model": (
+            "1.1",
+            "Move 'model' into the [provider] table in codex config.toml",
+        ),
+    },
+    "gemini": {
+        # 'contextWindowSize' was removed in Gemini CLI 2.0
+        "contextWindowSize": (
+            "2.0",
+            "'contextWindowSize' removed — use 'context.maxTokens' instead",
+        ),
+        # 'theme' top-level key deprecated in 1.8 in favour of 'ui.theme'
+        "theme": (
+            "1.8",
+            "Move 'theme' to 'ui.theme' in Gemini settings.json",
+        ),
+    },
+    "opencode": {
+        # 'instructions' top-level key superseded by 'system' in 0.2
+        "instructions": (
+            "0.2",
+            "Replace 'instructions' with 'system' in opencode config",
+        ),
+    },
+    "aider": {
+        # '--encoding' flag deprecated in 0.55; use '--input-encoding'
+        "encoding": (
+            "0.55",
+            "Replace 'encoding' with 'input-encoding' in .aider.conf.yml",
+        ),
+    },
+    "windsurf": {
+        # 'globalRules' key removed in Windsurf 1.1; use .windsurfrules file
+        "globalRules": (
+            "1.1",
+            "Remove 'globalRules' key; place rules in .windsurfrules instead",
+        ),
+    },
+}
+
+
+def check_deprecated_fields_in_output(
+    target: str,
+    output: dict | str,
+    project_dir: Path | None = None,
+) -> list[str]:
+    """Check adapter output for deprecated config fields before writing.
+
+    Scans the about-to-be-written config (either a dict or raw string) for
+    fields that the target harness has deprecated.  Issues a warning for each
+    deprecated field found, including the first harness version where the field
+    was deprecated and the migration path.
+
+    This runs *before* writing so the user can fix CLAUDE.md or update the
+    adapter before the stale config lands on disk.
+
+    Args:
+        target: Harness name (e.g. "cursor").
+        output: The config data the adapter is about to write.  May be a dict
+                (for JSON/TOML configs) or a string (for Markdown configs).
+        project_dir: Project root for loading pinned version (optional).
+
+    Returns:
+        List of warning strings.  Empty list = no deprecated fields detected.
+    """
+    deprecated = DEPRECATED_FIELDS.get(target, {})
+    if not deprecated:
+        return []
+
+    # Load pinned version so we can skip warnings for fields deprecated in
+    # versions newer than what the user has declared.
+    pinned = load_pinned_versions(project_dir).get(target, _DEFAULT_VERSIONS.get(target, "0"))
+
+    warnings: list[str] = []
+
+    for field_name, (deprecated_since, migration_hint) in deprecated.items():
+        # Only warn if the user's pinned version is >= the deprecation version
+        if not _version_gte(pinned, deprecated_since):
+            continue
+
+        found = False
+        if isinstance(output, dict):
+            # Check top-level dict keys (and one level deep for nested dicts)
+            if field_name in output:
+                found = True
+            else:
+                for v in output.values():
+                    if isinstance(v, dict) and field_name in v:
+                        found = True
+                        break
+        elif isinstance(output, str):
+            # For TOML/YAML/Markdown: simple substring search for the field name
+            if field_name in output:
+                found = True
+
+        if found:
+            warnings.append(
+                f"[deprecation] {target}: '{field_name}' deprecated since v{deprecated_since} — "
+                f"{migration_hint}"
+            )
+
+    return warnings
+
+
+def warn_deprecated_fields(
+    target: str,
+    output: dict | str,
+    project_dir: Path | None = None,
+) -> None:
+    """Log deprecation warnings for any deprecated fields in adapter output.
+
+    Convenience wrapper around ``check_deprecated_fields_in_output`` that
+    prints warnings directly to stderr.  Adapters can call this just before
+    writing config files to surface deprecation notices to the user.
+
+    Args:
+        target: Harness name.
+        output: Config data about to be written.
+        project_dir: Project root for version lookup.
+    """
+    import sys
+    warnings_list = check_deprecated_fields_in_output(target, output, project_dir)
+    for w in warnings_list:
+        print(f"  ⚠  {w}", file=sys.stderr)
+
+
 @dataclass
 class VersionCompatResult:
     """Compatibility check result for a single harness."""

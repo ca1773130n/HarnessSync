@@ -172,6 +172,29 @@ class AdapterBase(ABC):
         """
         return content.replace('$ARGUMENTS', '[user-provided arguments]')
 
+    def check_deprecations(self, output: "dict | str") -> list[str]:
+        """Check adapter output for deprecated config fields before writing.
+
+        Delegates to ``check_deprecated_fields_in_output`` in
+        ``harness_version_compat`` using this adapter's ``target_name``.
+        Adapters should call this just before writing config files so any
+        deprecation warnings surface to the user rather than silently landing
+        stale fields on disk.
+
+        Args:
+            output: Config data about to be written (dict or raw string).
+
+        Returns:
+            List of human-readable warning strings. Empty = no issues.
+        """
+        try:
+            from src.harness_version_compat import check_deprecated_fields_in_output
+            return check_deprecated_fields_in_output(
+                self.target_name, output, self.project_dir
+            )
+        except Exception:
+            return []
+
     def sync_all(self, source_data: dict) -> dict[str, SyncResult]:
         """Sync all configuration types.
 
@@ -186,6 +209,14 @@ class AdapterBase(ABC):
             Dict mapping config type to SyncResult
         """
         results = {}
+
+        # Pre-sync: warn about deprecated config fields
+        settings_output = source_data.get('settings', {})
+        if settings_output:
+            dep_warnings = self.check_deprecations(settings_output)
+            for w in dep_warnings:
+                import sys
+                print(f"  ⚠  {w}", file=sys.stderr)
 
         # Sync rules
         try:

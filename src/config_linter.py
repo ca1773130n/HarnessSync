@@ -78,6 +78,13 @@ _TAG_RE = re.compile(
     re.IGNORECASE,
 )
 
+# @harness shorthand annotation recognition (item 28)
+# <!-- @harness:codex-only --> / <!-- @harness:skip-gemini --> / <!-- @harness:cursor,aider -->
+_AT_HARNESS_ANNOTATION_RE = re.compile(
+    r"<!--\s*@harness:(?:skip-)?[a-z0-9][-a-z0-9,\s]*(?:-only)?\s*-->",
+    re.IGNORECASE,
+)
+
 # Broken markdown: unclosed triple-backtick fences
 _FENCE_RE = re.compile(r"^```", re.MULTILINE)
 

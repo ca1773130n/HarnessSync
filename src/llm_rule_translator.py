@@ -397,3 +397,226 @@ def translate_rule_for_target(
         TranslationResult.
     """
     return LLMRuleTranslator(target=target, model=model).translate(content)
+
+
+# ---------------------------------------------------------------------------
+# Offline Phrasing Normalizer (item 21)
+# ---------------------------------------------------------------------------
+#
+# Different harnesses respond differently to imperative vs declarative phrasing:
+#   - Claude Code: imperative works best ("Always use named exports")
+#   - Codex/AGENTS.md: slightly more declarative ("The agent should use named exports")
+#   - Gemini: declarative/explanatory ("Named exports are preferred because …")
+#   - Cursor .mdc: short imperative fragments ("Use named exports")
+#   - Aider CONVENTIONS.md: imperative or descriptive ("Prefer named exports")
+#
+# This normalizer applies regex-based phrasing transforms without an LLM,
+# making it fast, offline, and deterministic.  It complements LLMRuleTranslator:
+#   - RulePhrasingNormalizer: instant, offline, style-only transforms
+#   - LLMRuleTranslator:      slow, online, semantic + style transforms
+
+# Harness phrasing style: imperative | declarative | fragment | descriptive
+_HARNESS_PHRASING_STYLE: dict[str, str] = {
+    "codex":    "declarative",
+    "gemini":   "declarative",
+    "cursor":   "fragment",
+    "aider":    "imperative",
+    "opencode": "imperative",
+    "windsurf": "imperative",
+}
+
+# Sentence-level transforms: (pattern, imperative_repl, declarative_repl, fragment_repl)
+# Each row is a rule transform.  We try each pattern against the full sentence.
+# Patterns are case-insensitive and applied to each sentence independently.
+_PHRASING_TRANSFORMS: list[tuple[re.Pattern, str, str, str]] = [
+    # "Always X" → "The assistant should X" / "Always X" / "X"
+    (
+        re.compile(r"^Always\s+(.+)$", re.IGNORECASE),
+        r"Always \1",
+        r"The assistant should always \1",
+        r"\1",
+    ),
+    # "Never X" → "The assistant must never X" / "Never X" / "avoid X"
+    (
+        re.compile(r"^Never\s+(.+)$", re.IGNORECASE),
+        r"Never \1",
+        r"The assistant must never \1",
+        r"avoid \1",
+    ),
+    # "Prefer X" → "The assistant prefers X" / "prefer X" / "X preferred"
+    (
+        re.compile(r"^Prefer\s+(.+)$", re.IGNORECASE),
+        r"Prefer \1",
+        r"The assistant prefers \1",
+        r"\1 preferred",
+    ),
+    # "Use X" → "The assistant uses X" / "use X" / "X"
+    (
+        re.compile(r"^Use\s+(.+)$", re.IGNORECASE),
+        r"Use \1",
+        r"The assistant uses \1",
+        r"\1",
+    ),
+    # "Do not X" → "The assistant does not X" / "do not X" / "no X"
+    (
+        re.compile(r"^Do not\s+(.+)$", re.IGNORECASE),
+        r"Do not \1",
+        r"The assistant does not \1",
+        r"no \1",
+    ),
+    # "Avoid X" → "The assistant avoids X" / "avoid X" / "no X"
+    (
+        re.compile(r"^Avoid\s+(.+)$", re.IGNORECASE),
+        r"Avoid \1",
+        r"The assistant avoids \1",
+        r"no \1",
+    ),
+    # "Ensure X" → "The assistant ensures X" / "ensure X" / "X"
+    (
+        re.compile(r"^Ensure\s+(.+)$", re.IGNORECASE),
+        r"Ensure \1",
+        r"The assistant ensures \1",
+        r"\1",
+    ),
+    # "Make sure X" → "The assistant should make sure X" / "make sure X" / "X"
+    (
+        re.compile(r"^Make sure\s+(.+)$", re.IGNORECASE),
+        r"Make sure \1",
+        r"The assistant should make sure \1",
+        r"\1",
+    ),
+]
+
+
+def _transform_sentence(sentence: str, style: str) -> str:
+    """Apply one phrasing transform to a single sentence.
+
+    Args:
+        sentence: One rule sentence (no leading/trailing whitespace).
+        style: Target phrasing style: "imperative" | "declarative" | "fragment".
+
+    Returns:
+        Transformed sentence, or original if no pattern matches.
+    """
+    for pattern, imp_repl, dec_repl, frag_repl in _PHRASING_TRANSFORMS:
+        if pattern.match(sentence):
+            if style == "declarative":
+                result = pattern.sub(dec_repl, sentence, count=1)
+            elif style == "fragment":
+                result = pattern.sub(frag_repl, sentence, count=1)
+            else:  # imperative (default)
+                result = pattern.sub(imp_repl, sentence, count=1)
+            # Capitalise first letter
+            return result[:1].upper() + result[1:] if result else sentence
+    return sentence
+
+
+class RulePhrasingNormalizer:
+    """Offline phrasing normalizer for CLAUDE.md rules.
+
+    Transforms rule sentences to match each harness's expected phrasing style
+    (imperative / declarative / fragment) without requiring an LLM call.
+
+    This normalizer works at the sentence level within each rule block.
+    It is fast enough to run on every sync without noticeable delay.
+
+    Usage::
+
+        normalizer = RulePhrasingNormalizer()
+        normalized = normalizer.normalize("Always use named exports.", "gemini")
+        # → "The assistant should always use named exports."
+
+        block = normalizer.normalize_block(rule_text, "cursor")
+        # → sentence-by-sentence fragment style
+
+    """
+
+    def normalize(self, sentence: str, target: str) -> str:
+        """Normalize a single rule sentence for the target harness.
+
+        Args:
+            sentence: One rule sentence (may have trailing punctuation).
+            target: Harness name (e.g. "gemini", "cursor").
+
+        Returns:
+            Phrasing-adjusted sentence.
+        """
+        style = _HARNESS_PHRASING_STYLE.get(target, "imperative")
+        stripped = sentence.strip().rstrip(".")
+        transformed = _transform_sentence(stripped, style)
+        # Re-attach period if original had one and result doesn't
+        if sentence.rstrip().endswith(".") and not transformed.endswith("."):
+            transformed += "."
+        return transformed
+
+    def normalize_block(self, rule_text: str, target: str) -> str:
+        """Normalize all sentences in a rule block for the target harness.
+
+        Splits on sentence boundaries (. at line end or before uppercase),
+        transforms each sentence, then reassembles preserving blank lines
+        and non-sentence lines (e.g. code blocks, bullet lists).
+
+        Args:
+            rule_text: Multi-sentence rule block text.
+            target: Target harness name.
+
+        Returns:
+            Phrasing-adjusted rule block.
+        """
+        lines = rule_text.splitlines(keepends=True)
+        output: list[str] = []
+        in_code_block = False
+
+        for line in lines:
+            stripped = line.strip()
+            # Skip code blocks
+            if stripped.startswith("```"):
+                in_code_block = not in_code_block
+                output.append(line)
+                continue
+            if in_code_block:
+                output.append(line)
+                continue
+            # Skip bullet/numbered list markers — only transform the text after the marker
+            list_match = re.match(r"^(\s*[-*+]|\s*\d+[.)]\s+)(.+)$", line)
+            if list_match:
+                prefix = list_match.group(1)
+                text = list_match.group(2).rstrip("\n")
+                normalized = self.normalize(text, target)
+                eol = "\n" if line.endswith("\n") else ""
+                output.append(f"{prefix}{normalized}{eol}")
+                continue
+            # Plain sentence lines
+            if stripped and not stripped.startswith("#"):
+                normalized = self.normalize(stripped, target)
+                indent = len(line) - len(line.lstrip())
+                eol = "\n" if line.endswith("\n") else ""
+                output.append(" " * indent + normalized + eol)
+            else:
+                output.append(line)
+
+        return "".join(output)
+
+    def normalize_all_targets(self, rule_text: str) -> dict[str, str]:
+        """Normalize a rule block for all known harnesses.
+
+        Args:
+            rule_text: Rule block text.
+
+        Returns:
+            Dict mapping harness name → normalized rule text.
+        """
+        return {t: self.normalize_block(rule_text, t) for t in _HARNESS_PHRASING_STYLE}
+
+
+def normalize_rule_phrasing(rule_text: str, target: str) -> str:
+    """Convenience function: normalize a rule block's phrasing for a target.
+
+    Args:
+        rule_text: Rule text to normalize.
+        target: Target harness name.
+
+    Returns:
+        Phrasing-adjusted rule text.
+    """
+    return RulePhrasingNormalizer().normalize_block(rule_text, target)

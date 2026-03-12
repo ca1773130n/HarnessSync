@@ -25,6 +25,15 @@ Allows users to annotate CLAUDE.md sections with sync control tags:
     <!-- harness:only=codex -->           — include THIS LINE only in codex
     <!-- harness:only=codex,opencode --> — include THIS LINE only in listed targets
 
+  @harness shorthand annotations (item 28 — inline declarative style):
+    <!-- @harness:codex-only -->    — include THIS LINE only in codex
+    <!-- @harness:skip-gemini -->   — skip THIS LINE for gemini
+    <!-- @harness:cursor,aider -->  — include THIS LINE only in cursor and aider
+    <!-- @harness:skip-gemini,aider --> — skip THIS LINE for gemini and aider
+
+  These are semantic aliases for the harness:only= / harness:skip= forms but
+  use a more CSS-like @harness: prefix that some users find more readable.
+
   Environment-specific overrides (item 18):
     @env:production                — section only included when --env=production
     @env:dev                       — section only included when --env=dev
@@ -78,6 +87,54 @@ _HARNESS_ONLY_RE = re.compile(
     r"<!--\s*harness:only=([a-z0-9,\s_-]+)\s*-->",
     re.IGNORECASE,
 )
+
+# @harness shorthand annotations (item 28):
+#
+# Two sub-forms exist:
+#
+#   @harness:TARGET-only            — include this line only in TARGET
+#   @harness:T1,T2                  — include this line only in T1, T2
+#   @harness:skip-TARGET            — skip this line for TARGET
+#   @harness:skip-T1,T2             — skip this line for T1 and T2
+#
+# Examples:
+#   <!-- @harness:codex-only -->             → only in codex
+#   <!-- @harness:cursor,aider -->           → only in cursor and aider
+#   <!-- @harness:skip-gemini -->            → skip for gemini
+#   <!-- @harness:skip-gemini,aider -->      → skip for gemini and aider
+#
+# These are normalised to the same semantics as harness:only= / harness:skip=.
+
+# skip-TARGET(,TARGET)* form
+_AT_HARNESS_SKIP_RE = re.compile(
+    r"<!--\s*@harness:skip-([a-z0-9,\s_-]+)\s*-->",
+    re.IGNORECASE,
+)
+
+# TARGET-only  OR  T1,T2  (inclusion) form  — NOTE: must be checked after skip
+# Matches "@harness:codex-only" or "@harness:cursor,aider"
+# The pattern requires no "skip-" prefix.
+_AT_HARNESS_ONLY_RE = re.compile(
+    r"<!--\s*@harness:((?!skip-)([a-z0-9][-a-z0-9]*(?:,\s*[a-z0-9][-a-z0-9]*)*)(?:-only)?)\s*-->",
+    re.IGNORECASE,
+)
+
+
+def _parse_at_harness_targets(raw: str) -> set[str]:
+    """Parse the target list from an @harness annotation.
+
+    Handles "codex-only" (strip "-only" suffix), "codex,aider",
+    and "codex, aider" forms.
+
+    Args:
+        raw: Captured group from _AT_HARNESS_SKIP_RE or _AT_HARNESS_ONLY_RE.
+
+    Returns:
+        Normalised set of target name strings.
+    """
+    cleaned = raw.lower().removesuffix("-only")
+    return {t.strip().rstrip("-") for t in cleaned.split(",") if t.strip()}
+
 
 # Block-level exclude tag (item 30 — Harness-Specific Section Tagging):
 #   <!-- harness:exclude:gemini -->   — open; section dropped for gemini only
@@ -248,6 +305,8 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
        (content only visible to target X)
     5. Inline <!-- harness:skip=X,Y --> — drops THIS line for listed targets
     6. Inline <!-- harness:only=X,Y --> — keeps THIS line only for listed targets
+    7. Inline <!-- @harness:skip-X,Y --> — @harness shorthand skip (item 28)
+    8. Inline <!-- @harness:X-only --> or <!-- @harness:X,Y --> — @harness only (item 28)
 
     Args:
         content: Raw rules text (e.g. CLAUDE.md contents).
@@ -354,6 +413,32 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
             if targets and not any(t.endswith("-only") or t in ("exclude", "end") for t in targets):
                 active_tag = f"targets:{','.join(sorted(targets))}"
                 continue
+
+        # --- @harness:skip-X shorthand (item 28) — applies to this line only ---
+        # <!-- @harness:skip-gemini --> or <!-- @harness:skip-gemini,aider -->
+        # Semantically equivalent to <!-- harness:skip=gemini --> but uses the
+        # @harness: prefix style.  Checked before the plain harness:skip form.
+        at_skip_m = _AT_HARNESS_SKIP_RE.search(line)
+        if at_skip_m:
+            skip_targets = _parse_at_harness_targets(at_skip_m.group(1))
+            if target_lower in skip_targets:
+                continue  # Drop this line for listed targets
+            cleaned = _AT_HARNESS_SKIP_RE.sub("", line).rstrip()
+            if cleaned.strip():
+                output.append(cleaned + ("\n" if line.endswith("\n") else ""))
+            continue
+
+        # --- @harness:TARGET-only / @harness:T1,T2 shorthand (item 28) ---
+        # <!-- @harness:codex-only --> or <!-- @harness:cursor,aider -->
+        # Semantically equivalent to <!-- harness:only=codex --> forms.
+        at_only_m = _AT_HARNESS_ONLY_RE.search(line)
+        if at_only_m:
+            only_targets = _parse_at_harness_targets(at_only_m.group(1))
+            if target_lower in only_targets:
+                cleaned = _AT_HARNESS_ONLY_RE.sub("", line).rstrip()
+                if cleaned.strip():
+                    output.append(cleaned + ("\n" if line.endswith("\n") else ""))
+            continue  # Always consumed — other targets don't see this line
 
         # --- Inline harness:skip=X annotation — applies to this line only ---
         # Must be checked BEFORE harness_open so "harness:skip=gemini" doesn't

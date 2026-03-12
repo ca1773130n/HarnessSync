@@ -246,6 +246,16 @@ def main():
         help="Use three-way diff conflict resolution (shows per-section diffs; requires TTY)",
     )
     parser.add_argument(
+        "--section-wizard",
+        action="store_true",
+        dest="section_wizard",
+        help=(
+            "Interactively resolve conflicts section-by-section before syncing. "
+            "For each conflicting Markdown section, choose: use synced version, "
+            "keep your edits, or skip the section entirely. Requires a TTY."
+        ),
+    )
+    parser.add_argument(
         "--allow-anomalies",
         action="store_true",
         dest="allow_anomalies",
@@ -354,9 +364,49 @@ def main():
                         cd = ConflictDetector()
                         conflicts = cd.check_all()
                         if any(conflicts.values()):
+                            use_section_wizard = getattr(args, "section_wizard", False)
                             use_three_way = getattr(args, "three_way", False)
-                            if use_three_way:
-                                # Three-way per-section resolution wizard
+                            if use_section_wizard:
+                                # Per-section conflict resolution wizard
+                                # For each conflicted file, break into sections and
+                                # let the user choose per-section: source / keep / skip.
+                                # The merged content is written to a temp staging env var
+                                # so adapters can read it instead of re-generating.
+                                section_merged: dict[str, str] = {}
+                                for _target_name, target_conflicts in conflicts.items():
+                                    for conflict in target_conflicts:
+                                        from src.source_reader import SourceReader
+                                        try:
+                                            sr = SourceReader(
+                                                scope=getattr(args, "scope", "all"),
+                                                project_dir=project_dir,
+                                            )
+                                            source_data = sr.discover_all()
+                                            source_content = source_data.get("rules", "")
+                                        except Exception:
+                                            source_content = ""
+                                        file_path = conflict.get("file_path", "")
+                                        current_content = ""
+                                        try:
+                                            from pathlib import Path as _Path
+                                            _fp = _Path(file_path)
+                                            if _fp.exists():
+                                                current_content = _fp.read_text(encoding="utf-8", errors="replace")
+                                        except OSError:
+                                            pass
+                                        sec_conflicts = cd.section_conflicts(source_content, conflict)
+                                        if sec_conflicts:
+                                            print(f"\nSection wizard: {file_path}")
+                                            sec_resolutions = cd.resolve_section_interactive(sec_conflicts)
+                                            merged = cd.apply_section_resolutions(
+                                                source_content, current_content, sec_resolutions
+                                            )
+                                            section_merged[file_path] = merged
+                                if section_merged:
+                                    import json as _json
+                                    os.environ["HARNESSSYNC_SECTION_MERGED"] = _json.dumps(section_merged)
+                            elif use_three_way:
+                                # Three-way per-file resolution wizard
                                 keep_files: list[str] = []
                                 for target_name, target_conflicts in conflicts.items():
                                     for conflict in target_conflicts:

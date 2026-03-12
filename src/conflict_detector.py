@@ -505,6 +505,81 @@ class ConflictDetector:
 
         return resolutions
 
+    def apply_section_resolutions(
+        self,
+        source_content: str,
+        current_content: str,
+        resolutions: dict[str, str],
+    ) -> str:
+        """Build merged file content from per-section resolution choices.
+
+        Reconstructs the file by iterating sections in source order and
+        substituting each section body based on the resolution decision:
+          - "source": use HarnessSync's version of the section
+          - "keep":   preserve the user's current version
+          - "skip":   omit the section entirely
+
+        Sections with no resolution entry default to "source".
+
+        Args:
+            source_content: What HarnessSync would write (canonical order).
+            current_content: Current file on disk (user's version).
+            resolutions: Dict mapping section heading -> "source" | "keep" | "skip".
+
+        Returns:
+            Merged file content string.
+        """
+        import re
+
+        _SECTION_RE = re.compile(r"^(#{1,3}\s+.+)$", re.MULTILINE)
+
+        def _split_ordered(text: str) -> list[tuple[str, str]]:
+            """Return ordered list of (heading, body) pairs."""
+            matches = list(_SECTION_RE.finditer(text))
+            result = []
+            for i, m in enumerate(matches):
+                heading = m.group(1).strip()
+                start = m.end()
+                end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+                body = text[start:end]
+                # Preserve leading newline from heading line
+                result.append((heading, body))
+            return result
+
+        source_sections = _split_ordered(source_content)
+        current_sections = dict(_split_ordered(current_content))
+
+        # Sections in source that exist in current — track for "keep-only" sections
+        source_headings = {h for h, _ in source_sections}
+
+        output_parts: list[str] = []
+
+        # Content before first heading (preamble)
+        first_match = _SECTION_RE.search(source_content)
+        if first_match and first_match.start() > 0:
+            output_parts.append(source_content[: first_match.start()])
+
+        # Process sections in source order
+        for heading, source_body in source_sections:
+            resolution = resolutions.get(heading, "source")
+
+            if resolution == "skip":
+                continue
+            elif resolution == "keep":
+                kept_body = current_sections.get(heading, source_body)
+                output_parts.append(f"{heading}{kept_body}")
+            else:  # "source" (default)
+                output_parts.append(f"{heading}{source_body}")
+
+        # Append any "keep" sections that only exist in current (status=removed)
+        for heading, current_body in _split_ordered(current_content):
+            if heading not in source_headings:
+                resolution = resolutions.get(heading, "keep")
+                if resolution == "keep":
+                    output_parts.append(f"{heading}{current_body}")
+
+        return "".join(output_parts)
+
     def format_warnings(self, conflicts: dict[str, list[dict]]) -> str:
         """
         Format conflict warnings for user output.

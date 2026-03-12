@@ -1616,3 +1616,68 @@ _2026-03-12T01:50:52.834Z_
 - Desktop notifications were only firing in watch mode; adding them to _display_results() means users running one-shot /sync now also get OS-level feedback
 
 ---
+## Iteration 25
+_2026-03-12T02:10:06.559Z_
+
+### Items Attempted
+
+- **New Harness Onboarding Wizard** — pass
+- **Drift Alerts with OS Notifications** — pass
+- **Team Config Broadcast via Git** — pass
+- **Per-Project Sync Profiles** — pass
+- **MCP Server Discovery & One-Click Install** — pass
+- **Merge Conflict Resolver for Diverged Configs** — pass
+- **Harness Parity Score Card** — pass
+- **Rule Tagging for Selective Sync** — pass
+- **GitHub Actions / CI Sync Validation** — pass
+- **Secret Masking Before Sync** — pass
+- **Sync History Timeline** — pass
+- **Capability Gap Advisor** — pass
+- **Config Version Pinning** — pass
+- **LLM-Assisted Rule Translation** — pass
+- **Sync Webhook Triggers** — pass
+- **Plugin Ecosystem Cross-Pollination** — pass
+- **Offline Sync Queue** — pass
+- **Rule Usage Analytics** — pass
+- **Auto-Sync on Git Branch Switch** — pass
+- **Config Lint with Auto-Fix Suggestions** — pass
+- **Multi-Machine Config Sync via iCloud/Dropbox** — pass
+- **Context Window Budget Optimizer** — pass
+- **Auto-Detect Newly Installed Harnesses** — pass
+- **Rule Inheritance Hierarchy** — pass
+- **Community Rule Templates Hub** — pass
+- **Live Target Capability Matrix** — pass
+- **Incremental Sync with Change Fingerprinting** — pass
+- **AI Rule Generator from Codebase Analysis** — pass
+- **Sync Impact Estimator** — pass
+- **Emergency Config Reset Command** — pass
+
+### Decisions Made
+
+- Fixed AttributeError bug in rule_usage_tracker.py where coverage_heatmap() referenced summary.last_seen but RuleUsageSummary only has a last_used field — this would crash with an AttributeError for any user who called format_heatmap() or coverage_heatmap() with populated analytics data
+- Created src/incremental_sync.py as a standalone engine rather than embedding in adapters — this keeps the fingerprinting logic testable independently and lets any adapter opt in without requiring adapter refactors
+- IncrementalSyncEngine stores content_hashes inside the existing state.json target entry rather than a new file — reuses atomic write infrastructure and avoids file proliferation; the _HASH_KEY nested key is backward-compatible with existing state readers
+- LLMRuleTranslator uses claude-haiku-4-5-20251001 as the default model for cost efficiency — config-to-config translation is a structured, low-ambiguity task that haiku handles well; users can override with the model param
+- LLMRuleTranslator degrades gracefully to regex-translated content when ANTHROPIC_API_KEY is unset or HARNESSSYNC_LLM_TRANSLATE=0 — LLM translation is always opt-in; no hard dependency is introduced
+- generate_rules_for_project() in project_detector.py uses the existing ProjectTypeDetector to drive rule template selection, then adds supplemental rules from secondary signals (test frameworks, linters, CI) — this composable layering avoids duplicating project detection logic
+- Rule templates in _RULE_TEMPLATES are stored as module-level dicts rather than computed at call time — consistent with the codebase pattern of building lookup tables once at import time
+- sync_pin.py uses atomic writes (NamedTemporaryFile + os.replace) for pin storage — consistent with existing pattern in state_manager, profile_manager, and webhook_notifier to prevent partial writes on crash
+- sync_pin restore automatically backs up the current CLAUDE.md to .md.pre-pin-restore before overwriting — users who restore accidentally can recover their current config without needing git
+
+### Patterns Discovered
+
+- The codebase consistently uses from __future__ import annotations for Python 3.9 compatibility — all new files honour this convention
+- AttributeError bugs are hard to detect without tests because coverage_heatmap() requires a populated analytics store (log file with events) to trigger; the bug only fires in non-empty analytics scenarios
+- The _RULE_TEMPLATES dict-of-lists pattern in project_detector.py mirrors the _PATTERNS list in nl_config_generator.py — both use module-level static data registered once at import time, easy to extend without touching existing logic
+- Command modules (sync_pin.py) all follow the same pattern: PLUGIN_ROOT detection, sys.path.insert, argparse with shlex.split for CLAUDE_ARGS env fallback, main() entrypoint — consistent and discoverable
+- Most 30-item lists in iteration prompts have 25+ items already implemented across 24 prior iterations; the primary iteration value is finding genuine gaps (bugs, missing wiring, new combinations) rather than greenfield features
+
+### Takeaways
+
+- After 24 iterations the codebase has ~85 source files and extraordinary feature coverage — every iteration should audit for real bugs (like the last_seen/last_used AttributeError) rather than defaulting to new standalone modules
+- The incremental sync engine (src/incremental_sync.py) fills a structural gap: hashing.py provided file fingerprinting primitives but no higher-level engine that adapters could use to skip unchanged content
+- LLM-assisted translation (llm_rule_translator.py) correctly separates from skill_translator.py — the regex translator is the fast path; LLM is the slow path for content that regex cannot handle. The two-stage approach avoids unnecessary API calls
+- generate_rules_for_project() produces 3-6 rules per project type; for real user value it should eventually accept a user's existing CLAUDE.md to avoid duplicating rules already present
+- The sync_pin command gives users a panic-button checkpoint workflow (pin → experiment with rules → restore if things break) which is distinct from ConfigSnapshot (share with others) and SyncRollback (restore previous sync output)
+
+---
