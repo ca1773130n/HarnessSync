@@ -242,7 +242,45 @@ class ConfigLinter:
         if self._custom_rules:
             issues.extend(self._run_custom_rules(source_data))
 
+        # Check for cross-harness rule duplicates (item 30)
+        # Surface deduplication opportunities so --fix can consolidate them.
+        if project_dir:
+            issues.extend(self._lint_duplicates(project_dir))
+
         return issues
+
+    def _lint_duplicates(self, project_dir: Path) -> list[str]:
+        """Detect near-duplicate rules across harness config files.
+
+        Uses RuleDeduplicator to find clusters of similar rules in CLAUDE.md,
+        AGENTS.md, GEMINI.md, and other harness config files. Cross-harness
+        duplicates indicate rules that should be consolidated in CLAUDE.md as
+        the single source of truth.
+
+        Args:
+            project_dir: Project root directory.
+
+        Returns:
+            List of lint warning strings, one per cross-harness duplicate cluster.
+        """
+        try:
+            from src.rule_deduplicator import RuleDeduplicator
+            dedup = RuleDeduplicator(project_dir=project_dir)
+            clusters = dedup.scan()
+            cross_harness = [c for c in clusters if c.is_cross_harness]
+            if not cross_harness:
+                return []
+            sources_summary = ", ".join(
+                "/".join(sorted(c.sources)) for c in cross_harness[:3]
+            )
+            suffix = f" (e.g. {sources_summary})" if sources_summary else ""
+            return [
+                f"Found {len(cross_harness)} near-duplicate rule cluster(s) across harness "
+                f"config files{suffix}. Consider consolidating in CLAUDE.md as the single "
+                "source of truth. Run /sync to let HarnessSync propagate from there."
+            ]
+        except Exception:
+            return []  # Deduplication check is best-effort
 
     def _run_custom_rules(self, source_data: dict) -> list[str]:
         """Execute all registered custom rules against source_data.

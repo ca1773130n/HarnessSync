@@ -419,6 +419,19 @@ class SyncOrchestrator:
             except ImportError as e:
                 self.logger.warn(f"BackupManager unavailable: {e}")
 
+        # --- PRE-SYNC: AUTO-SNAPSHOT (Config Snapshot Versioning, item 28) ---
+        # Take a named snapshot before every real sync so users can restore
+        # to any past state, not just the most recent backup.
+        if not self.dry_run:
+            try:
+                from src.config_time_machine import ConfigTimeMachine
+                _ctm = ConfigTimeMachine(self.project_dir)
+                _snap_name = f"pre-sync-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                _ctm.take_snapshot(name=_snap_name, cc_home=self.cc_home)
+                self.logger.debug(f"Auto-snapshot saved: {_snap_name}")
+            except Exception:
+                pass  # Auto-snapshot is best-effort, never blocks sync
+
         # --- PRE-SYNC: CAPTURE USER ANNOTATIONS (skip in dry-run) ---
         _captured_annotations: dict = {}
         if not self.dry_run:
@@ -711,6 +724,20 @@ class SyncOrchestrator:
         # Add conflicts to results if any were found
         if any(conflicts.values()):
             results['_conflicts'] = conflicts
+
+        # --- POST-SYNC: HARNESS UPGRADE ADVISOR (item 20) ---
+        # Detect when installed harness versions have changed and surface
+        # new capabilities that could improve sync quality.
+        if not self.dry_run:
+            try:
+                from src.harness_version_compat import detect_harness_updates, format_update_report
+                updates = detect_harness_updates(acknowledge=True)
+                if updates:
+                    report = format_update_report(updates)
+                    if report:
+                        results['_upgrade_notices'] = report
+            except Exception:
+                pass  # Upgrade advisor is informational, never blocks
 
         return results
 

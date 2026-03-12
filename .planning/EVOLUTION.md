@@ -2153,3 +2153,69 @@ _2026-03-12T04:14:16.210Z_
 - Version update detection is a critical missing link between HarnessSync and harness evolution — as Cursor/Codex/Gemini gain new capabilities, adapters need to know to re-evaluate previously-unmapped features. The version cache pattern enables this.
 
 ---
+## Iteration 33
+_2026-03-12T04:30:24.109Z_
+
+### Items Attempted
+
+- **Team Config Broadcast via Git** — pass
+- **Per-Branch Sync Profiles** — pass
+- **Harness Capability Advisor** — pass
+- **Config Drift Alerts** — pass
+- **Rule Portability Score** — pass
+- **MCP Server Compatibility Bridge** — pass
+- **Config Templating with Variables** — pass
+- **New Harness Auto-Discovery** — pass
+- **Harness-Agnostic Rule DSL** — pass
+- **Community Config Registry** — pass
+- **AI-Assisted Rule Generation** — pass
+- **Scheduled Background Sync** — pass
+- **CI/CD Pipeline Sync Action** — pass
+- **Sync Conflict Resolution Wizard** — pass
+- **Cross-Harness Skill Smoke Tests** — pass
+- **Rule Deduplication and Consolidation** — pass
+- **Task-to-Harness Recommendation** — pass
+- **Primary Harness Migration Wizard** — pass
+- **Project Type Auto-Profiles** — pass
+- **Visual Sync Timeline and Rollback** — pass
+- **Live MCP Reachability Monitor** — pass
+- **Semantic Diff Explanations** — pass
+- **Harness Warmup / Onboarding Scripts** — pass
+- **Config Snapshot Versioning** — pass
+- **Environment-Aware Sync (dev/staging/prod)** — pass
+- **Claude Code Plugin Sync to Other Harnesses** — pass
+- **Sync Impact Predictor** — pass
+- **Cross-Harness Token Cost Tracker** — pass
+- **Offline Sync Queue with Replay** — pass
+- **Rule Effectiveness Feedback Loop** — pass
+- **Harness Parity Gap Report** — pass
+- **Webhook-Triggered Sync** — pass
+- **Secret and Credential Scrubber** — pass
+- **Natural Language Sync Query** — pass
+
+### Decisions Made
+
+- Added ProjectPortabilityScore as a dataclass (not a class with __init__) to match the existing SkillCompatibilityReport pattern; used dataclasses.dataclass decorator for field declarations
+- check_and_auto_pull() uses a local .harnesssync-broadcast-state.json sidecar file rather than the global StateManager to track team broadcast pull timestamps, keeping team sync state isolated from per-target sync state
+- Implemented check_team_broadcast() and check_schedule_staleness() as standalone functions in startup_check.py (not methods) to match the existing module-level function pattern and make them independently callable from hooks
+- The /sync-impact command reads a .harnesssync-last-source.json snapshot for previous state rather than inventing a new StateManager API; falls back to empty dict (first-sync semantics) if absent
+- generate_bootstrap_script() emits bash with 'set -euo pipefail' but wraps per-harness sync calls in '|| { ... }' to avoid aborting the whole script when one harness fails — resilience over strictness for onboarding scripts
+- RulePortabilityIssue and ProjectPortabilityScore use @dataclasses.dataclass but SkillCompatibilityIssue (pre-existing) uses plain __init__ — kept pre-existing style for SkillCompatibilityIssue, applied dataclass to new types for cleaner field declarations
+
+### Patterns Discovered
+
+- Module-level functions (not class methods) are the dominant pattern in this codebase — utility files expose plain functions; only stateful operations (TeamBroadcast, SkillCompatibilityChecker) use classes
+- Commands consistently use shlex.split + argparse on sys.argv[1:] and a PLUGIN_ROOT path injection pattern; the sync_impact command follows this exactly
+- The .harnesssync JSON file is the per-project config surface — used by orchestrator, branch_aware_sync, and now team_broadcast auto-pull and schedule staleness; it's the right place to add new per-project knobs
+- Type hints use dict[str, X] not Dict[str, X] consistently (Python 3.9+ style), all files have from __future__ import annotations — new code follows this
+- Weighted scoring (40% rules + 60% skills) reflects that skills are more behaviorally impactful than rules, but rules affect all harnesses while skills are optional — the weighting encodes this semantic difference
+
+### Takeaways
+
+- The codebase has extensive coverage of most features from the ideation list already — iteration-33 improvements focused on filling specific functional gaps (missing command, missing aggregate score, missing auto-pull integration) rather than building net-new modules
+- startup_check.py is the right integration point for session-start behaviors; it was underused (only drift + version updates) and can absorb team broadcast + schedule staleness cleanly
+- The test suite is thin (14 tests across 4 files) relative to the codebase size — most modules have no tests; the existing tests focus on adapter output format correctness
+- harness_detector.py already had bootstrap_new_harness() for single-harness bootstrapping but lacked a multi-harness shell script generator; generate_bootstrap_script() fills this gap for team onboarding use cases
+- sync_impact_predictor.py had no command wrapper despite being a complete, useful module — this is a recurring pattern where backend modules exist but aren't surfaced as slash commands
+
+---

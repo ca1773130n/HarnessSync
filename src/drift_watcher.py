@@ -83,6 +83,7 @@ class DriftWatcher:
         state_manager: StateManager | None = None,
         notify: bool = False,
         notify_cooldown_minutes: float = 60.0,
+        slack_webhook_url: str | None = None,
     ):
         """Initialize the drift watcher.
 
@@ -97,14 +98,19 @@ class DriftWatcher:
                     notification callback that sends desktop banners (item 29).
             notify_cooldown_minutes: Minimum minutes between OS notifications
                                      for the same file (default: 60).
+            slack_webhook_url: Optional Slack incoming webhook URL for posting
+                               drift alerts. Also reads HARNESSSYNC_SLACK_WEBHOOK
+                               env var if not provided explicitly.
         """
         self.project_dir = project_dir
         self.poll_interval = poll_interval
         if alert_callback is not None:
             self.alert_callback = alert_callback
-        elif notify:
+        elif notify or slack_webhook_url:
             self.alert_callback = make_notifying_alert_callback(
-                notify=True, threshold_minutes=notify_cooldown_minutes
+                notify=notify,
+                threshold_minutes=notify_cooldown_minutes,
+                slack_webhook_url=slack_webhook_url,
             )
         else:
             self.alert_callback = _default_alert_callback
@@ -302,9 +308,62 @@ def send_os_notification(title: str, body: str) -> bool:
     return False
 
 
+def send_slack_notification(webhook_url: str, title: str, body: str) -> bool:
+    """Send a drift alert to a Slack channel via incoming webhook (item 14).
+
+    Posts a formatted Slack message using the Incoming Webhooks API.
+    The message uses Slack's Block Kit for readable formatting.
+
+    CRITICAL: Never includes file content or hash values in the payload —
+    only filenames and harness names to avoid leaking sensitive config data.
+
+    Args:
+        webhook_url: Slack incoming webhook URL
+                     (e.g. https://hooks.slack.com/services/T.../B.../...).
+        title: Notification title (e.g. "HarnessSync Drift Detected").
+        body: Notification body text.
+
+    Returns:
+        True if the notification was posted successfully, False otherwise.
+    """
+    import json as _json
+    import urllib.request as _urllib_request
+
+    if not webhook_url or not webhook_url.startswith("https://"):
+        return False
+
+    payload = {
+        "blocks": [
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": title, "emoji": True},
+            },
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": body},
+            },
+        ]
+    }
+
+    try:
+        data = _json.dumps(payload).encode("utf-8")
+        req = _urllib_request.Request(
+            webhook_url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with _urllib_request.urlopen(req, timeout=5):
+            pass
+        return True
+    except Exception:
+        return False
+
+
 def make_notifying_alert_callback(
     notify: bool = True,
     threshold_minutes: float = 60.0,
+    slack_webhook_url: str | None = None,
 ) -> "Callable[[DriftAlert], None]":
     """Create an alert callback that sends OS notifications for drift (item 29).
 
@@ -312,22 +371,31 @@ def make_notifying_alert_callback(
     cooldown threshold prevents notification spam when the same file is
     detected as drifted across multiple poll cycles.
 
+    When ``slack_webhook_url`` is provided, also posts to Slack. The Slack
+    webhook URL can also be set via the HARNESSSYNC_SLACK_WEBHOOK env var.
+
     Args:
         notify: If False, OS notifications are disabled (stdout only).
         threshold_minutes: Minimum minutes between notifications for the
                            same (target, file) pair. Default: 60 minutes.
+        slack_webhook_url: Optional Slack incoming webhook URL. Falls back to
+                           the HARNESSSYNC_SLACK_WEBHOOK environment variable.
 
     Returns:
         Alert callback function compatible with DriftWatcher.alert_callback.
     """
+    import os as _os
     from typing import Callable
+
+    # Resolve Slack webhook: explicit arg takes precedence over env var
+    _slack_url = slack_webhook_url or _os.environ.get("HARNESSSYNC_SLACK_WEBHOOK", "").strip()
 
     last_notified: dict[tuple[str, str], float] = {}
 
     def _callback(alert: DriftAlert) -> None:
         print(alert.format())
 
-        if not notify:
+        if not notify and not _slack_url:
             return
 
         key = (alert.target, alert.file_path)
@@ -345,7 +413,22 @@ def make_notifying_alert_callback(
         else:
             body = f"{alert.target}: {filename} was modified outside HarnessSync."
 
-        sent = send_os_notification(title, body)
+        sent = False
+        if notify:
+            sent = send_os_notification(title, body)
+
+        # Also post to Slack if webhook configured
+        if _slack_url:
+            slack_body = (
+                f"*Target:* `{alert.target}`\n"
+                f"*File:* `{filename}`\n"
+                f"*Status:* {'deleted' if alert.deleted else 'modified outside HarnessSync'}\n"
+                f"*Time:* {alert.detected_at}\n"
+                f"Run `/sync` to re-sync or `/sync-restore` to revert."
+            )
+            send_slack_notification(_slack_url, title, slack_body)
+            sent = True
+
         if sent:
             last_notified[key] = now
 

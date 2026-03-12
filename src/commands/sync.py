@@ -444,13 +444,25 @@ def main():
             # --- PRE-SYNC: APPROVAL GATE (--confirm) ---
             if getattr(args, "confirm", False) and not args.dry_run:
                 try:
-                    from src.native_preview import build_sync_preview, confirm_sync
+                    from src.native_preview import (
+                        build_sync_preview, confirm_sync, get_all_native_previews
+                    )
                     from src.source_reader import SourceReader
                     _sr = SourceReader(scope=getattr(args, "scope", "all"),
                                        project_dir=project_dir)
                     _source_data = _sr.discover_all()
+                    _rules = _source_data.get("rules", "")
+                    if isinstance(_rules, list):
+                        _rules = "\n\n".join(
+                            r.get("content", "") for r in _rules if isinstance(r, dict)
+                        )
+                    _preview_all = get_all_native_previews(
+                        rules_content=_rules,
+                        mcp_servers=_source_data.get("mcp_servers", {}),
+                        settings=_source_data.get("settings", {}),
+                    )
                     _preview_changes = build_sync_preview(
-                        source_data=_source_data,
+                        preview_all=_preview_all,
                         project_dir=project_dir,
                     )
                     if not confirm_sync(_preview_changes, force=False):
@@ -577,6 +589,32 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
             if isinstance(target_results, dict) and "preview" in target_results:
                 print(f"\n[{target}]")
                 print(target_results["preview"])
+        # --- TERRAFORM-STYLE PLAN SUMMARY (item 1) ---
+        # Show consolidated "+ created / ~ modified / = unchanged" counts.
+        try:
+            from src.native_preview import (
+                get_all_native_previews, build_sync_preview, format_sync_preview
+            )
+            from src.source_reader import SourceReader as _SR
+            _sr2 = _SR(scope=getattr(args, "scope", "all"), project_dir=project_dir)
+            _sd2 = _sr2.discover_all()
+            _rules2 = _sd2.get("rules", "")
+            if isinstance(_rules2, list):
+                _rules2 = "\n\n".join(
+                    r.get("content", "") for r in _rules2 if isinstance(r, dict)
+                )
+            _pall = get_all_native_previews(
+                rules_content=_rules2,
+                mcp_servers=_sd2.get("mcp_servers", {}),
+                settings=_sd2.get("settings", {}),
+            )
+            _pchanges = build_sync_preview(preview_all=_pall, project_dir=project_dir)
+            if _pchanges:
+                print()
+                print(format_sync_preview(_pchanges))
+        except Exception:
+            pass  # Preview summary is best-effort
+
         print("\n(dry-run complete, no files modified)")
 
         # Write HTML report if --html-report specified
@@ -615,6 +653,11 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
         # Display fidelity scores (0-100 per target)
         if '_fidelity_report' in results:
             print(results['_fidelity_report'])
+
+        # Display harness upgrade notices (item 20)
+        if '_upgrade_notices' in results:
+            print()
+            print(results['_upgrade_notices'])
 
         # --- AUTO-GENERATED SYNC CHANGELOG ---
         if not getattr(args, "no_changelog", False):
