@@ -1546,3 +1546,73 @@ _2026-03-12T01:36:00.344Z_
 - After 23 iterations, the codebase feature surface is mature. Future iterations should focus on: (a) wiring existing modules together into the main orchestrator pipeline, (b) adding integration tests that exercise the full sync path, and (c) consolidating the many small analytics modules into fewer, more cohesive surfaces.
 
 ---
+## Iteration 24
+_2026-03-12T01:50:52.834Z_
+
+### Items Attempted
+
+- **Conflict Resolution Wizard** — pass
+- **Live Capability Compatibility Map** — pass
+- **Tag-Based Selective Targeting** — pass
+- **Pre-Sync Change Preview with Approval Gate** — pass
+- **Team Shared Baseline Config** — pass
+- **MCP Server Health Dashboard** — pass
+- **Auto-Generated Sync Changelog** — pass
+- **New Harness Onboarding Wizard** — pass
+- **Per-Project Sync Profiles** — pass
+- **Sync Lint Auto-Fix Mode** — pass
+- **Response Quality Benchmark Across Harnesses** — pass
+- **VS Code / Cursor Extension Sync** — pass
+- **MCP Server Discovery Registry** — pass
+- **Config Time Travel / Point-in-Time Restore** — pass
+- **PR Comment: Sync Impact Preview** — pass
+- **Secret & Credential Scrubber** — pass
+- **Missing Feature Gap Reporter** — pass
+- **Desktop Notifications for Auto-Sync Events** — pass
+- **Rule Effectiveness Scoring** — pass
+- **Natural Language Sync Config** — pass
+- **Multi-Machine Config Sync via Git** — pass
+- **Sync on Git Commit Hook** — pass
+- **Plugin Marketplace Propagation** — pass
+- **Visual Sync Diff Viewer in Terminal** — pass
+- **Token Cost Estimator per Harness** — pass
+- **Conditional Sync Rules Engine** — pass
+- **Harness Quickstart Templates Library** — pass
+- **Sync Webhook / REST API Endpoint** — pass
+- **Import Rules from Obsidian / Notion** — pass
+- **Sync Anomaly Detection** — pass
+- **A/B Rule Testing Across Harnesses** — pass
+- **CLAUDE.md Health Score & Recommendations** — pass
+- **Federated Sync for Teams** — pass
+- **Harness Retirement Cleanup Command** — pass
+
+### Decisions Made
+
+- Created src/sync_anomaly.py as a standalone module rather than embedding in orchestrator — keeps anomaly logic testable and reusable independently of the sync pipeline
+- Used line-overlap content-similarity heuristic for anomaly detection instead of difflib SequenceMatcher — faster and sufficient for anomaly flagging (not precise diff)
+- Wired ChangelogManager into _display_results() rather than main() — ensures changelog writes happen once per real sync regardless of account-mode branching
+- Added --three-way, --confirm, --allow-anomalies, --no-changelog as opt-in flags rather than defaults — preserves backward compatibility with existing CI/scripted sync workflows
+- Added @target:/@skip: frontmatter directives as standalone annotation lines (not HTML comments) — more ergonomic for users who don't want HTML comment syntax in CLAUDE.md
+- Fixed regex character class to use [ \t] instead of \s in MULTILINE mode — \s matches newlines which broke multi-directive parsing by bleeding into adjacent lines
+- Added 5 new auto-fixable portability patterns to config_linter.py including trailing whitespace, CRLF normalization, excess blank lines, /sync* command references, and orphaned sync:end tags
+- Added inline secret detection as an auto-fixable lint rule in _suggest_portability_fixes() — catches sk-*, ghp_*, xoxb-*, Bearer, AIza patterns with [REDACTED] substitution
+
+### Patterns Discovered
+
+- The codebase follows a strict pattern: all new modules need 'from __future__ import annotations' for Python 3.9 compat — already honoured in sync_anomaly.py
+- _display_results() is the single post-sync display hub — it's the right place to wire changelog, notifications, and anomaly reports since all sync paths converge there
+- sync.py accumulates flags via argparse but passes them via 'args' namespace — adding new flags requires both argparse registration and getattr(args, 'flag', default) access in the body
+- State machine in filter_rules_for_target() processes lines one-at-a-time without lookahead — new features must fit this streaming model or preprocess content before the loop
+- Many src/ modules exist as stubs with well-documented public APIs but are not wired to any command — connecting them to sync.py is often the right evolution step
+- The deepeval pytest plugin conflicts with Python 3.9 due to union type syntax (X | None) — tests must be run with -p no:deepeval to avoid collection errors unrelated to our code
+
+### Takeaways
+
+- The codebase is architecturally mature with ~80 source files; most iteration-24 items had partial implementations already — the primary work is integration, not invention
+- Anomaly detection (item 30) was the only item with zero prior implementation — it was a genuine gap in an otherwise well-covered feature set
+- Frontmatter @target:/@skip: annotations fill a usability gap in the existing HTML-comment tagging system — power users will prefer the terser syntax for file-level rules
+- The three-way conflict resolution wizard already existed in conflict_detector.py but was dead code — wiring it to --three-way surfaced months of existing work instantly
+- Auto-fix rules in config_linter.py were sparse (4 patterns); adding 5 more including secret scrubbing significantly improves the --fix mode value proposition
+- Desktop notifications were only firing in watch mode; adding them to _display_results() means users running one-shot /sync now also get OS-level feedback
+
+---

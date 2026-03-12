@@ -520,7 +520,7 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
             if isinstance(target_results, dict) and "preview" in target_results:
                 print(f"\n[{target}]")
                 print(target_results["preview"])
-        print(f"\n(dry-run complete, no files modified)")
+        print("\n(dry-run complete, no files modified)")
 
         # Write HTML report if --html-report specified
         html_report_path = getattr(args, 'html_report', None)
@@ -577,7 +577,6 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
         try:
             from src.sync_anomaly import SyncAnomalyDetector
             _anomaly_det = SyncAnomalyDetector()
-            scope_key = getattr(args, "scope", "all")
             # Check for anomaly hints surfaced by orchestrator
             if "_anomalies" in results:
                 _anomaly_report = _anomaly_det.format_report(results["_anomalies"])

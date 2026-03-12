@@ -455,7 +455,7 @@ class RuleUsageTracker:
         for rule in known_rules:
             summary = summaries.get(rule)
             uses = summary.total_uses if summary else 0
-            last_seen = summary.last_seen if summary else None
+            last_seen = summary.last_used if summary else None
             heat_score = uses / max_uses
 
             if heat_score >= 0.66:
@@ -480,7 +480,7 @@ class RuleUsageTracker:
                 heat_score = summary.total_uses / max_uses
                 result[rule] = {
                     "uses": summary.total_uses,
-                    "last_seen": summary.last_seen,
+                    "last_seen": summary.last_used,
                     "heat": "warm" if heat_score >= 0.33 else "cool",
                     "heat_score": heat_score,
                 }
