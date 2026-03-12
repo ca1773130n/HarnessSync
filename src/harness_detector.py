@@ -377,3 +377,173 @@ def prompt_bootstrap_new_harnesses(
         )
         results.append(result)
     return results
+
+
+# ---------------------------------------------------------------------------
+# Version update tracking (item 26)
+# ---------------------------------------------------------------------------
+
+def _load_known_versions(cache_path: "Path") -> dict[str, str]:
+    """Load previously-recorded harness versions from cache file.
+
+    Args:
+        cache_path: Path to the JSON cache file (typically ~/.harnesssync/versions_cache.json).
+
+    Returns:
+        Dict mapping harness_name -> last_seen_version_string.
+    """
+    if not cache_path.exists():
+        return {}
+    try:
+        import json
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        return {k: v for k, v in data.items() if isinstance(v, str)}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_known_versions(cache_path: "Path", versions: dict[str, str]) -> None:
+    """Persist harness versions to cache file.
+
+    Args:
+        cache_path: Path to write the JSON cache.
+        versions: Dict mapping harness_name -> version_string.
+    """
+    import json
+    import tempfile
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", dir=cache_path.parent, suffix=".tmp", delete=False, encoding="utf-8"
+    )
+    try:
+        json.dump(versions, tmp, indent=2)
+        tmp.close()
+        Path(tmp.name).replace(cache_path)
+    except (OSError, ValueError):
+        try:
+            Path(tmp.name).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def detect_version_updates(
+    cache_dir: "Path | None" = None,
+) -> list[dict]:
+    """Detect harnesses whose installed version has changed since last check.
+
+    Compares the current installed version of each detected harness against
+    the version stored in a local cache file. Returns harnesses that have
+    been updated, downgraded, or newly installed since the last call.
+
+    Useful for triggering a re-evaluation of sync capabilities when a harness
+    gains new features (e.g. Cursor 0.43 adding .cursor/mcp.json support).
+
+    Args:
+        cache_dir: Directory for the version cache file.
+                   Default: ~/.harnesssync/
+
+    Returns:
+        List of update dicts, each with keys:
+          - harness: Canonical harness name
+          - old_version: Previously recorded version (or "unknown")
+          - new_version: Current installed version
+          - kind: "upgraded" | "downgraded" | "new"
+          - note: Human-readable description
+    """
+    from pathlib import Path as _Path
+
+    cache_dir = cache_dir or (_Path.home() / ".harnesssync")
+    cache_path = cache_dir / "versions_cache.json"
+
+    known = _load_known_versions(cache_path)
+    current_scan = scan_all_with_versions()
+
+    updates: list[dict] = []
+
+    for harness, info in current_scan.items():
+        current_ver = info.get("version") or "unknown"
+        old_ver = known.get(harness, "")
+
+        if not old_ver:
+            # First time we've seen this harness
+            if current_ver and current_ver != "unknown":
+                updates.append({
+                    "harness":     harness,
+                    "old_version": "unknown",
+                    "new_version": current_ver,
+                    "kind":        "new",
+                    "note":        f"{harness} detected for the first time (v{current_ver})",
+                })
+        elif current_ver != old_ver and current_ver != "unknown":
+            # Compare: try semantic comparison, fall back to string
+            kind = _compare_version_kind(old_ver, current_ver)
+            updates.append({
+                "harness":     harness,
+                "old_version": old_ver,
+                "new_version": current_ver,
+                "kind":        kind,
+                "note":        f"{harness} {kind}: {old_ver} → {current_ver}",
+            })
+
+    # Persist the current versions so next call can compare
+    merged = dict(known)
+    for harness, info in current_scan.items():
+        ver = info.get("version")
+        if ver and ver != "unknown":
+            merged[harness] = ver
+
+    _save_known_versions(cache_path, merged)
+
+    return updates
+
+
+def _compare_version_kind(old: str, new: str) -> str:
+    """Return 'upgraded', 'downgraded', or 'changed' based on version strings.
+
+    Attempts a simple numeric tuple comparison; falls back to 'changed' if
+    versions can't be parsed.
+    """
+    def _parse(v: str) -> tuple:
+        parts = []
+        for segment in v.lstrip("v").split("."):
+            try:
+                parts.append(int(segment))
+            except ValueError:
+                parts.append(0)
+        return tuple(parts)
+
+    try:
+        old_t = _parse(old)
+        new_t = _parse(new)
+        if new_t > old_t:
+            return "upgraded"
+        elif new_t < old_t:
+            return "downgraded"
+        return "changed"
+    except Exception:
+        return "changed"
+
+
+def format_version_update_report(updates: list[dict]) -> str:
+    """Format detected harness version updates as a human-readable report.
+
+    Args:
+        updates: List from detect_version_updates().
+
+    Returns:
+        Formatted string, or empty string if no updates.
+    """
+    if not updates:
+        return ""
+
+    lines = [f"\nHarnessSync detected {len(updates)} harness version update(s):"]
+    for u in updates:
+        icon = "↑" if u["kind"] == "upgraded" else ("↓" if u["kind"] == "downgraded" else "★")
+        lines.append(f"  {icon}  {u['note']}")
+
+    lines.append(
+        "\nNew harness versions may support features not previously available."
+    )
+    lines.append("Run /sync-status to review compatibility changes.")
+    return "\n".join(lines)

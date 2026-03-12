@@ -243,3 +243,187 @@ class CursorAdapter(AdapterBase):
     def sync_settings(self, settings: dict) -> SyncResult:
         """Settings sync is a no-op for Cursor (managed by IDE)."""
         return SyncResult(skipped=1, skipped_files=[".cursor/settings.json: managed by IDE"])
+
+    # ------------------------------------------------------------------
+    # Bidirectional sync: read Cursor config back into CC format
+    # ------------------------------------------------------------------
+
+    def read_rules(self) -> list[dict]:
+        """Read .cursor/rules/*.mdc files and return them in CC rule format.
+
+        Strips HarnessSync-managed markers so only user-edited content is
+        returned. Skips sub-directories (skills/, agents/, commands/) since
+        those have dedicated reader methods.
+
+        Returns:
+            List of rule dicts with keys:
+              - path: Original .mdc filename (relative to project_dir)
+              - content: Raw Markdown content with frontmatter stripped
+              - type: "cursor-mdc"
+              - name: Stem of the filename
+        """
+        if not self.rules_dir.is_dir():
+            return []
+
+        rules = []
+        for mdc_path in sorted(self.rules_dir.glob("*.mdc")):
+            try:
+                raw = mdc_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+
+            content = self._strip_frontmatter(raw)
+            content = self._strip_managed_markers(content)
+            content = content.strip()
+            if not content:
+                continue
+
+            rules.append({
+                "path": str(mdc_path.relative_to(self.project_dir)),
+                "content": content,
+                "type": "cursor-mdc",
+                "name": mdc_path.stem,
+            })
+
+        return rules
+
+    def read_mcp(self) -> dict[str, dict]:
+        """Read .cursor/mcp.json and return MCP servers in CC format.
+
+        Returns:
+            Dict mapping server name -> server config dict.
+            Empty dict if .cursor/mcp.json doesn't exist or is invalid.
+        """
+        if not self.mcp_json_path.is_file():
+            return {}
+
+        try:
+            import json
+            data = json.loads(self.mcp_json_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+        raw_servers = data.get("mcpServers", data)
+        if not isinstance(raw_servers, dict):
+            return {}
+
+        servers: dict[str, dict] = {}
+        for name, cfg in raw_servers.items():
+            if not isinstance(cfg, dict):
+                continue
+            entry: dict = {}
+            if "command" in cfg:
+                entry["command"] = cfg["command"]
+            if "args" in cfg:
+                entry["args"] = cfg["args"]
+            if "env" in cfg:
+                entry["env"] = cfg["env"]
+            if "url" in cfg:
+                entry["url"] = cfg["url"]
+                entry["type"] = "sse"
+            servers[name] = entry
+
+        return servers
+
+    def read_all(self) -> dict:
+        """Read all Cursor config and return a unified CC-format dict.
+
+        Returns:
+            Dict with keys: rules, mcp_servers, source_harness.
+            Suitable for merging into CLAUDE.md via sync-import.
+        """
+        return {
+            "rules": self.read_rules(),
+            "mcp_servers": self.read_mcp(),
+            "source_harness": "cursor",
+        }
+
+    def list_rule_types(self) -> dict[str, list[str]]:
+        """Enumerate .mdc files by their Cursor rule type (always/auto/agent/manual).
+
+        Reads the ``alwaysApply`` and ``description`` frontmatter fields to
+        classify each rule file by how Cursor activates it.
+
+        Returns:
+            Dict mapping rule_type -> list of .mdc filenames:
+              - "always": alwaysApply: true
+              - "auto": description-based glob matching (no alwaysApply)
+              - "manual": agent-requested or manual rules
+        """
+        if not self.rules_dir.is_dir():
+            return {"always": [], "auto": [], "manual": []}
+
+        result: dict[str, list[str]] = {"always": [], "auto": [], "manual": []}
+
+        for mdc_path in sorted(self.rules_dir.glob("**/*.mdc")):
+            try:
+                raw = mdc_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+
+            fm = self._parse_frontmatter(raw)
+            rel = str(mdc_path.relative_to(self.project_dir))
+
+            always_apply = str(fm.get("alwaysApply", "false")).lower() in ("true", "yes", "1")
+            has_glob = bool(fm.get("glob") or fm.get("globs"))
+            if always_apply:
+                result["always"].append(rel)
+            elif has_glob:
+                result["auto"].append(rel)
+            else:
+                result["manual"].append(rel)
+
+        return result
+
+    @staticmethod
+    def _strip_frontmatter(content: str) -> str:
+        """Remove YAML frontmatter block (--- ... ---) from content."""
+        stripped = content.lstrip()
+        if not stripped.startswith("---"):
+            return content
+        rest = stripped[3:]
+        end = rest.find("\n---")
+        if end == -1:
+            return content
+        return rest[end + 4:].lstrip("\n")
+
+    @staticmethod
+    def _parse_frontmatter(content: str) -> dict:
+        """Parse YAML frontmatter into a dict (without full yaml dependency)."""
+        stripped = content.lstrip()
+        if not stripped.startswith("---"):
+            return {}
+        rest = stripped[3:]
+        end = rest.find("\n---")
+        if end == -1:
+            return {}
+        fm_text = rest[:end]
+        result: dict = {}
+        for line in fm_text.splitlines():
+            if ":" in line:
+                k, _, v = line.partition(":")
+                result[k.strip()] = v.strip()
+        return result
+
+    @staticmethod
+    def _strip_managed_markers(content: str) -> str:
+        """Remove HarnessSync management markers from content.
+
+        Strips <!-- Managed by HarnessSync --> ... <!-- End HarnessSync managed content -->
+        blocks so only user-authored content survives the round-trip.
+        Preserves content between the markers that wasn't added by HarnessSync.
+        """
+        lines = content.splitlines(keepends=True)
+        out: list[str] = []
+        in_managed = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped == HARNESSSYNC_MARKER:
+                in_managed = True
+                continue
+            if stripped == HARNESSSYNC_MARKER_END:
+                in_managed = False
+                continue
+            if not in_managed:
+                out.append(line)
+        return "".join(out)

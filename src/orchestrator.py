@@ -334,6 +334,19 @@ class SyncOrchestrator:
                         adapter_data['mcp'] = scrubbed_mcp
                         scrub_report = secret_detector.format_scrub_report(scrubbed_names)
                         self.logger.warn(scrub_report)
+
+                    # Also scrub inline secrets from rules content
+                    rules = source_data.get('rules', [])
+                    if rules:
+                        scrubbed_rules, rule_descs = secret_detector.scrub_rules_content(rules)
+                        if rule_descs:
+                            source_data['rules'] = scrubbed_rules
+                            adapter_data['rules'] = scrubbed_rules
+                            self.logger.warn(
+                                f"Scrubbed {len(rule_descs)} inline secret(s) from rules: "
+                                + ", ".join(rule_descs[:5])
+                                + ("..." if len(rule_descs) > 5 else "")
+                            )
                 elif secret_detector.should_block(detections, self.allow_secrets):
                     # Block sync - return early with warning
                     formatted_warnings = secret_detector.format_warnings(detections)

@@ -319,6 +319,10 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
     if not content:
         return content
 
+    # Apply section-level heading annotations first (whole-section include/exclude)
+    # before the line-by-line inline tag processing below.
+    content = filter_sections_for_target(content, target_name)
+
     target_lower = target_name.lower()
 
     lines = content.splitlines(keepends=True)
@@ -842,3 +846,243 @@ def propagate_effectiveness_annotations(
 
     # All other targets: keep as HTML comments (default passthrough)
     return content
+
+
+# ---------------------------------------------------------------------------
+# Section-level harness annotation parser (item 2 — per-harness config overrides)
+# ---------------------------------------------------------------------------
+
+# Matches a Markdown heading line (H1–H4) that is IMMEDIATELY followed on the
+# same line by a harness annotation comment:
+#   ## My Section <!-- harness:codex-only -->
+#   ### Rules <!-- skip:gemini -->
+#   # Context <!-- harness:only=codex,cursor -->
+_SECTION_ANNOTATION_RE = re.compile(
+    r"^(#{1,4}\s+.+?)\s+"
+    r"<!--\s*"
+    r"(?:"
+    r"harness:(?P<only_a>[a-z0-9,_-]+-only)"       # harness:codex-only
+    r"|harness:only=(?P<only_b>[a-z0-9,_-]+)"       # harness:only=codex,cursor
+    r"|harness:skip=(?P<skip_a>[a-z0-9,_-]+)"       # harness:skip=gemini
+    r"|skip:(?P<skip_b>[a-z0-9,_-]+)"               # skip:gemini
+    r")"
+    r"\s*-->",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def extract_section_annotations(content: str) -> list[dict]:
+    """Parse CLAUDE.md and extract per-section harness annotation metadata.
+
+    Returns a list of sections annotated with harness targeting info.
+    Useful for auditing which sections are restricted to specific harnesses.
+
+    Supported heading-line annotation forms:
+      ## Section Name <!-- harness:codex-only -->
+      ## Section Name <!-- harness:only=codex,cursor -->
+      ## Section Name <!-- harness:skip=gemini -->
+      ## Section Name <!-- skip:gemini -->
+
+    Args:
+        content: Raw CLAUDE.md (or other Markdown) text.
+
+    Returns:
+        List of dicts with keys:
+          - heading: Full heading text (e.g. "## My Section")
+          - annotation_type: "only" | "skip"
+          - targets: Set of harness names the annotation applies to
+          - line_number: 1-based line number of the heading
+    """
+    results: list[dict] = []
+    for m in _SECTION_ANNOTATION_RE.finditer(content):
+        heading = m.group(1).strip()
+
+        # Determine line number
+        line_number = content[: m.start()].count("\n") + 1
+
+        only_a = m.group("only_a")
+        only_b = m.group("only_b")
+        skip_a = m.group("skip_a")
+        skip_b = m.group("skip_b")
+
+        if only_a:
+            # "codex-only" → target is "codex"
+            raw = only_a.replace("-only", "")
+            targets = {t.strip() for t in raw.split(",") if t.strip()}
+            ann_type = "only"
+        elif only_b:
+            targets = {t.strip() for t in only_b.split(",") if t.strip()}
+            ann_type = "only"
+        elif skip_a:
+            targets = {t.strip() for t in skip_a.split(",") if t.strip()}
+            ann_type = "skip"
+        else:
+            targets = {t.strip() for t in skip_b.split(",") if t.strip()}
+            ann_type = "skip"
+
+        results.append({
+            "heading":         heading,
+            "annotation_type": ann_type,
+            "targets":         targets,
+            "line_number":     line_number,
+        })
+
+    return results
+
+
+def filter_sections_for_target(content: str, target_name: str) -> str:
+    """Remove or retain whole Markdown sections based on heading-level annotations.
+
+    When a heading line carries a ``<!-- harness:codex-only -->`` or similar
+    annotation, the entire section (heading + body, up to the next same-level
+    or higher heading) is either kept or dropped for the given target.
+
+    This is complementary to ``filter_rules_for_target()``, which handles
+    inline and block-level tags. This function handles coarser, section-level
+    targeting.
+
+    Sections without annotations pass through unchanged.
+
+    Args:
+        content: Raw CLAUDE.md Markdown text.
+        target_name: Target harness name (e.g. "codex", "gemini").
+
+    Returns:
+        Filtered content with excluded sections removed.
+    """
+    target_lower = target_name.lower()
+
+    # Parse all annotated sections first
+    annotated: dict[int, dict] = {}  # start_pos -> annotation
+    for m in _SECTION_ANNOTATION_RE.finditer(content):
+        annotated[m.start()] = {
+            "match": m,
+            "annotation_type": None,
+            "targets": set(),
+        }
+        only_a = m.group("only_a")
+        only_b = m.group("only_b")
+        skip_a = m.group("skip_a")
+        skip_b = m.group("skip_b")
+        if only_a:
+            raw = only_a.replace("-only", "")
+            annotated[m.start()]["targets"] = {t.strip() for t in raw.split(",") if t.strip()}
+            annotated[m.start()]["annotation_type"] = "only"
+        elif only_b:
+            annotated[m.start()]["targets"] = {t.strip() for t in only_b.split(",") if t.strip()}
+            annotated[m.start()]["annotation_type"] = "only"
+        elif skip_a:
+            annotated[m.start()]["targets"] = {t.strip() for t in skip_a.split(",") if t.strip()}
+            annotated[m.start()]["annotation_type"] = "skip"
+        else:
+            annotated[m.start()]["targets"] = {t.strip() for t in skip_b.split(",") if t.strip()}
+            annotated[m.start()]["annotation_type"] = "skip"
+
+    if not annotated:
+        return content
+
+    # Split content into lines with character positions
+    lines = content.splitlines(keepends=True)
+    line_starts = []
+    pos = 0
+    for line in lines:
+        line_starts.append(pos)
+        pos += len(line)
+
+    # Build a set of line indices to drop
+    heading_re = re.compile(r"^(#{1,4})\s", re.MULTILINE)
+    heading_matches = list(heading_re.finditer(content))
+
+    # For each annotated heading, determine section extent and decide to keep/drop
+    drop_ranges: list[tuple[int, int]] = []  # (start_line_idx, end_line_idx) exclusive
+
+    for start_pos, ann_info in annotated.items():
+        ann_type = ann_info["annotation_type"]
+        targets = ann_info["targets"]
+
+        # Should this section be excluded for the target?
+        if ann_type == "only":
+            exclude = target_lower not in targets
+        else:  # "skip"
+            exclude = target_lower in targets
+
+        if not exclude:
+            continue
+
+        # Find which heading_match corresponds to this annotation
+        match_obj = ann_info["match"]
+        ann_heading_start = match_obj.start()
+
+        # Find index of this heading in heading_matches
+        hm_idx = next(
+            (i for i, hm in enumerate(heading_matches) if hm.start() == ann_heading_start),
+            None,
+        )
+        if hm_idx is None:
+            continue
+
+        current_level = len(heading_matches[hm_idx].group(1))
+
+        # Section ends at next heading of same or higher level
+        section_start = ann_heading_start
+        section_end = len(content)
+        for hm in heading_matches[hm_idx + 1:]:
+            level = len(hm.group(1))
+            if level <= current_level:
+                section_end = hm.start()
+                break
+
+        drop_ranges.append((section_start, section_end))
+
+    if not drop_ranges:
+        return content
+
+    # Build output by excluding dropped character ranges
+    result_parts: list[str] = []
+    cursor = 0
+    for start, end in sorted(drop_ranges):
+        if cursor < start:
+            result_parts.append(content[cursor:start])
+        cursor = max(cursor, end)
+    if cursor < len(content):
+        result_parts.append(content[cursor:])
+
+    return "".join(result_parts)
+
+
+def format_section_annotation_report(content: str, targets: list[str] | None = None) -> str:
+    """Report all section-level harness annotations found in CLAUDE.md.
+
+    Args:
+        content: Raw CLAUDE.md content.
+        targets: Optional list of known harness names for validation.
+
+    Returns:
+        Formatted report string listing annotated sections.
+    """
+    annotations = extract_section_annotations(content)
+    if not annotations:
+        return "No section-level harness annotations found."
+
+    lines = [f"Found {len(annotations)} section-level harness annotation(s):\n"]
+    for ann in annotations:
+        heading = ann["heading"]
+        ann_type = ann["annotation_type"]
+        targets_str = ", ".join(sorted(ann["targets"]))
+        line_num = ann["line_number"]
+
+        if ann_type == "only":
+            desc = f"only-for: {targets_str}"
+        else:
+            desc = f"skip-for: {targets_str}"
+
+        lines.append(f"  Line {line_num:4d}: {heading} — {desc}")
+
+        # Warn about unknown targets
+        if targets:
+            known_set = set(targets)
+            unknown = ann["targets"] - known_set
+            if unknown:
+                lines.append(f"           ⚠ Unknown harness(es): {', '.join(sorted(unknown))}")
+
+    return "\n".join(lines)

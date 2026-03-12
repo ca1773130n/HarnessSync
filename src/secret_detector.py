@@ -473,3 +473,100 @@ class SecretDetector:
         lines.append("Use --allow-secrets to override this warning (NOT recommended).")
 
         return "\n".join(lines)
+
+    def scrub_content(self, content: str, placeholder: str = "[REDACTED]") -> tuple[str, list[str]]:
+        """Replace inline secret values in plain text content with a placeholder.
+
+        Scans each line for patterns like ``api_key: sk-abc123`` or
+        ``password=supersecretvalue123`` and replaces the *value* portion
+        with ``placeholder``. The key name is preserved so the context is
+        not lost, but the secret value is never written to target configs.
+
+        This extends scrub_mcp_env() to cover inline secrets inside CLAUDE.md
+        rules text and other plaintext config files.
+
+        CRITICAL: Never logs or displays actual secret values.
+
+        Args:
+            content: Raw text to scrub (e.g. CLAUDE.md content).
+            placeholder: Replacement string for detected secret values.
+                         Default: "[REDACTED]"
+
+        Returns:
+            Tuple of (scrubbed_content, scrubbed_descriptions) where:
+              - scrubbed_content: Content with secret values replaced.
+              - scrubbed_descriptions: List of human-readable descriptions
+                of what was scrubbed (e.g. "api_key on line 12"), without
+                revealing the actual secret values.
+        """
+        scrubbed_lines: list[str] = []
+        descriptions: list[str] = []
+
+        for line_num, line in enumerate(content.splitlines(keepends=True), start=1):
+            new_line = line
+            for m in _INLINE_SECRET_RE.finditer(line):
+                # m.group(0) is e.g. "api_key: sk-abc123"
+                # We preserve the key= part and replace only the value
+                matched = m.group(0)
+                # Find the separator (: or =) and replace everything after it
+                sep_pos = -1
+                for sep in (":", "="):
+                    idx = matched.find(sep)
+                    if idx != -1 and (sep_pos == -1 or idx < sep_pos):
+                        sep_pos = idx
+                if sep_pos != -1:
+                    key_part = matched[: sep_pos + 1]
+                    new_line = new_line.replace(matched, f"{key_part} {placeholder}", 1)
+                    keyword = matched[:sep_pos].strip()
+                    descriptions.append(f"{keyword} on line {line_num}")
+
+            # Entropy-based scrubbing for standalone high-entropy tokens
+            # Only applies to tokens that look like they're assigned values
+            # (prevents scrubbing normal prose words)
+            for word in new_line.split():
+                clean = word.strip("\"',;()")
+                if len(clean) >= ENTROPY_MIN_LENGTH and is_high_entropy_secret(clean):
+                    # Extra guard: must contain mixed-case or digits to avoid
+                    # false positives on long lowercase prose words
+                    has_upper = any(c.isupper() for c in clean)
+                    has_digit = any(c.isdigit() for c in clean)
+                    if has_upper and has_digit:
+                        new_line = new_line.replace(clean, placeholder, 1)
+                        descriptions.append(f"high-entropy token on line {line_num}")
+                        break  # One replacement per line for entropy scrubbing
+
+            scrubbed_lines.append(new_line)
+
+        return "".join(scrubbed_lines), descriptions
+
+    def scrub_rules_content(self, rules: list[dict]) -> tuple[list[dict], list[str]]:
+        """Scrub inline secrets from a list of rule dicts returned by SourceReader.
+
+        Each rule dict has a ``content`` key containing the rule text.
+        This method returns a new list with secrets scrubbed from content.
+
+        Args:
+            rules: List of rule dicts (path, content keys).
+
+        Returns:
+            Tuple of (scrubbed_rules, all_descriptions) where:
+              - scrubbed_rules: New list of rule dicts with secrets removed.
+              - all_descriptions: Flat list of scrub descriptions.
+        """
+        import copy
+
+        scrubbed_rules: list[dict] = []
+        all_descriptions: list[str] = []
+
+        for rule in rules:
+            rule_copy = copy.copy(rule)
+            content = rule.get("content", "")
+            if content:
+                scrubbed_content, descs = self.scrub_content(content)
+                rule_copy["content"] = scrubbed_content
+                if descs:
+                    src = rule.get("path", "rule")
+                    all_descriptions.extend(f"{src}: {d}" for d in descs)
+            scrubbed_rules.append(rule_copy)
+
+        return scrubbed_rules, all_descriptions

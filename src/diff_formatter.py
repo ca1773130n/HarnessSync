@@ -277,3 +277,98 @@ class DiffFormatter:
         diff_output = self.format_output()
         cost = self.estimate_cost()
         return diff_output + "\n\n" + cost.format()
+
+    def format_per_harness_summary(self) -> str:
+        """Format a compact per-harness dry-run summary table.
+
+        Shows one row per harness with file and line change counts.
+        Designed for quick scanning before a real sync run.
+
+        Returns:
+            Formatted multi-line string, or empty string if no data.
+
+        Example output::
+
+            Dry-Run Summary — Per Harness
+            ─────────────────────────────────────
+              harness        files   added  removed  status
+              codex              3    +142      -18  changes
+              gemini             1      +8       -2  changes
+              opencode           0       —        —  no change
+              cursor             5     +67      -11  changes
+            ─────────────────────────────────────
+              Total              9    +217      -31
+        """
+        breakdown = self._target_breakdown
+        if not breakdown:
+            return ""
+
+        lines = ["Dry-Run Summary — Per Harness", "─" * 52]
+        lines.append(f"  {'harness':<14} {'files':>5}  {'added':>7}  {'removed':>8}  status")
+        lines.append("  " + "─" * 50)
+
+        total_files = 0
+        total_added = 0
+        total_removed = 0
+
+        # Sort: harnesses with changes first, then alphabetically
+        sorted_targets = sorted(
+            breakdown.items(),
+            key=lambda kv: (-(kv[1].get("files", 0)), kv[0]),
+        )
+
+        for target, info in sorted_targets:
+            files = info.get("files", 0)
+            added = info.get("added", 0)
+            removed = info.get("removed", 0)
+            status = "changes" if files > 0 else "no change"
+            added_str = f"+{added}" if added else "—"
+            removed_str = f"-{removed}" if removed else "—"
+            lines.append(
+                f"  {target:<14} {files:>5}  {added_str:>7}  {removed_str:>8}  {status}"
+            )
+            total_files += files
+            total_added += added
+            total_removed += removed
+
+        unchanged = self._files_unchanged
+        if unchanged:
+            lines.append(
+                f"  {'(unchanged)':<14} {'—':>5}  {'—':>7}  {'—':>8}  "
+                f"{unchanged} file(s) unchanged"
+            )
+
+        lines.append("  " + "─" * 50)
+        lines.append(
+            f"  {'Total':<14} {total_files:>5}  +{total_added:>6}  -{total_removed:>7}"
+        )
+        return "\n".join(lines)
+
+    def format_full_dry_run(self) -> str:
+        """Format a complete dry-run report: summary table + diffs + cost estimate.
+
+        Intended as the canonical output for ``--dry-run`` mode. Provides:
+          1. Per-harness summary table (quick scan)
+          2. Full unified diffs (detailed review)
+          3. Cost estimate (time / write count)
+
+        Returns:
+            Complete formatted string.
+        """
+        parts: list[str] = []
+
+        summary = self.format_per_harness_summary()
+        if summary:
+            parts.append(summary)
+
+        diff_output = self.format_output()
+        if diff_output and diff_output != "[no changes detected]":
+            parts.append(diff_output)
+        elif not summary:
+            parts.append("[no changes detected]")
+
+        cost = self.estimate_cost()
+        if cost.files_to_write > 0 or cost.files_unchanged > 0:
+            parts.append(cost.format())
+
+        return "\n\n".join(parts) if parts else "[no changes detected]"

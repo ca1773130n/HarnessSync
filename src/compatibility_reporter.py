@@ -809,6 +809,154 @@ class CompatibilityReporter:
         footer = "─" * 50
         return header + "\n".join(sections) + "\n" + footer
 
+    def rank_by_value_lost(self, source_data: dict, targets: list[str]) -> list[dict]:
+        """Rank feature×harness combinations by how much value the user is losing.
+
+        Returns a list sorted highest-to-lowest by estimated value loss, so
+        users can prioritize which gaps matter most to them. Each entry
+        explains the gap and suggests a workaround.
+
+        Value is computed as:
+          count_of_items × fidelity_loss_factor × category_importance_weight
+
+        Category importance weights (subjective, user-value focused):
+          skills=1.5, agents=1.4, mcp=1.3, commands=1.1, settings=0.8
+
+        Args:
+            source_data: Output of SourceReader.discover_all().
+            targets: List of target harness names to analyze.
+
+        Returns:
+            List of dicts sorted by value_lost descending, each with keys:
+              - harness: Target harness name
+              - feature: Feature category ("skills", "agents", etc.)
+              - item_count: Number of items affected
+              - fidelity: "none" | "partial"
+              - value_lost: Numeric score (higher = more value lost)
+              - headline: One-line description (e.g. "12 skills lost in Codex")
+              - suggestion: Actionable tip for closing this gap
+        """
+        # Gap matrix: harness -> feature -> fidelity ("none" | "partial")
+        _GAP_MATRIX: dict[str, dict[str, str]] = {
+            "codex":    {"skills": "partial", "agents": "partial", "commands": "partial"},
+            "gemini":   {"agents": "partial", "commands": "partial"},
+            "opencode": {"agents": "partial", "commands": "partial", "mcp": "partial"},
+            "cursor":   {"skills": "none", "agents": "none", "commands": "partial"},
+            "aider":    {"skills": "none", "agents": "none", "commands": "none", "mcp": "none"},
+            "windsurf": {"skills": "none", "agents": "none", "commands": "none"},
+        }
+
+        _IMPORTANCE: dict[str, float] = {
+            "skills": 1.5,
+            "agents": 1.4,
+            "mcp":    1.3,
+            "commands": 1.1,
+            "settings": 0.8,
+            "rules":  0.5,
+        }
+
+        _FIDELITY_LOSS: dict[str, float] = {"none": 1.0, "partial": 0.4}
+
+        _SUGGESTIONS: dict[str, dict[str, str]] = {
+            "skills": {
+                "none":    "Use LLM rule translation (/sync-capabilities) to embed skill intent as rules",
+                "partial": "Review translated skills in target — some nuance may be lost",
+            },
+            "agents": {
+                "none":    "Describe agents as prose rules in CLAUDE.md for harnesses without agent support",
+                "partial": "Check generated agent descriptions for completeness",
+            },
+            "commands": {
+                "none":    "Document slash commands as workflow notes in CLAUDE.md",
+                "partial": "Verify command hints are recognized in the target harness",
+            },
+            "mcp": {
+                "none":    "Add MCP servers manually in the target harness; consider using /sync-mcp-health",
+                "partial": "Some MCP fields may be dropped — verify server config after sync",
+            },
+            "settings": {
+                "partial": "Review translated settings; use per-harness overrides for unsupported fields",
+            },
+        }
+
+        counts: dict[str, int] = {
+            "skills":   len(source_data.get("skills", {})),
+            "agents":   len(source_data.get("agents", {})),
+            "commands": len(source_data.get("commands", {})),
+            "mcp":      len(source_data.get("mcp_servers", {})),
+            "settings": 1 if source_data.get("settings") else 0,
+        }
+
+        entries: list[dict] = []
+        for target in targets:
+            gaps = _GAP_MATRIX.get(target, {})
+            for feature, fidelity in gaps.items():
+                count = counts.get(feature, 0)
+                if count == 0:
+                    continue
+                loss_factor = _FIDELITY_LOSS.get(fidelity, 0.0)
+                importance = _IMPORTANCE.get(feature, 1.0)
+                value_lost = round(count * loss_factor * importance, 2)
+
+                if fidelity == "none":
+                    headline = f"{count} {feature} will NOT sync to {target}"
+                else:
+                    headline = f"{count} {feature} will lose fidelity in {target}"
+
+                suggestion = _SUGGESTIONS.get(feature, {}).get(fidelity, "Review sync output manually")
+
+                entries.append({
+                    "harness":    target,
+                    "feature":    feature,
+                    "item_count": count,
+                    "fidelity":   fidelity,
+                    "value_lost": value_lost,
+                    "headline":   headline,
+                    "suggestion": suggestion,
+                })
+
+        entries.sort(key=lambda e: e["value_lost"], reverse=True)
+        return entries
+
+    def format_value_lost_ranking(self, source_data: dict, targets: list[str]) -> str:
+        """Format the ranked value-loss list as a human-readable report.
+
+        Args:
+            source_data: Output of SourceReader.discover_all().
+            targets: List of target harness names.
+
+        Returns:
+            Formatted string showing features ranked by value lost,
+            with a suggestion for each gap.
+        """
+        ranked = self.rank_by_value_lost(source_data, targets)
+        if not ranked:
+            return "No capability gaps detected — all features sync with full fidelity."
+
+        lines = [
+            "Capability Gap Report — Ranked by Value Lost",
+            "=" * 50,
+            "",
+            "Higher score = more CC functionality you lose in that harness.",
+            "",
+        ]
+
+        for i, entry in enumerate(ranked, start=1):
+            score_bar = "█" * min(int(entry["value_lost"] / 2), 20)
+            lines.append(
+                f"#{i:2d}  [{entry['value_lost']:5.1f}] {score_bar}"
+            )
+            lines.append(f"      {entry['headline']}")
+            lines.append(f"      Tip: {entry['suggestion']}")
+            lines.append("")
+
+        total_lost = sum(e["value_lost"] for e in ranked)
+        lines.append(f"Total value-loss score: {total_lost:.1f}")
+        lines.append(
+            "\nRun /sync-capabilities for detailed per-feature translation fidelity."
+        )
+        return "\n".join(lines)
+
     def has_issues(self, report: dict) -> bool:
         """
         Check if report contains adapted or failed items.

@@ -329,3 +329,139 @@ def write_html_report(
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html_content, encoding="utf-8")
+
+
+def render_skill_heatmap_html(
+    skill_names: list[str],
+    targets: list[str],
+    fidelity_matrix: dict[str, dict[str, str]],
+    title: str = "Skill Coverage Heatmap",
+) -> str:
+    """Generate a self-contained HTML heatmap showing skill sync fidelity.
+
+    Each cell shows how well a skill translates to a specific target harness.
+    Cell colors:
+      - Green (#4caf50):  "full" — syncs with full fidelity
+      - Yellow (#ffc107): "partial" — translates with some fidelity loss
+      - Red (#f44336):    "none" — no equivalent in target
+      - Grey (#9e9e9e):   "unknown" — not evaluated
+
+    Args:
+        skill_names: List of CC skill names (rows).
+        targets: List of target harness names (columns).
+        fidelity_matrix: Dict mapping skill_name -> {target -> fidelity_str}.
+                         fidelity_str is one of "full", "partial", "none".
+        title: Page and table title.
+
+    Returns:
+        Self-contained HTML string with embedded CSS and no external deps.
+    """
+    _COLORS = {
+        "full":    ("#4caf50", "#fff", "Full"),
+        "partial": ("#ffc107", "#333", "Partial"),
+        "none":    ("#f44336", "#fff", "None"),
+        "unknown": ("#9e9e9e", "#fff", "?"),
+    }
+
+    # Build header row
+    header_cells = "<th>Skill</th>" + "".join(
+        f"<th>{_escape(t)}</th>" for t in targets
+    )
+
+    # Build data rows
+    body_rows: list[str] = []
+    for skill in skill_names:
+        skill_fidelity = fidelity_matrix.get(skill, {})
+        cells = [f"<td class='skill-name'>{_escape(skill)}</td>"]
+        for target in targets:
+            fidelity = skill_fidelity.get(target, "unknown")
+            bg, fg, label = _COLORS.get(fidelity, _COLORS["unknown"])
+            cells.append(
+                f"<td style='background:{bg};color:{fg};' title='{label}: {skill} → {target}'>"
+                f"{label}</td>"
+            )
+        body_rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    # Legend
+    legend_items = "".join(
+        f"<span style='background:{bg};color:{fg};padding:2px 8px;border-radius:3px;margin:0 4px;'>"
+        f"{label}</span>"
+        for label, (bg, fg, _) in [
+            ("Full", _COLORS["full"]),
+            ("Partial", _COLORS["partial"]),
+            ("None", _COLORS["none"]),
+            ("Unknown", _COLORS["unknown"]),
+        ]
+    )
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    total_skills = len(skill_names)
+    full_count = sum(
+        1 for s in skill_names for t in targets
+        if fidelity_matrix.get(s, {}).get(t) == "full"
+    )
+    total_cells = max(total_skills * len(targets), 1)
+    overall_pct = round(100 * full_count / total_cells)
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{_escape(title)}</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          margin: 24px; background: #f5f5f5; color: #212121; }}
+  h1 {{ font-size: 1.4em; margin-bottom: 4px; }}
+  .meta {{ font-size: 0.85em; color: #757575; margin-bottom: 16px; }}
+  .summary {{ background: #fff; border-radius: 6px; padding: 12px 16px;
+              margin-bottom: 16px; display: inline-block; box-shadow: 0 1px 3px rgba(0,0,0,.15); }}
+  table {{ border-collapse: collapse; background: #fff;
+           box-shadow: 0 1px 3px rgba(0,0,0,.15); border-radius: 6px; overflow: hidden; }}
+  th {{ background: #263238; color: #fff; padding: 8px 14px;
+        font-size: 0.8em; text-transform: uppercase; letter-spacing: .05em; }}
+  td {{ padding: 7px 14px; font-size: 0.85em; border-bottom: 1px solid #e0e0e0; }}
+  td.skill-name {{ font-family: monospace; background: #fafafa; font-weight: 500; }}
+  tr:last-child td {{ border-bottom: none; }}
+  .legend {{ margin-top: 14px; font-size: 0.8em; }}
+</style>
+</head>
+<body>
+<h1>{_escape(title)}</h1>
+<div class="meta">Generated {now} by HarnessSync</div>
+<div class="summary">
+  <strong>{total_skills}</strong> skills &nbsp;|&nbsp;
+  <strong>{len(targets)}</strong> targets &nbsp;|&nbsp;
+  <strong>{overall_pct}%</strong> full-fidelity cells
+</div>
+<table>
+<thead><tr>{header_cells}</tr></thead>
+<tbody>
+{''.join(body_rows)}
+</tbody>
+</table>
+<div class="legend">Legend: {legend_items}</div>
+</body>
+</html>
+"""
+    return html
+
+
+def write_skill_heatmap(
+    skill_names: list[str],
+    targets: list[str],
+    fidelity_matrix: dict[str, dict[str, str]],
+    output_path: Path,
+    title: str = "Skill Coverage Heatmap",
+) -> None:
+    """Write a skill coverage heatmap HTML file.
+
+    Args:
+        skill_names: List of CC skill names.
+        targets: List of target harness names.
+        fidelity_matrix: Dict mapping skill_name -> {target -> fidelity_str}.
+        output_path: Path to write the HTML file.
+        title: Page title.
+    """
+    html = render_skill_heatmap_html(skill_names, targets, fidelity_matrix, title)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(html, encoding="utf-8")

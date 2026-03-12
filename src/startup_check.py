@@ -166,3 +166,52 @@ def format_startup_message(project_dir: Path | None = None) -> str | None:
     Suitable for display in hooks/startup scripts. Returns None if no drift.
     """
     return check_drift_brief(project_dir)
+
+
+def check_harness_updates(cache_dir: Path | None = None) -> str | None:
+    """Check for newly installed or updated harnesses and return a notice.
+
+    Detects harnesses that have been installed or updated since the last
+    HarnessSync run. Surfaces a short notification so users know new sync
+    capabilities may be available.
+
+    Args:
+        cache_dir: Directory for the version cache.
+                   Default: ~/.harnesssync/
+
+    Returns:
+        Formatted notice string, or None if no updates detected.
+    """
+    try:
+        from src.harness_detector import detect_version_updates, format_version_update_report
+        updates = detect_version_updates(cache_dir=cache_dir)
+        report = format_version_update_report(updates)
+        return report or None
+    except Exception:
+        return None
+
+
+def full_startup_check(project_dir: Path | None = None) -> list[str]:
+    """Run all startup checks and return a list of notice strings.
+
+    Combines drift detection and harness version update detection into a
+    single call suitable for use in SessionStart hooks or shell prompts.
+
+    Args:
+        project_dir: Project root directory (optional).
+
+    Returns:
+        List of notice strings (may be empty if everything is up to date).
+        Each string is a self-contained message suitable for printing.
+    """
+    notices: list[str] = []
+
+    drift_msg = format_startup_message(project_dir)
+    if drift_msg:
+        notices.append(drift_msg)
+
+    update_msg = check_harness_updates()
+    if update_msg:
+        notices.append(update_msg)
+
+    return notices

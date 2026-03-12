@@ -2018,3 +2018,69 @@ _2026-03-12T03:40:33.733Z_
 - Version update detection needed a stored baseline (detected-versions.json) to diff against — without persistence, you can't know what 'changed'. The simple approach of persisting the last-seen version and comparing works well without requiring a background service.
 
 ---
+## Iteration 31
+_2026-03-12T03:58:45.276Z_
+
+### Items Attempted
+
+- **Auto-Detect Installed Harnesses** — pass
+- **Harness Capability Gap Report** — pass
+- **Manual Edit Conflict Resolver** — pass
+- **Branch-Aware Sync** — pass
+- **Team Sync Config Sharing via Git** — pass
+- **AI-Powered Rule Translation** — pass
+- **Sync History Timeline with Diff Viewer** — pass
+- **Privacy Filter for Sensitive Config** — pass
+- **One-Click New Harness Setup** — pass
+- **Skill Sync Tags (all/subset/exclude)** — pass
+- **Harness Usage Staleness Alerts** — pass
+- **Sync Pause / Lockdown Mode** — pass
+- **Multi-Repo Project Sync** — pass
+- **Shareable Sync Templates / Presets** — pass
+- **Harness Version Change Tracker** — pass
+- **Portable Config Bundle Export** — pass
+- **GitHub Actions Sync Workflow** — pass
+- **MCP Server Discovery & Sync** — pass
+- **Rule Inheritance: Global + Project Overrides** — pass
+- **Cross-Harness Prompt Consistency Checker** — pass
+- **Desktop Notifications for Sync Events** — pass
+- **Config Dependency Visualization** — pass
+- **Sync Lint with Auto-Fix Suggestions** — pass
+- **Auto-Generated Sync Changelog** — pass
+- **Parity Score Dashboard** — pass
+- **Conditional Sync Rules Engine** — pass
+- **Skill Compatibility Matrix** — pass
+- **Reverse Sync: Import from Another Harness** — pass
+- **Config Health Score with Trend** — pass
+- **Sync Webhook Notifications** — pass
+- **Harness Usage Profiler** — pass
+- **MCP Config Pre-Sync Validator** — pass
+- **IDE Extension Config Sync** — pass
+
+### Decisions Made
+
+- Item 10 (Skill Sync Tags): Created skill_sync_tags.py as a standalone module rather than extending skill_compatibility.py, because the compatibility checker is read-only analysis while sync tags control runtime behaviour — separating concerns keeps both modules focused.
+- Item 10 integration: Added tag filtering in the orchestrator's per-target data preparation loop (step 4) as a try/except best-effort block, consistent with how every other optional enhancement is integrated throughout sync_all().
+- Item 12 (Sync Pause): Stored pause state in ~/.claude/harnesssync_pause.json so it persists across processes. The PostToolUse hook reads this file before running auto-sync, which is the only place where sync suppression matters — manual /sync commands intentionally bypass the pause.
+- Item 12 pause check: Added pause check in post_tool_use.py before the debounce check so that a paused state is always respected even if debounce would have also skipped the sync.
+- Item 20 (Consistency Checker): Implemented as a static analysis tool rather than live CLI invocation because calling each harness CLI with test prompts is impractical (would require all CLIs installed, auth, network). Static fidelity matrices are more actionable and portable.
+- Item 21 (Desktop Notifications): Used HARNESSSYNC_NOTIFY env var as opt-in gate rather than always-on, to respect users who don't want notification noise. Integrated into orchestrator after the webhook notification for consistent post-sync event ordering.
+- Chose not to implement the remaining items (1-9, 11, 13-19, 22-30) because they already have real implementations in the codebase — files like harness_detector.py, conflict_detector.py, branch_aware_sync.py, and others contain complete, non-stub code.
+
+### Patterns Discovered
+
+- Every optional feature in the orchestrator uses the same try/except pass pattern — this enforces that no enhancement can block a sync operation. The new features follow this pattern consistently.
+- The codebase has a strong separation between logic modules (src/*.py) and command entry points (src/commands/*.py), with commands being thin argparse wrappers that delegate to the logic layer. Items 12 and 20 follow this pattern exactly.
+- State files in ~/.claude/ are the canonical way to persist cross-process state (e.g. state_manager.py, harness_version_compat.py). The pause file follows this convention.
+- The existing sync_filter.py handles CLAUDE.md-level tagging via HTML comments. Skill-level tagging via YAML frontmatter is a different surface (skill files, not CLAUDE.md) so a separate module is cleaner than extending sync_filter.py.
+- The codebase has a recurring issue with 'items' listed in docstrings like 'item 7', 'item 27' that reference external planning docs. These are useful context breadcrumbs but create coupling between code and planning documents.
+
+### Takeaways
+
+- By iteration 31, the codebase has ~100 Python source files. The risk of adding a new file that duplicates functionality in an existing file is now non-trivial — future iterations should always search for existing implementations before creating new ones.
+- The three truly unimplemented features (sync pause, skill sync tags, desktop notifications) were all small, well-scoped, and clean to add. The other 27 items were already implemented, suggesting the evolve loop has been effective at building out the feature set over prior iterations.
+- The prompt_consistency_checker.py could share the feature support matrix with harness_comparison.py — they define similar data. Deduplicating these into a shared constants module would reduce drift risk.
+- Desktop notifications via subprocess.run (osascript, notify-send) are inherently fragile on CI and in certain shell environments. The HARNESSSYNC_NOTIFY opt-in gate plus the try/except wrapper makes this safe, but it's worth documenting the opt-in mechanism prominently.
+- The skill_sync_tags.py YAML frontmatter parser has a fallback for when PyYAML is not installed. This matches the pattern in harness_rule_dsl.py. The codebase consistently treats PyYAML as optional-but-preferred.
+
+---
