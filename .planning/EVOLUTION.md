@@ -2285,3 +2285,68 @@ _2026-03-12T04:45:24.266Z_
 - Slack webhook integration is a natural extension of the existing OS notification pattern in drift_watcher.py — the cooldown and key-tracking logic reuses existing infrastructure cleanly.
 
 ---
+## Iteration 35
+_2026-03-12T04:58:10.422Z_
+
+### Items Attempted
+
+- **Named Sync Profiles (Work / Personal / OSS)** — pass
+- **Drift Alerts: Notify When Targets Fall Out of Sync** — pass
+- **Team Config Sharing via Git** — pass
+- **Live Capability Gap Matrix** — pass
+- **MCP Watchdog: Auto-Disable Unreachable Servers at Sync Time** — pass
+- **Starter Config Templates / Presets** — pass
+- **Per-Harness Override Files** — pass
+- **Interactive Conflict Resolution for Manual Edits** — pass
+- **Auto-Detect Newly Installed Harnesses** — pass
+- **Human-Readable Sync Changelog** — pass
+- **Harness Version Compatibility Warnings** — pass
+- **Sync Impact Preview Before Committing** — pass
+- **Skill Translation Quality Report** — pass
+- **Cross-Harness A/B Config Testing** — pass
+- **MCP Server Browser + One-Click Add** — pass
+- **Sync Analytics: What Gets Used Across Harnesses** — pass
+- **Config Health Score with Actionable Tips** — pass
+- **Harness-Agnostic Rule Linter** — pass
+- **Scheduled Sync with Email/Notification Digest** — pass
+- **Secret Scrubber: Auto-Redact Before Sync** — pass
+- **Harness-Specific MCP Server Aliases** — pass
+- **Visual Rollback Timeline** — pass
+- **Multi-Machine Sync via Cloud or Git Backend** — pass
+- **Rule Inheritance: Global → Project → Local Overrides** — pass
+- **Git Commit Hook: Sync Config on CLAUDE.md Changes** — pass
+- **Interactive Onboarding Wizard for New Projects** — pass
+- **Per-Target Ignore Patterns (.harnessignore)** — pass
+- **Env Var Portability Checker** — pass
+- **Auto-Generate Config Documentation** — pass
+- **Minimal Footprint Mode: Sync Only What's Used** — pass
+- **Harness Parity Score: How Close Is Each Target** — pass
+- **Plugin Recommendation: Suggest Target-Native Equivalents** — pass
+- **Sync Validation Test Suite** — pass
+
+### Decisions Made
+
+- Added filter_unreachable_servers() to mcp_reachability.py as a standalone module-level function rather than a method on McpReachabilityChecker — this keeps it composable (callers pass any dict and get back filtered dict + skipped list) without requiring a class instance.
+- Implemented .harnessignore as two separate functions (load_harnessignore / apply_harnessignore) in sync_filter.py rather than a new file — the filter logic is closely related to existing tag-based filtering and belongs in the same module.
+- Used frozenset() (empty) to represent 'all targets' in .harnessignore rules rather than a sentinel string — this avoids string comparison bugs and is consistent with how Python idiomatic set operations work.
+- Extended harness_comparison.py _FEATURE_SUPPORT with cline/continue/zed/neovim based on their actual config file formats (e.g. .clinerules, .roo/mcp.json, .zed/settings.json context_servers) to give accurate support ratings.
+- Added check_env_portability() to env_var_matrix.py using a module-level _re import instead of importing inside the function — avoids repeated module lookup overhead and follows the existing pattern in the file.
+- Added format_skill_translation_report() to skill_translator.py that reuses the existing score_skill_file() and score_translation() functions — no code duplication, just a new formatting layer on top of already-tested scoring logic.
+
+### Patterns Discovered
+
+- The codebase uses from __future__ import annotations consistently in every src/*.py file — essential for Python 3.9 support with PEP 604 union syntax (X | Y).
+- New harnesses (cline, continue, zed, neovim) are referenced in dead_config_detector.py and harness_detector.py but were missing from harness_comparison.py — a common pattern where new targets get added to some modules but not others.
+- Module-level constants for supported target names appear in multiple files (sync_filter.KNOWN_TARGETS, harness_comparison.ALL_TARGETS, dead_config_detector._TARGET_OUTPUT_FILES) without a shared source of truth — adding a target requires updating each file separately.
+- The codebase uses @dataclass for most report/result types, making them easy to extend without breaking callers.
+- import re at module level but used as _re in env_var_matrix.py addition to avoid shadowing the existing re import style in the file — clean but slightly inconsistent.
+
+### Takeaways
+
+- Nearly all 30 product-ideation items were already implemented in some form — iteration 35 was primarily about filling functionality gaps within existing modules rather than creating net-new files.
+- The capability gap matrix (harness_comparison.py) was missing 4 recently-added adapters (cline, continue, zed, neovim) despite those adapters being live in the codebase — static data matrices need a maintenance process.
+- The .harnessignore feature fills a genuine gap: the tag-based sync filtering in sync_filter.py requires editing CLAUDE.md, but teams often want per-project ignore rules that live outside the main config file.
+- filter_unreachable_servers() completes the MCP watchdog story: mcp_reachability.py could detect dead servers but offered no clean way to filter the source dict before passing it to adapters.
+- A shared TARGETS constant across modules would eliminate the pattern where adding a new harness requires updating 6-8 separate files.
+
+---

@@ -19,6 +19,76 @@ import re
 from pathlib import Path
 from src.utils.paths import read_json_safe
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Inline harness annotation parsing (item 2 — Per-Harness Rule Overrides)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Supported annotation forms in CLAUDE.md:
+#
+#   <!-- harness:codex -->
+#   This rule is only for Codex.
+#   <!-- /harness:codex -->
+#
+#   <!-- harness:codex,cursor -->
+#   This rule is for Codex and Cursor only.
+#   <!-- /harness:codex,cursor -->
+#
+#   <!-- harness:!gemini -->
+#   This rule is synced everywhere EXCEPT Gemini.
+#   <!-- /harness:!gemini -->
+#
+# Blocks without any annotation are included for all harnesses (default).
+# Opening and closing tags are consumed; only the block body is kept.
+
+_HARNESS_ANNO_RE = re.compile(
+    r"<!--\s*harness:(!?)([a-zA-Z0-9_,\s-]+?)\s*-->(.*?)<!--\s*/harness:[^>]+-->",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def filter_rules_for_harness(content: str, target: str) -> str:
+    """Filter CLAUDE.md content, keeping only rules relevant to *target*.
+
+    Inline harness annotations scope rule blocks to specific targets:
+
+    * ``<!-- harness:codex --> ... <!-- /harness:codex -->``
+      Keep only when syncing to codex.
+    * ``<!-- harness:codex,cursor --> ... <!-- /harness:codex,cursor -->``
+      Keep only when syncing to codex or cursor.
+    * ``<!-- harness:!gemini --> ... <!-- /harness:!gemini -->``
+      Exclude when syncing to gemini.
+
+    Content outside annotation blocks is passed through unchanged.
+
+    Args:
+        content: Raw CLAUDE.md text.
+        target: Target harness name (e.g. ``"codex"``).
+
+    Returns:
+        Filtered content with annotation markers removed.
+    """
+    target_lower = target.lower().strip()
+    result_parts: list[str] = []
+    last_end = 0
+
+    for m in _HARNESS_ANNO_RE.finditer(content):
+        # Text before this annotation block — always included
+        result_parts.append(content[last_end:m.start()])
+        last_end = m.end()
+
+        negate = m.group(1) == "!"
+        raw_targets = [t.strip().lower() for t in m.group(2).replace(" ", "").split(",") if t.strip()]
+        body = m.group(3)
+
+        in_list = target_lower in raw_targets
+        include = (not negate and in_list) or (negate and not in_list)
+        if include:
+            result_parts.append(body)
+
+    # Trailing text after the last annotation block
+    result_parts.append(content[last_end:])
+    return "".join(result_parts)
+
 
 class SourceReader:
     """
@@ -278,6 +348,22 @@ class SourceReader:
                     pass
 
         return "\n\n---\n\n".join(rules)
+
+    def get_rules_for_harness(self, target: str) -> str:
+        """Return rules filtered by inline ``<!-- harness:X -->`` annotations.
+
+        Calls :func:`get_rules` then applies :func:`filter_rules_for_harness`
+        so that only rules relevant to *target* are included.  Annotation
+        markers are stripped from the output.
+
+        Args:
+            target: Target harness name (e.g. ``"codex"``).
+
+        Returns:
+            Filtered rules string ready for use by the adapter.
+        """
+        raw = self.get_rules()
+        return filter_rules_for_harness(raw, target)
 
     def get_skills(self) -> dict[str, Path]:
         """

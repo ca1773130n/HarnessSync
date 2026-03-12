@@ -13,6 +13,7 @@ Time-travel rollback extensions:
 """
 
 import datetime
+import difflib
 import os
 import sys
 import shlex
@@ -140,6 +141,77 @@ def _get_all_targets() -> list[str]:
     return sorted(d.name for d in BACKUP_ROOT.iterdir() if d.is_dir())
 
 
+def _diff_preview(backup_dir: Path, project_dir: Path) -> str:
+    """Return a unified-diff string showing what rollback would change.
+
+    Compares every file in *backup_dir* against its current counterpart in
+    *project_dir*.  Files that exist in the backup but are absent in the
+    working tree are shown as pure additions (i.e. they would be restored).
+    Files that exist only in the working tree are not shown — rollback never
+    deletes files that weren't in the backup.
+
+    Args:
+        backup_dir: Backup snapshot directory.
+        project_dir: Project root to compare against.
+
+    Returns:
+        Unified diff string, or an empty string if no differences found.
+    """
+    diff_lines: list[str] = []
+
+    children = list(backup_dir.iterdir())
+    if not children:
+        return ""
+
+    # Walk all files in the backup recursively
+    def _walk(base: Path) -> list[Path]:
+        result: list[Path] = []
+        for p in sorted(base.rglob("*")):
+            if p.is_file():
+                result.append(p)
+        return result
+
+    restore_root = children[0]  # first child is the item to restore
+    backup_files = _walk(restore_root) if restore_root.is_dir() else [restore_root]
+
+    for backup_file in backup_files:
+        if restore_root.is_dir():
+            rel = backup_file.relative_to(restore_root)
+            current_file = project_dir / restore_root.name / rel
+        else:
+            current_file = project_dir / restore_root.name
+
+        try:
+            backup_lines = backup_file.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+        except OSError:
+            continue
+
+        if current_file.exists():
+            try:
+                current_lines = current_file.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+            except OSError:
+                current_lines = []
+        else:
+            current_lines = []
+
+        if backup_lines == current_lines:
+            continue  # no difference
+
+        label_current = str(current_file) if current_file.exists() else f"{current_file} (new)"
+        chunk = list(difflib.unified_diff(
+            current_lines,
+            backup_lines,
+            fromfile=f"current/{current_file.name}",
+            tofile=f"backup/{backup_file.name}",
+            lineterm="",
+        ))
+        if chunk:
+            diff_lines.extend(chunk)
+            diff_lines.append("")
+
+    return "\n".join(diff_lines)
+
+
 def _restore_backup(backup_dir: Path, project_dir: Path, target: str) -> bool:
     """Restore a backup to the project directory.
 
@@ -221,6 +293,22 @@ def main() -> None:
             "Uses git log to find the commit timestamp then selects the nearest backup. "
             "Example: --before-commit abc1234"
         ),
+    )
+    parser.add_argument(
+        "--diff-preview",
+        action="store_true",
+        default=False,
+        help=(
+            "Show a unified diff of what would change in each harness file before "
+            "executing the rollback.  Use with --target to preview a specific target. "
+            "When combined with --dry-run (implied), no files are modified."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Show what would be restored without making any changes.",
     )
 
     try:
@@ -316,6 +404,30 @@ def main() -> None:
     else:
         # Use most recent
         backup_dir = backups[0]
+
+    # Diff preview (item 29): show what would change before executing rollback.
+    if args.diff_preview or args.dry_run:
+        dt = datetime.datetime.fromtimestamp(backup_dir.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        print(f"\nDiff preview: {target} → backup {backup_dir.name} ({dt})")
+        print("=" * 70)
+        diff = _diff_preview(backup_dir, project_dir)
+        if diff:
+            print(diff)
+        else:
+            print("(no differences — files are already identical to this backup)")
+        print("=" * 70)
+
+        if args.dry_run and not args.diff_preview:
+            # Pure dry-run without explicit --diff-preview: still skip restore
+            print("\nDry run — no files modified.")
+            return
+        if args.diff_preview and not args.dry_run:
+            # Diff-preview alone: ask confirmation or proceed
+            print("\nProceeding with rollback...")
+        else:
+            # Both flags set: just preview, no restore
+            print("\nDry run — no files modified.")
+            return
 
     print(f"Restoring {target} from backup: {backup_dir.name}")
     success = _restore_backup(backup_dir, project_dir, target)

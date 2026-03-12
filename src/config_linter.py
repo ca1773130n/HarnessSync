@@ -642,3 +642,103 @@ class ConfigLinter:
             ))
 
         return fixes
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Config Quality Score (item 10)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def quality_score(
+        self,
+        source_data: dict,
+        project_dir: Path | None = None,
+        cc_home: Path | None = None,
+    ) -> dict:
+        """Compute a 0–100 quality score for the current configuration.
+
+        Runs the full lint suite and suggest_fixes pipeline, then converts the
+        result into a numeric score with a tier label and a prioritised list of
+        actionable suggestions.
+
+        Scoring model
+        ~~~~~~~~~~~~~
+        * Base score: 100.
+        * Each lint *error* (broken fence, unclosed tag, missing rules, …) deducts
+          **10 points**.
+        * Each portability *fix* (non-portable construct, CC-only tool reference,
+          embedded secret) deducts **5 points**.
+        * Cross-harness duplicate warnings deduct **3 points** each (capped at 15).
+        * Score is clamped to [0, 100].
+
+        Tier labels
+        ~~~~~~~~~~~
+        * 90–100  Excellent — config is clean and portable
+        * 70–89   Good — minor portability issues
+        * 50–69   Fair — several issues worth addressing
+        * 0–49    Poor — significant problems present
+
+        Args:
+            source_data: Output of ``SourceReader.discover_all()``.
+            project_dir: Project root (enables custom rules + duplicate checks).
+            cc_home: Claude Code config directory.
+
+        Returns:
+            Dict with keys:
+
+            * ``score`` (int 0–100)
+            * ``tier`` (str: "Excellent" | "Good" | "Fair" | "Poor")
+            * ``issues`` (list[str]) — all lint issue strings
+            * ``suggestions`` (list[str]) — human-readable improvement hints
+            * ``breakdown`` (dict) — per-category deduction totals
+        """
+        issues = self.lint(source_data, project_dir=project_dir, cc_home=cc_home)
+
+        # Gather portability / fix suggestions from rules content
+        rules_text = source_data.get("rules", "") or ""
+        portability_fixes = self._suggest_portability_fixes(rules_text)
+        rule_fixes = self._suggest_rule_fixes(rules_text)
+        all_fixes = portability_fixes + rule_fixes
+
+        # Categorise issues
+        duplicate_issues = [i for i in issues if "duplicate" in i.lower() or "similar" in i.lower()]
+        structural_issues = [i for i in issues if i not in duplicate_issues]
+
+        # Compute deductions
+        structural_deduction = min(len(structural_issues) * 10, 60)
+        portability_deduction = min(len(portability_fixes) * 5, 30)
+        duplicate_deduction = min(len(duplicate_issues) * 3, 15)
+
+        score = max(0, 100 - structural_deduction - portability_deduction - duplicate_deduction)
+
+        if score >= 90:
+            tier = "Excellent"
+        elif score >= 70:
+            tier = "Good"
+        elif score >= 50:
+            tier = "Fair"
+        else:
+            tier = "Poor"
+
+        # Build actionable suggestions (deduplicated, capped for readability)
+        suggestions: list[str] = []
+        seen: set[str] = set()
+        for fix in all_fixes:
+            hint = fix.suggestion
+            if hint and hint not in seen:
+                suggestions.append(hint)
+                seen.add(hint)
+        for issue in structural_issues:
+            if issue not in seen:
+                suggestions.append(f"Fix: {issue}")
+                seen.add(issue)
+
+        return {
+            "score": score,
+            "tier": tier,
+            "issues": issues,
+            "suggestions": suggestions[:10],
+            "breakdown": {
+                "structural_deduction": structural_deduction,
+                "portability_deduction": portability_deduction,
+                "duplicate_deduction": duplicate_deduction,
+            },
+        }
