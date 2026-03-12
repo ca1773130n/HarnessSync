@@ -589,3 +589,176 @@ def format_upgrade_suggestions(
         lines.append(f"  {i}. {s}")
     lines.append("")
     return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Format Change Notifier (item 7)
+#
+# Detects when HarnessSync's own feature matrix (VERSIONED_FEATURES) has been
+# updated — e.g. new features added for Cursor or Codex after a harness release.
+# This is different from version pinning: it alerts users when the compatibility
+# data itself has changed so they know to re-evaluate their sync setup.
+#
+# How it works:
+#   1. Compute a stable hash of VERSIONED_FEATURES at startup.
+#   2. Compare against a hash stored at ~/.harnesssync/format-matrix.json.
+#   3. If the hash differs, compute a diff of added/removed features and surface
+#      a notification listing which harnesses gained or lost documented features.
+#   4. Update the stored hash after the user acknowledges (or automatically).
+# ──────────────────────────────────────────────────────────────────────────────
+
+import hashlib as _hashlib
+import json as _json_fmt
+
+
+_FORMAT_MATRIX_CACHE_FILE = Path.home() / ".harnesssync" / "format-matrix.json"
+
+
+def _compute_matrix_hash(matrix: dict[str, dict[str, tuple[str, str]]]) -> str:
+    """Compute a stable SHA256 hash of the feature matrix.
+
+    Args:
+        matrix: VERSIONED_FEATURES dict (or equivalent).
+
+    Returns:
+        Hex digest string.
+    """
+    # Serialise with sorted keys so the hash is stable across Python sessions
+    payload = _json_fmt.dumps(
+        {
+            target: {
+                feat: list(data)
+                for feat, data in sorted(features.items())
+            }
+            for target, features in sorted(matrix.items())
+        },
+        sort_keys=True,
+        ensure_ascii=True,
+    )
+    return _hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _load_format_matrix_cache() -> dict:
+    """Load the cached format matrix record from disk.
+
+    Returns:
+        Dict with keys ``hash`` (str) and ``features`` (dict snapshot),
+        or empty dict if no cache exists.
+    """
+    if not _FORMAT_MATRIX_CACHE_FILE.exists():
+        return {}
+    try:
+        data = _json_fmt.loads(_FORMAT_MATRIX_CACHE_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, _json_fmt.JSONDecodeError):
+        return {}
+
+
+def _save_format_matrix_cache(matrix: dict[str, dict[str, tuple[str, str]]]) -> None:
+    """Persist current feature matrix hash and snapshot to disk.
+
+    Args:
+        matrix: Current VERSIONED_FEATURES dict.
+    """
+    _FORMAT_MATRIX_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "hash": _compute_matrix_hash(matrix),
+        "features": {
+            target: {feat: list(data) for feat, data in features.items()}
+            for target, features in matrix.items()
+        },
+    }
+    try:
+        _FORMAT_MATRIX_CACHE_FILE.write_text(
+            _json_fmt.dumps(record, indent=2, ensure_ascii=True),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def check_format_matrix_changes(
+    matrix: dict[str, dict[str, tuple[str, str]]] | None = None,
+    acknowledge: bool = False,
+) -> list[str]:
+    """Check if the HarnessSync feature matrix has changed since last run.
+
+    Compares the current VERSIONED_FEATURES matrix against a cached snapshot.
+    Returns a list of human-readable change notices so callers can surface them
+    to the user (e.g. during /sync or /sync-health).
+
+    Args:
+        matrix: Feature matrix to check. Defaults to VERSIONED_FEATURES.
+        acknowledge: If True, update the cache after computing the diff
+                     (marks the user as having seen the changes).
+
+    Returns:
+        List of change notice strings. Empty list means no changes detected.
+    """
+    if matrix is None:
+        matrix = VERSIONED_FEATURES
+
+    current_hash = _compute_matrix_hash(matrix)
+    cache = _load_format_matrix_cache()
+
+    if not cache:
+        # First run — establish baseline silently
+        _save_format_matrix_cache(matrix)
+        return []
+
+    if cache.get("hash") == current_hash:
+        return []  # No changes
+
+    # Matrix changed — compute diff
+    notices: list[str] = []
+    prev_features: dict = cache.get("features", {})
+
+    for target, features in sorted(matrix.items()):
+        prev = prev_features.get(target, {})
+
+        added = {f: v for f, v in features.items() if f not in prev}
+        removed = {f: v for f, v in prev.items() if f not in features}
+        changed = {
+            f: (prev[f], v)
+            for f, v in features.items()
+            if f in prev and list(v) != list(prev[f])
+        }
+
+        if added or removed or changed:
+            notices.append(f"HarnessSync compat matrix updated for {target.upper()}:")
+            for feat, (min_ver, desc) in added.items():
+                notices.append(f"  + Added:   {feat} (requires {target} v{min_ver}+) — {desc}")
+            for feat, data in removed.items():
+                prev_ver = data[0] if isinstance(data, (list, tuple)) else "?"
+                notices.append(f"  - Removed: {feat} (was v{prev_ver}+)")
+            for feat, (old_data, new_data) in changed.items():
+                old_ver = old_data[0] if isinstance(old_data, (list, tuple)) else "?"
+                new_ver = new_data[0] if isinstance(new_data, (list, tuple)) else "?"
+                if old_ver != new_ver:
+                    notices.append(
+                        f"  ~ Changed: {feat} min version {old_ver} → {new_ver}"
+                    )
+
+    if acknowledge:
+        _save_format_matrix_cache(matrix)
+
+    return notices
+
+
+def format_matrix_change_report(notices: list[str]) -> str:
+    """Format format-matrix change notices as a user-facing message.
+
+    Args:
+        notices: Output of check_format_matrix_changes().
+
+    Returns:
+        Formatted string, or empty string if no notices.
+    """
+    if not notices:
+        return ""
+    header = [
+        "⚠  HarnessSync compatibility matrix has changed.",
+        "   Run /sync to apply the updated config schema.",
+        "",
+    ]
+    return "\n".join(header + notices)

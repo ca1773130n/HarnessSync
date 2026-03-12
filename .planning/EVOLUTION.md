@@ -1286,3 +1286,60 @@ _2026-03-12T00:34:00.603Z_
 - The shim generator only supports sse-to-stdio and http-to-stdio. WebSocket shimming was deliberately omitted because it requires asyncio and is harder to express as a simple synchronous script.
 
 ---
+## Iteration 20
+_2026-03-12T00:47:42.142Z_
+
+### Items Attempted
+
+- **Drift Alert Notifications** — pass
+- **Capability Gap Report** — pass
+- **Team Config Sharing via Git** — pass
+- **Secret Scanner Before Sync** — pass
+- **Config Presets for Common Stacks** — pass
+- **MCP Server Portability Checker** — pass
+- **Per-Harness Config Overrides** — pass
+- **New Harness Auto-Detector** — pass
+- **Sync Analytics Dashboard** — pass
+- **Merge Conflict Resolution for Config Collisions** — pass
+- **Skill Translation to Target Formats** — pass
+- **Config Version Pinning and Rollback** — pass
+- **Harness Performance Benchmark** — pass
+- **Environment Variable Cross-Harness Translation** — pass
+- **Interactive Onboarding Wizard** — pass
+- **CI/CD GitHub Action for Team Sync** — pass
+- **Harness Health Score** — pass
+- **Plugin Propagation to Compatible Harnesses** — pass
+- **Context-Window-Aware Rule Truncation** — pass
+- **Rule Tagging and Filtering System** — pass
+- **Slack/Discord Sync Notifications** — pass
+- **Harness Usage Frequency Tracker** — pass
+- **Project Context Profiles** — pass
+- **Harness Release Tracker** — pass
+- **Token Cost Estimator Per Harness** — pass
+- **Cross-Harness Snippet Library** — pass
+- **Offline Sync Queue** — pass
+
+### Decisions Made
+
+- Created /sync-share as a distinct command from /sync-broadcast: broadcast pushes to an external shared git repo, while share commits to a dedicated branch in the current project repo — teammates git-pull from the same repo they already have cloned, requiring no external dependencies.
+- Used git plumbing commands (hash-object, update-index, write-tree, commit-tree) for sync-share instead of git checkout: this writes to the share branch without touching the user's working tree or current branch, making it safe to run during active development.
+- Extended orchestrator secret detection to call scan_config_files in addition to scan_mcp_env: the existing SecretDetector already had scan_config_files implemented but it was never wired into the sync flow. The fix is a 3-line addition that covers CLAUDE.md, CLAUDE.local.md, settings.json, and .mcp.json.
+- Designed SnippetLibrary with per-target translations as an opt-in dict: snippets without translations fall back to the canonical form, so new snippets can be added with zero per-harness work and translations added incrementally as harness format quirks are discovered.
+- Chose a neutral sentinel target '__shared__' for normalization in sync-share rather than adding a new filter_content function: filter_rules_for_target with an unknown target name drops all harness-specific blocks and retains universally tagged content, reusing existing filter logic without new API surface.
+
+### Patterns Discovered
+
+- The project follows a consistent 'pre-sync gate' pattern in orchestrator.py: each check (MCP reachability, secret detection, linting, version compat) runs before any writes and can early-return with a '_blocked' dict. New pre-sync checks should follow this pattern.
+- Commands import PLUGIN_ROOT via os.path.dirname chaining to avoid relative import issues — all command files use the same 3-line preamble before sys.path.insert.
+- Many features have library modules in src/ (e.g. SecretDetector, TeamBroadcast) and thin command wrappers in src/commands/ — the library module owns the logic, the command handles argparse and stdout formatting.
+- filter_rules_for_target in sync_filter.py is the canonical way to strip harness-specific annotations; passing a nonexistent target name effectively keeps only universal (untagged) content — a useful normalization trick.
+- The secret detector's scan_mcp_env existed and was called, but scan_config_files (for inline rules) was implemented but never wired up — a pattern of 'built but not integrated' that appears elsewhere in the codebase.
+
+### Takeaways
+
+- The codebase is very feature-complete for a single iteration — 25 of 27 items already had substantive implementations. Future evolve passes should focus on integration gaps (features built but not wired into the main flow) rather than new feature creation.
+- The deepeval pytest plugin causes import failures on Python 3.9 — tests must be run with -p no:deepeval flag or the plugin should be removed from the test environment.
+- The /sync-broadcast command covers external-repo team sharing but there was no in-repo branch sharing primitive — the /sync-share command fills this gap for teams that want zero-dependency sharing via their existing project repo.
+- Snippet translation coverage is sparse by design — harnesses like gemini and opencode use sufficiently similar markdown that canonical form works fine; only aider (flat text) and codex (minor formatting differences) benefit from custom translations.
+
+---

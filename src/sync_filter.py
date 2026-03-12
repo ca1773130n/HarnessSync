@@ -79,6 +79,20 @@ _HARNESS_ONLY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Compliance-pinned block tags (item 16):
+#   <!-- compliance:pinned -->   — open block; content is ALWAYS included in all targets
+#   <!-- /compliance:pinned -->  — close block
+# Content inside compliance-pinned blocks bypasses all sync filters so that
+# security/legal requirements cannot be accidentally excluded.
+_COMPLIANCE_OPEN_RE = re.compile(
+    r"<!--\s*compliance:pinned\s*-->",
+    re.IGNORECASE,
+)
+_COMPLIANCE_CLOSE_RE = re.compile(
+    r"<!--\s*/compliance:pinned\s*-->",
+    re.IGNORECASE,
+)
+
 # Environment-specific section tags (item 18):
 #   @env:production  or  <!-- env:production -->  — open block for named env
 #   <!-- /env:production -->                       — close env block
@@ -126,8 +140,23 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
     active_tag: str | None = None
     # harness_only: set of targets for current harness block; None = not in a harness block
     harness_target: str | None = None
+    # compliance_pinned: True when inside <!-- compliance:pinned --> block.
+    # Content in this block bypasses ALL other filter logic.
+    compliance_pinned: bool = False
 
     for line in lines:
+        # --- Check for compliance:pinned open/close tags ---
+        if _COMPLIANCE_OPEN_RE.search(line):
+            compliance_pinned = True
+            continue  # Don't emit the tag line itself
+        if _COMPLIANCE_CLOSE_RE.search(line):
+            compliance_pinned = False
+            continue  # Don't emit the tag line itself
+        # Inside a compliance-pinned block: always include, skip all other logic
+        if compliance_pinned:
+            output.append(line)
+            continue
+
         # --- Check for harness close tag first ---
         hc_match = _HARNESS_CLOSE_RE.search(line)
         if hc_match:
@@ -442,3 +471,52 @@ def format_effectiveness_report(annotations: list[dict]) -> str:
             note = f" — {a['note']}" if a["note"] else ""
             lines.append(f"  line {a['line_number']}: confused{note}")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Compliance-Pinned Helpers (item 16)
+# ---------------------------------------------------------------------------
+
+
+def has_compliance_pinned(content: str) -> bool:
+    """Return True if content contains any compliance:pinned blocks.
+
+    Args:
+        content: Raw CLAUDE.md text.
+
+    Returns:
+        True if at least one ``<!-- compliance:pinned -->`` tag is present.
+    """
+    return bool(_COMPLIANCE_OPEN_RE.search(content))
+
+
+def extract_compliance_pinned(content: str) -> str:
+    """Extract all compliance-pinned content from a CLAUDE.md string.
+
+    Collects all text inside ``<!-- compliance:pinned --> ... <!-- /compliance:pinned -->``
+    blocks into a single string. Used by the orchestrator to inject compliance
+    content into targets that would otherwise have the rules section skipped.
+
+    Args:
+        content: Raw CLAUDE.md text.
+
+    Returns:
+        Concatenated compliance-pinned content, or empty string if none.
+    """
+    if not content:
+        return ""
+
+    collected: list[str] = []
+    in_block = False
+
+    for line in content.splitlines(keepends=True):
+        if _COMPLIANCE_OPEN_RE.search(line):
+            in_block = True
+            continue
+        if _COMPLIANCE_CLOSE_RE.search(line):
+            in_block = False
+            continue
+        if in_block:
+            collected.append(line)
+
+    return "".join(collected).strip()

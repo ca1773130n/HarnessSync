@@ -302,3 +302,117 @@ class RuleUsageTracker:
         """Delete the usage log (for testing or fresh start)."""
         if self._log_file.exists():
             self._log_file.unlink()
+
+    # ------------------------------------------------------------------
+    # Stale Harness Detection (item 30)
+    # ------------------------------------------------------------------
+
+    # Known config file paths per harness, relative to $HOME.
+    # First path in each list that exists is used for mtime checks.
+    _HARNESS_CONFIG_PATHS: dict[str, list[str]] = {
+        "codex":    [".codex/config.toml", ".config/codex/config.toml"],
+        "gemini":   [".gemini/settings.json", ".config/gemini-cli/settings.json"],
+        "opencode": [".config/opencode/config.json", ".opencode/config.json"],
+        "cursor":   [".cursor/rules/claude-code-rules.mdc", ".cursor/settings.json"],
+        "aider":    [".aider.conf.yml", ".config/aider/config.yml"],
+        "windsurf": [".windsurfrules", ".windsurf/config.json"],
+    }
+
+    def detect_stale_harnesses(
+        self,
+        stale_days: int = 30,
+        home_dir: "Path | None" = None,
+    ) -> list[dict]:
+        """Detect harnesses whose config files haven't been modified recently.
+
+        Uses file modification time (mtime) as a proxy for harness activity.
+        A harness is considered stale if its primary config file exists but
+        hasn't been modified in ``stale_days`` days.
+
+        Args:
+            stale_days: Number of days of inactivity before a harness is
+                        considered stale (default: 30).
+            home_dir: Override home directory for testing. Defaults to
+                      ``Path.home()``.
+
+        Returns:
+            List of dicts, one per stale harness, with keys:
+                - ``harness``: str — harness name
+                - ``config_file``: str — path to the config file checked
+                - ``last_modified``: str — ISO date of last mtime
+                - ``days_inactive``: int — days since last modification
+                - ``suggestion``: str — human-readable suggestion
+        """
+        from pathlib import Path as _Path
+        home = home_dir or _Path.home()
+        cutoff = datetime.now(tz=timezone.utc) - timedelta(days=stale_days)
+        stale: list[dict] = []
+
+        for harness, candidates in self._HARNESS_CONFIG_PATHS.items():
+            config_path = None
+            for rel in candidates:
+                p = home / rel
+                if p.exists():
+                    config_path = p
+                    break
+
+            if config_path is None:
+                continue  # Harness not installed — not stale, just absent
+
+            try:
+                mtime = config_path.stat().st_mtime
+                last_modified_dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
+            except OSError:
+                continue
+
+            if last_modified_dt >= cutoff:
+                continue  # Active — not stale
+
+            days_inactive = (datetime.now(tz=timezone.utc) - last_modified_dt).days
+            stale.append({
+                "harness": harness,
+                "config_file": str(config_path),
+                "last_modified": last_modified_dt.date().isoformat(),
+                "days_inactive": days_inactive,
+                "suggestion": (
+                    f"You haven't used {harness} in {days_inactive} days. "
+                    f"Consider removing it from sync targets to reduce noise: "
+                    f"add \"{harness}\" to skip_targets in .harnesssync."
+                ),
+            })
+
+        # Sort by most inactive first
+        stale.sort(key=lambda x: x["days_inactive"], reverse=True)
+        return stale
+
+    def format_stale_harness_report(
+        self,
+        stale_days: int = 30,
+        home_dir: "Path | None" = None,
+    ) -> str:
+        """Format a stale harness detection report for display.
+
+        Args:
+            stale_days: Inactivity threshold in days.
+            home_dir: Override home directory for testing.
+
+        Returns:
+            Human-readable report string, or empty string if no stale harnesses.
+        """
+        stale = self.detect_stale_harnesses(stale_days=stale_days, home_dir=home_dir)
+        if not stale:
+            return ""
+
+        lines = [
+            f"Stale Harness Detection (>{stale_days} days inactive)",
+            "=" * 55,
+            "",
+        ]
+        for entry in stale:
+            lines.append(f"  {entry['harness'].upper()}")
+            lines.append(f"    Config: {entry['config_file']}")
+            lines.append(f"    Last modified: {entry['last_modified']} ({entry['days_inactive']} days ago)")
+            lines.append(f"    Suggestion: {entry['suggestion']}")
+            lines.append("")
+
+        return "\n".join(lines)

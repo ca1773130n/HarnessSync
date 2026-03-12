@@ -17,6 +17,21 @@ Rule DSL format (YAML/JSON inside CLAUDE.md fenced block):
     applies_to: [rules]
     ```
 
+Compliance-pinned rules (item 16):
+    Add ``compliance: true`` to mark a rule as always-synced regardless of
+    ``--skip-sections`` or other filters. Compliance rules appear first in
+    the compiled output and carry a [COMPLIANCE] marker so target harnesses
+    can visually distinguish them. Useful for security/legal requirements
+    that must be present in every harness config.
+
+    ```harness-rule
+    id: never-commit-secrets
+    intent: security
+    priority: critical
+    compliance: true
+    text: Never commit API keys, tokens, or passwords to version control.
+    ```
+
 Intent values:
     prevent_hardcoding | security | style | workflow | tool_restriction |
     quality | documentation | testing | performance | safety
@@ -84,6 +99,7 @@ class HarnessRule:
     scope: list[str] = field(default_factory=list)   # empty = all targets
     priority: str = "medium"
     applies_to: list[str] = field(default_factory=lambda: ["rules"])
+    compliance: bool = False   # If True, rule cannot be skipped by --skip-sections
     raw: dict = field(default_factory=dict, repr=False)
 
     @property
@@ -97,10 +113,13 @@ class HarnessRule:
         return target in self.scope
 
     def format_for_target(self, target: str) -> str:
-        """Format the rule text for a specific target."""
-        # All targets currently use Markdown bullet
-        # Future: could return TOML for codex, JSON for opencode, etc.
-        return f"- {self.text}"
+        """Format the rule text for a specific target.
+
+        Compliance-pinned rules are prefixed with [COMPLIANCE] so they are
+        visually distinct in every target harness config.
+        """
+        prefix = "[COMPLIANCE] " if self.compliance else ""
+        return f"- {prefix}{self.text}"
 
 
 class RuleDSLParser:
@@ -159,6 +178,15 @@ class RuleDSLParser:
 
         intent = str(data.get("intent", "style")).strip()
         priority = str(data.get("priority", "medium")).strip()
+        # Compliance flag: accept bool True, or string "true"/"yes"/"1"
+        compliance_raw = data.get("compliance", False)
+        if isinstance(compliance_raw, bool):
+            compliance = compliance_raw
+        else:
+            compliance = str(compliance_raw).strip().lower() in ("true", "yes", "1")
+        # Rules with priority "critical" are implicitly compliance-pinned
+        if priority == "critical":
+            compliance = True
 
         return HarnessRule(
             id=rule_id,
@@ -167,6 +195,7 @@ class RuleDSLParser:
             scope=scope,
             priority=priority,
             applies_to=applies_to,
+            compliance=compliance,
             raw=data,
         )
 
@@ -189,6 +218,22 @@ class RuleDSLParser:
         return result
 
 
+def get_compliance_rules(rules: list[HarnessRule]) -> list[HarnessRule]:
+    """Return only compliance-pinned rules from a list.
+
+    Compliance rules are those with ``compliance=True`` (set explicitly or
+    implied by ``priority=critical``). These must always be synced to every
+    target regardless of section filters.
+
+    Args:
+        rules: Full list of HarnessRule objects.
+
+    Returns:
+        Filtered list containing only compliance-pinned rules.
+    """
+    return [r for r in rules if r.compliance]
+
+
 class RuleDSLCompiler:
     """Compile HarnessRule objects to target-specific config text."""
 
@@ -197,18 +242,28 @@ class RuleDSLCompiler:
         rules: list[HarnessRule],
         target: str,
         section_heading: str = "Rules",
+        compliance_only: bool = False,
     ) -> str:
         """Compile rules to the format expected by a specific target.
+
+        Compliance-pinned rules always appear first under a dedicated
+        "Compliance Requirements" subsection, clearly separated from
+        regular rules so they are not accidentally removed.
 
         Args:
             rules: List of HarnessRule objects.
             target: Target harness name.
             section_heading: Markdown section heading for the rules block.
+            compliance_only: If True, emit only compliance-pinned rules.
+                             Used by the orchestrator to inject compliance
+                             content when a section is otherwise skipped.
 
         Returns:
             Formatted string ready to be written to the target config file.
         """
         applicable = [r for r in rules if r.applies_to_target(target)]
+        if compliance_only:
+            applicable = [r for r in applicable if r.compliance]
         if not applicable:
             return ""
 
@@ -218,18 +273,30 @@ class RuleDSLCompiler:
         preamble = _TARGET_PREAMBLES.get(target, "")
         lines = [preamble, f"## {section_heading}", ""]
 
-        # Group by intent for readability
-        by_intent: dict[str, list[HarnessRule]] = {}
-        for rule in applicable:
-            by_intent.setdefault(rule.intent, []).append(rule)
+        # Emit compliance-pinned rules first under their own subsection
+        compliance_rules = [r for r in applicable if r.compliance]
+        regular_rules = [r for r in applicable if not r.compliance]
 
-        for intent, intent_rules in by_intent.items():
-            intent_label = VALID_INTENTS.get(intent, intent.replace("_", " ").title())
-            lines.append(f"### {intent_label}")
+        if compliance_rules:
+            lines.append("### Compliance Requirements")
             lines.append("")
-            for rule in intent_rules:
+            for rule in compliance_rules:
                 lines.append(rule.format_for_target(target))
             lines.append("")
+
+        if regular_rules and not compliance_only:
+            # Group non-compliance rules by intent for readability
+            by_intent: dict[str, list[HarnessRule]] = {}
+            for rule in regular_rules:
+                by_intent.setdefault(rule.intent, []).append(rule)
+
+            for intent, intent_rules in by_intent.items():
+                intent_label = VALID_INTENTS.get(intent, intent.replace("_", " ").title())
+                lines.append(f"### {intent_label}")
+                lines.append("")
+                for rule in intent_rules:
+                    lines.append(rule.format_for_target(target))
+                lines.append("")
 
         return "\n".join(lines)
 
@@ -237,11 +304,17 @@ class RuleDSLCompiler:
         """Generate a human-readable summary of DSL rule metadata."""
         if not rules:
             return "No harness-rule DSL blocks found."
-        lines = [f"Harness Rule DSL — {len(rules)} rule(s) defined:", ""]
+        compliance_count = sum(1 for r in rules if r.compliance)
+        lines = [
+            f"Harness Rule DSL — {len(rules)} rule(s) defined "
+            f"({compliance_count} compliance-pinned):",
+            "",
+        ]
         for rule in rules:
             scope_str = ", ".join(rule.scope) if rule.scope else "all targets"
+            compliance_flag = " 🔒COMPLIANCE" if rule.compliance else ""
             lines.append(
-                f"  [{rule.priority.upper()}] {rule.id}  "
+                f"  [{rule.priority.upper()}] {rule.id}{compliance_flag}  "
                 f"intent={rule.intent}  scope={scope_str}"
             )
         return "\n".join(lines)
