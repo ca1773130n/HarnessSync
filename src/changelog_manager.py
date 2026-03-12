@@ -419,6 +419,31 @@ class ChangelogManager:
             lines.append(f"- **BLOCKED**: {results.get('_reason', 'unknown')}")
             return lines
 
+        for target, target_results in sorted(results.items()):
+            if target.startswith("_") or not isinstance(target_results, dict):
+                continue
+
+            synced = skipped = failed = 0
+            changed_files: list[str] = []
+
+            for config_type, r in target_results.items():
+                if isinstance(r, SyncResult):
+                    synced += r.synced
+                    skipped += r.skipped
+                    failed += r.failed
+                    changed_files.extend(r.synced_files if hasattr(r, "synced_files") else [])
+
+            status = "✓" if failed == 0 else "✗"
+            lines.append(
+                f"- **{target}** {status}  synced={synced} skipped={skipped} failed={failed}"
+            )
+            for f in changed_files[:10]:
+                lines.append(f"  - `{f}`")
+            if len(changed_files) > 10:
+                lines.append(f"  - … and {len(changed_files) - 10} more")
+
+        return lines
+
     def _build_plain_summary(self, results: dict, scope: str) -> str:
         """Generate a one-line human-readable summary of a sync event.
 
@@ -530,28 +555,3 @@ def record_with_diff(
                 fh.write(diff_text)
         except OSError:
             pass
-
-        for target, target_results in sorted(results.items()):
-            if target.startswith("_") or not isinstance(target_results, dict):
-                continue
-
-            synced = skipped = failed = 0
-            changed_files: list[str] = []
-
-            for config_type, r in target_results.items():
-                if isinstance(r, SyncResult):
-                    synced += r.synced
-                    skipped += r.skipped
-                    failed += r.failed
-                    changed_files.extend(r.synced_files if hasattr(r, "synced_files") else [])
-
-            status = "✓" if failed == 0 else "✗"
-            lines.append(
-                f"- **{target}** {status}  synced={synced} skipped={skipped} failed={failed}"
-            )
-            for f in changed_files[:10]:
-                lines.append(f"  - `{f}`")
-            if len(changed_files) > 10:
-                lines.append(f"  - … and {len(changed_files) - 10} more")
-
-        return lines

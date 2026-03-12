@@ -527,6 +527,15 @@ class SyncOrchestrator:
                 except Exception:
                     pass  # Aliasing is best-effort
 
+                # Step 4: filter skills per YAML frontmatter sync: tag
+                try:
+                    from src.skill_sync_tags import filter_skills_for_target as _fst
+                    _skills_raw = target_data.get('skills')
+                    if isinstance(_skills_raw, dict) and _skills_raw:
+                        target_data['skills'] = _fst(_skills_raw, target)
+                except Exception:
+                    pass  # Skill tag filtering is best-effort, never blocks
+
                 # Apply --only / --skip section filtering
                 target_data = self._apply_section_filter(target_data)
 
@@ -611,6 +620,14 @@ class SyncOrchestrator:
                 self._send_webhook(results)
             except Exception as e:
                 self.logger.warn(f"Webhook notification failed: {e}")
+
+        # --- POST-SYNC: DESKTOP NOTIFICATION ---
+        if not self.dry_run:
+            try:
+                from src.desktop_notifier import notify_from_results
+                notify_from_results(results)
+            except Exception:
+                pass  # Desktop notifications are best-effort, never block
 
         # --- POST-SYNC: BACKUP RETENTION CLEANUP (skip in dry-run) ---
         if not self.dry_run and backup_manager:

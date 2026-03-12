@@ -1950,3 +1950,71 @@ _2026-03-12T03:21:14.318Z_
 - A/B config testing fills a genuine product gap: the harness_comparison.py does static analysis, but users need a way to run the same question empirically across different harnesses and record subjective feedback about which felt better.
 
 ---
+## Iteration 30
+_2026-03-12T03:40:33.733Z_
+
+### Items Attempted
+
+- **Named Sync Profiles** — pass
+- **Team Config Broadcast via Git** — pass
+- **Drift Alerts via Native OS Notifications** — pass
+- **Live Capability Matrix with Gap Warnings** — pass
+- **MCP Server Reachability Dashboard** — pass
+- **Auto-Discovery of Installed Harnesses** — pass
+- **Section-Level Sync Control per Target** — pass
+- **Config Snapshots with Tags** — pass
+- **3-Way Merge for Config Conflicts** — pass
+- **Harness Onboarding Wizard for New Team Members** — pass
+- **CI/CD Config Validation Action** — pass
+- **Plugin & Skill Marketplace Discovery** — pass
+- **Cross-Harness Env Var & Secret Management** — pass
+- **Local Sync Analytics & Usage Insights** — pass
+- **Harness-Specific Override Files** — pass
+- **Cross-Harness Prompt Parity Tester** — pass
+- **AI-Assisted Rule Translation for Gaps** — pass
+- **Scheduled Automatic Sync** — pass
+- **Permission Model Auditor** — pass
+- **Auto-Generated Sync Changelog** — pass
+- **Multi-Project Sync Hub View** — pass
+- **Harness Config Deprecation Warnings** — pass
+- **Shareable Config Export for Teammates** — pass
+- **Rule Source Attribution in Synced Files** — pass
+- **Harness Version Update Detector** — pass
+- **Project-Type Detection with Rule Suggestions** — pass
+- **Symlink Health Monitor** — pass
+- **Config Complexity Benchmark** — pass
+- **Pre-Sync Validation Hooks** — pass
+- **VS Code Extension Config Bridge** — pass
+- **PR Sync Impact Comment** — pass
+- **Global Hotkey Sync Trigger** — pass
+- **Gradual Harness Rollout** — pass
+- **Natural Language Rule Authoring** — pass
+- **Offline Sync Queue** — pass
+- **Config Bloat Detector** — pass
+
+### Decisions Made
+
+- Extended symlink_cleaner.py from 144 lines covering only codex/opencode to a full health monitor covering all 8 harnesses (cursor, windsurf, cline, continue, zed, neovim, plus the no-symlink targets). Added separate health_report() (non-destructive) vs cleanup() (destructive) API and a new auto_repair() method that re-resolves broken symlinks from a source directory.
+- Added MCP server subset filtering to ProfileManager via a new 'mcp_servers' key in profile dicts. Profiles like 'work' can now list specific server names to sync, solving the problem of work-only servers leaking into OSS contexts. Added filter_mcp_servers() helper and updated apply_to_kwargs() to propagate 'profile_mcp_servers' to the orchestrator.
+- Added CLAUDE.{harness}.md file pattern to HarnessOverride as @staticmethod methods (find_file_override, load_file_override_rules, apply_file_override, discover_file_overrides). This complements the existing JSON override mechanism — users can keep harness-specific content as plain Markdown files alongside CLAUDE.md without learning JSON syntax.
+- Added NamedCheckpointStore class to config_snapshot.py for persistent named configuration checkpoints. Uses atomic writes and validates tag names. Supports save/load/delete/list_tags with human-readable formatted output. This is distinct from the existing ConfigSnapshot (which is for shareable export) — checkpoints are local, named, and restorable.
+- Added detect_harness_updates() and format_update_report() to harness_version_compat.py. Stores detected versions in ~/.harnesssync/detected-versions.json and diffs against current detected versions. Surfaces 'new', 'updated', and 'removed' harness events. First run records baseline; subsequent runs detect changes.
+- Added _build_plain_summary() to ChangelogManager and a module-level record_with_diff() function. The summary produces one-line human-readable descriptions ('rules+mcp sync to 3 targets (codex, gemini, cursor) — 5 files updated.'). record_with_diff() appends per-target rule-level unified diff sections to changelog entries as HTML comments.
+
+### Patterns Discovered
+
+- The codebase consistently uses @staticmethod for pure utility methods that don't need instance state — discovered_file_overrides was initially missed as an instance method, fixed to @staticmethod to match the pattern.
+- Atomic write pattern (NamedTemporaryFile + os.fsync + os.replace) is used uniformly across profile_manager.py, harness_override.py, harness_version_compat.py, and now config_snapshot.py for the checkpoint store — good consistency.
+- Health reporting pattern (non-destructive report vs destructive action) was missing from symlink_cleaner.py but is the right separation for monitoring use cases — added SymlinkHealthReport dataclass + health_report() method following the same pattern as DriftAlert/DriftWatcher.
+- The project uses dataclasses extensively for structured results — SymlinkStatus and SymlinkHealthReport follow this established pattern correctly.
+- Most items (30 in total) already had substantial existing implementations from prior iterations — the primary value in iteration 30 was filling specific functional gaps within those modules rather than creating new files.
+
+### Takeaways
+
+- The codebase is mature enough that 'implement item X' almost always means 'extend an existing module' rather than 'create from scratch' — read existing code first before writing anything.
+- The symlink_cleaner.py was the most undertrimmed module: 144 lines vs 350+ for comparable modules, covering only 3 harnesses (codex, opencode, gemini-noop) when 8+ are supported elsewhere. Adding the missing targets and health reporting brought it in line.
+- The distinction between 'shareable export' (ConfigSnapshot) and 'local named checkpoint' (NamedCheckpointStore) is important — the original ConfigSnapshot solved the sharing problem, not the 'time machine for my own config' problem.
+- The CLAUDE.{harness}.md pattern and the JSON override pattern solve the same problem via different UX — Markdown is better for rule authors, JSON is better for programmatic/MCP configuration. Supporting both reduces friction.
+- Version update detection needed a stored baseline (detected-versions.json) to diff against — without persistence, you can't know what 'changed'. The simple approach of persisting the last-seen version and comparing works well without requiring a background service.
+
+---

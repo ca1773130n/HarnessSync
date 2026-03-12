@@ -65,6 +65,21 @@ def main():
         from src.state_manager import StateManager
         from src.orchestrator import SyncOrchestrator
 
+        # Pause check (user ran /sync-pause)
+        try:
+            from src.sync_pauser import SyncPauser
+            _pauser = SyncPauser()
+            if _pauser.is_paused():
+                _status = _pauser.get_status()
+                _reason = _status.get("reason", "")
+                _msg = f"HarnessSync: auto-sync paused"
+                if _reason:
+                    _msg += f" ({_reason})"
+                print(_msg, file=sys.stderr)
+                sys.exit(0)
+        except Exception:
+            pass  # Pause check failure must never block sync
+
         # Debounce check
         state_manager = StateManager()
         if should_debounce(state_manager):
