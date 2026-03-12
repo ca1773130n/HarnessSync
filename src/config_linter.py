@@ -104,6 +104,39 @@ _PORTABILITY_PATTERNS: list[tuple[re.Pattern, str, str]] = [
         "",
         "Harness-specific sync tags without closing <!-- sync:end --> will silently include all content",
     ),
+    # Auto-fixable: strip trailing whitespace on each line (common portability issue
+    # causing inconsistent rendering in Cursor/Codex rule files)
+    (
+        re.compile(r"[ \t]+$", re.MULTILINE),
+        "",
+        "Trailing whitespace on rule lines can cause rendering issues in some harnesses",
+    ),
+    # Auto-fixable: Windows-style CRLF line endings (\\r\\n) → LF (\\n)
+    (
+        re.compile(r"\r\n"),
+        "\n",
+        "Windows CRLF line endings (\\r\\n) detected; normalize to LF for cross-platform harness compatibility",
+    ),
+    # Auto-fixable: more than 2 consecutive blank lines → 2 blank lines
+    (
+        re.compile(r"\n{4,}"),
+        "\n\n\n",
+        "More than 3 consecutive blank lines reduce readability; collapse to at most 2",
+    ),
+    # Auto-fixable: Claude-specific /slash-command references in rule text
+    # Replace with a generic description to avoid confusing other harnesses
+    (
+        re.compile(r"\b/sync(?:-[a-z]+)?\b"),
+        "[HarnessSync command]",
+        "/sync* slash-command references are Claude Code-specific; use a generic description for portability",
+    ),
+    # Auto-fixable: strip <!-- sync:end --> tag lines that appear without an opening tag
+    # (orphaned close tags confuse some harnesses that pass the content through literally)
+    (
+        re.compile(r"^<!--\s*sync:end\s*-->\s*\n", re.MULTILINE),
+        "",
+        "Orphaned <!-- sync:end --> without a matching opening tag — safe to remove",
+    ),
 ]
 
 # Patterns indicating tool-call syntax used inline
@@ -545,6 +578,22 @@ class ConfigLinter:
                 suggestion="Rewrite as generic actions (e.g. 'read the file', 'run the command') "
                            "so the instruction is meaningful to non-Claude Code harnesses.",
                 auto_fixable=False,
+            ))
+
+        # Secret-like patterns (auto-fixable: redact inline key values)
+        # Catches obvious patterns: sk-..., ghp_..., xoxb-... embedded in rule text
+        _SECRET_INLINE_RE = re.compile(
+            r"\b(sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{36,}|xoxb-[A-Za-z0-9\-]{40,}"
+            r"|Bearer [A-Za-z0-9\-_.]{20,}|AIza[A-Za-z0-9\-_]{35,})\b"
+        )
+        if _SECRET_INLINE_RE.search(combined):
+            fixes.append(LintFix(
+                issue="Potential API key or secret token embedded in rules content",
+                suggestion="Replace inline secret values with environment variable references "
+                           "(e.g. $MY_API_KEY) or remove them entirely before syncing.",
+                auto_fixable=True,
+                fix_pattern=_SECRET_INLINE_RE,
+                fix_replacement="[REDACTED]",
             ))
 
         return fixes

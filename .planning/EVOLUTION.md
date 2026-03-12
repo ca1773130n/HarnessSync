@@ -1481,3 +1481,68 @@ _2026-03-12T01:20:06.027Z_
 - The coverage heatmap format_heatmap() uses emoji (🔥🌡❄⬛) which may not render in all terminals. A future --ascii flag could substitute text labels for environments without Unicode support.
 
 ---
+## Iteration 23
+_2026-03-12T01:36:00.344Z_
+
+### Items Attempted
+
+- **Per-Harness Override Files** — pass
+- **Sync Profiles / Presets** — pass
+- **Team Config Server** — pass
+- **Automatic Secret Scrubbing Before Sync** — pass
+- **GitHub Actions / CI Sync Action** — pass
+- **Feature Gap Advisor** — pass
+- **Interactive Conflict Resolver** — pass
+- **MCP Server Portability Score** — pass
+- **First-Run Onboarding Wizard** — pass
+- **Plugin / Extension Ecosystem Sync** — pass
+- **Scheduled Sync with Smart Throttling** — pass
+- **AI-Assisted Prompt Translation** — pass
+- **Config Changelog with Natural Language Summaries** — pass
+- **Dry-Run Preview with Rendered Output** — pass
+- **Per-Project Sync Exclusions** — pass
+- **Config Time Travel / Snapshot History** — pass
+- **Cross-Harness Behavior Benchmarking** — pass
+- **Sync on Git Commit Hook (Auto-Push Config)** — pass
+- **Natural Language Config Authoring** — pass
+- **Config Health Score Dashboard** — pass
+- **Community Sync Templates** — pass
+- **Drift Alerts via Desktop Notification** — pass
+- **MCP Server Migration Assistant** — pass
+- **Skill Compatibility Matrix** — pass
+- **Cross-Harness Env Var Mapping** — pass
+- **Sync Impact Preview Before Config Changes** — pass
+- **Multi-Workspace Sync Manager** — pass
+- **Sync Regression Detection** — pass
+- **Sync Annotation Comments in Output** — pass
+- **Harness-Specific Section Tagging in CLAUDE.md** — pass
+- **Sync Event Webhooks** — pass
+- **Context-Aware Sync Filtering** — pass
+- **Harness Auto-Detection and Install Suggestions** — pass
+
+### Decisions Made
+
+- Added HARNESS_ENV_VAR_REMAP to env_translator.py as a declarative table mapping canonical Claude Code env var names to harness-specific equivalents. Used whole-word regex substitution to avoid false positives in prose. Built a reverse map (_REVERSE_REMAP) at module load time so canonical lookup is O(1).
+- Added portability_score() to McpCompatMatrix returning 1-5 using weighted averaging: NATIVE=1.0, TRANSLATE=0.75, BRIDGED=0.5, MANUAL=0.25, UNSUPPORTED=0.0. Added format_portability_scores() for a one-liner per-harness summary with star glyphs (5=excellent down to 1=poor). Chose the weighted approach over binary pass/fail to give partial credit for bridged servers.
+- Added _check_freshness() as a 5th dimension to ConfigHealthChecker.check(). Rather than requiring a StateManager (which would create a hard dependency), freshness is measured by comparing CLAUDE.md mtime against known target harness config file mtimes using os.stat(). Old-source detection (90 days) added as a secondary signal for config staleness.
+- Added <!-- harness:exclude:TARGET --> ... <!-- /harness:exclude:TARGET --> block-level syntax to sync_filter.py. Unlike the existing harness:skip=X inline form (drops one line), the exclude: form is a block pair that drops multi-line sections. Tracked as a set (harness_exclude_targets) to support nested/stacked excludes for different targets. Close tag uses discard() to be safe against malformed CLAUDE.md.
+- Added generate_translation_annotation() and annotate_translated_content() to skill_translator.py. The annotation comment documents each translation decision (tool refs rewritten, XML blocks removed, frontmatter stripped, residual MCP refs) in a structured <!-- ... --> block prepended to the output. Returns empty string for clean copies to avoid polluting output with useless headers.
+- Added 8 new behavior patterns to nl_config_generator.py covering: git workflow (conventional commits, no force-push), package manager restrictions, file creation policy, environment variable usage, code review readiness, API design standards, database/migration safety, and monorepo boundaries. Each includes harness_notes where behavior differs across tools.
+
+### Patterns Discovered
+
+- The codebase consistently uses module-level state for lookup tables (_REVERSE_REMAP, _PATTERNS, etc.) built once at import time rather than recomputed per call. This is the right pattern for static mappings that don't change at runtime.
+- sync_filter.py uses a set for harness_exclude_targets rather than a single string, correctly supporting simultaneous <!-- harness:exclude:gemini --> and <!-- harness:exclude:aider --> blocks — the same design as the existing compliance_pinned bool but generalized to multiple targets.
+- ConfigHealthChecker.check() now takes an optional cc_home parameter. All existing callers pass only source_data + optional project_dir, so adding cc_home as a keyword-only default None is fully backward compatible.
+- translate_env_var_names_in_text() returns (text, changes_list) rather than just text, following the same two-tuple convention as translate_env_vars_for_codex() and translate_env_vars_for_opencode_headers(). Consistent return types aid composition.
+- nl_config_generator patterns use _register() which builds _PATTERNS as a module-level list. Adding new patterns by appending _register() calls is zero-friction and doesn't require touching existing code.
+
+### Takeaways
+
+- Cross-harness env var name translation (item 25) was the clearest genuine gap in the codebase: env_translator.py had excellent *syntax* translation (${VAR} to {env:VAR}) but zero *semantic* name mapping. The new HARNESS_ENV_VAR_REMAP table fills that gap for the 5 most common cases (API key, model, base URL, streaming, max tokens).
+- The freshness dimension in ConfigHealthChecker relies on file mtime, which is a weak signal — build tools, sync operations, and package managers can touch files without user activity. A stronger signal would be the StateManager's last_sync_time, but that creates a dependency that would require a larger refactor. The mtime approach is pragmatic for now.
+- harness:exclude:target and harness:skip=target are semantically similar but syntactically distinct. harness:skip drops one line; harness:exclude wraps a block. The coexistence is justified because CLAUDE.md authors need both: inline skip for single lines and block exclude for multi-paragraph sections. Documenting the distinction in the docstring of filter_rules_for_target() would prevent confusion.
+- The skill translation annotation (item 29) is most valuable when deployed as a post-translation hook rather than opt-in. Future work: wire annotate_translated_content() into the adapter skill-sync path by default, with --no-annotations flag to suppress.
+- After 23 iterations, the codebase feature surface is mature. Future iterations should focus on: (a) wiring existing modules together into the main orchestrator pipeline, (b) adding integration tests that exercise the full sync path, and (c) consolidating the many small analytics modules into fewer, more cohesive surfaces.
+
+---

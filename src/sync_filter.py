@@ -123,6 +123,120 @@ def _parse_target_list(targets_str: str) -> set[str]:
     return {t.strip().lower() for t in targets_str.split(",") if t.strip()}
 
 
+# --------------------------------------------------------------------------- #
+# Frontmatter-based @target: / @skip: directive support (item 3)              #
+# --------------------------------------------------------------------------- #
+# Users can place directive lines at the top of a CLAUDE.md rule block:
+#
+#   @target:codex,gemini   — include this block ONLY in codex and gemini
+#   @skip:cursor,aider     — exclude this block from cursor and aider
+#
+# These are standalone lines (not HTML comments) making them easy to type.
+# They apply to the entire content block (not just a single line).
+# Multiple directives are AND-combined: content must satisfy all of them.
+
+_FRONTMATTER_TARGET_RE = re.compile(
+    r"^[ \t]*@target:([a-z0-9, _-]+)[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_FRONTMATTER_SKIP_RE = re.compile(
+    r"^[ \t]*@skip:([a-z0-9, _-]+)[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def parse_frontmatter_tags(content: str) -> dict:
+    """Extract @target: and @skip: directives from content.
+
+    Scans every line of ``content`` for standalone ``@target:`` and ``@skip:``
+    directive annotations. Returns a summary dict describing the targeting rules
+    found and the cleaned content with the directive lines removed.
+
+    Args:
+        content: Raw CLAUDE.md text, possibly containing @target:/@skip: lines.
+
+    Returns:
+        Dict with keys:
+          - target_targets: set[str] — if non-empty, content targets only these
+          - skip_targets:   set[str] — content must be excluded from these
+          - cleaned:        str      — content with directive lines stripped out
+    """
+    target_targets: set[str] = set()
+    skip_targets: set[str] = set()
+
+    for m in _FRONTMATTER_TARGET_RE.finditer(content):
+        target_targets.update(_parse_target_list(m.group(1)))
+
+    for m in _FRONTMATTER_SKIP_RE.finditer(content):
+        skip_targets.update(_parse_target_list(m.group(1)))
+
+    # Strip directive lines from the content
+    cleaned = _FRONTMATTER_TARGET_RE.sub("", content)
+    cleaned = _FRONTMATTER_SKIP_RE.sub("", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+    return {
+        "target_targets": target_targets,
+        "skip_targets": skip_targets,
+        "cleaned": cleaned,
+    }
+
+
+def is_content_allowed_for_target(content: str, target_name: str) -> bool:
+    """Return True if the content block is allowed to reach ``target_name``.
+
+    Checks @target: and @skip: frontmatter directives embedded in ``content``.
+    If neither directive is present, returns True (default passthrough).
+
+    Args:
+        content: Raw content that may contain @target:/@skip: directives.
+        target_name: Target harness identifier (e.g. "codex", "gemini").
+
+    Returns:
+        True if the content should be included for this target, False otherwise.
+    """
+    target_lower = target_name.lower()
+    tags = parse_frontmatter_tags(content)
+
+    # @skip: takes precedence
+    if target_lower in tags["skip_targets"]:
+        return False
+
+    # @target: restricts inclusion to a specific set
+    if tags["target_targets"] and target_lower not in tags["target_targets"]:
+        return False
+
+    return True
+
+
+def filter_content_with_frontmatter(content: str, target_name: str) -> str:
+    """Apply @target:/@skip: frontmatter directives and strip them from output.
+
+    If frontmatter directives indicate the content should be excluded from
+    ``target_name``, returns an empty string.  Otherwise returns the content
+    with the directive lines stripped (so they don't pollute the target file).
+
+    This should be called BEFORE ``filter_rules_for_target`` so that the
+    cleaned content flows into the per-line filter pipeline.
+
+    Args:
+        content: Raw CLAUDE.md rule block text.
+        target_name: Target harness identifier.
+
+    Returns:
+        Cleaned content (directive lines removed) if allowed, or "" if excluded.
+    """
+    tags = parse_frontmatter_tags(content)
+    target_lower = target_name.lower()
+
+    if target_lower in tags["skip_targets"]:
+        return ""
+    if tags["target_targets"] and target_lower not in tags["target_targets"]:
+        return ""
+
+    return tags["cleaned"] if (tags["target_targets"] or tags["skip_targets"]) else content
+
+
 def filter_rules_for_target(content: str, target_name: str) -> str:
     """Filter rules content for a specific target based on sync tags.
 

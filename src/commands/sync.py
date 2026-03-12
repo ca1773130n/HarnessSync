@@ -234,6 +234,29 @@ def main():
             "(e.g. 'production', 'dev'). Also reads HARNESS_ENV env var."
         ),
     )
+    parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Show a preview of all files that would be written and prompt y/n before syncing",
+    )
+    parser.add_argument(
+        "--three-way",
+        action="store_true",
+        dest="three_way",
+        help="Use three-way diff conflict resolution (shows per-section diffs; requires TTY)",
+    )
+    parser.add_argument(
+        "--allow-anomalies",
+        action="store_true",
+        dest="allow_anomalies",
+        help="Proceed even when sync anomaly detection flags unexpectedly large changes",
+    )
+    parser.add_argument(
+        "--no-changelog",
+        action="store_true",
+        dest="no_changelog",
+        help="Skip writing the auto-generated sync changelog entry",
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -331,13 +354,55 @@ def main():
                         cd = ConflictDetector()
                         conflicts = cd.check_all()
                         if any(conflicts.values()):
-                            resolutions = cd.resolve_interactive(conflicts)
-                            if resolutions:
-                                os.environ["HARNESSSYNC_KEEP_FILES"] = ",".join(
-                                    fp for fp, action in resolutions.items() if action == "keep"
-                                )
+                            use_three_way = getattr(args, "three_way", False)
+                            if use_three_way:
+                                # Three-way per-section resolution wizard
+                                keep_files: list[str] = []
+                                for target_name, target_conflicts in conflicts.items():
+                                    for conflict in target_conflicts:
+                                        from src.source_reader import SourceReader
+                                        try:
+                                            sr = SourceReader(scope=getattr(args, "scope", "all"),
+                                                              project_dir=project_dir)
+                                            source_data = sr.discover_all()
+                                            source_content = source_data.get("rules", "")
+                                        except Exception:
+                                            source_content = ""
+                                        three_way = cd.three_way_diff(source_content, conflict)
+                                        if three_way["has_real_conflict"]:
+                                            resolution, _ = cd.resolve_three_way_interactive(
+                                                conflict, three_way
+                                            )
+                                            if resolution == "keep":
+                                                keep_files.append(conflict["file_path"])
+                                if keep_files:
+                                    os.environ["HARNESSSYNC_KEEP_FILES"] = ",".join(keep_files)
+                            else:
+                                resolutions = cd.resolve_interactive(conflicts)
+                                if resolutions:
+                                    os.environ["HARNESSSYNC_KEEP_FILES"] = ",".join(
+                                        fp for fp, action in resolutions.items() if action == "keep"
+                                    )
                     except Exception:
                         pass  # Conflict resolution failure should not block sync
+
+            # --- PRE-SYNC: APPROVAL GATE (--confirm) ---
+            if getattr(args, "confirm", False) and not args.dry_run:
+                try:
+                    from src.native_preview import build_sync_preview, confirm_sync
+                    from src.source_reader import SourceReader
+                    _sr = SourceReader(scope=getattr(args, "scope", "all"),
+                                       project_dir=project_dir)
+                    _source_data = _sr.discover_all()
+                    _preview_changes = build_sync_preview(
+                        source_data=_source_data,
+                        project_dir=project_dir,
+                    )
+                    if not confirm_sync(_preview_changes, force=False):
+                        print("Sync cancelled by user.")
+                        return
+                except Exception:
+                    pass  # Non-blocking: approval gate failure should not hard-break
 
             if getattr(args, 'watch', False):
                 _run_watch_mode(project_dir, args, only_sections, skip_sections)
@@ -493,6 +558,59 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
         # Display fidelity scores (0-100 per target)
         if '_fidelity_report' in results:
             print(results['_fidelity_report'])
+
+        # --- AUTO-GENERATED SYNC CHANGELOG ---
+        if not getattr(args, "no_changelog", False):
+            try:
+                from src.changelog_manager import ChangelogManager
+                cm = ChangelogManager(project_dir=Path(os.getcwd()))
+                cm.record(
+                    results,
+                    scope=getattr(args, "scope", "all"),
+                    account=account,
+                )
+            except Exception:
+                pass  # Changelog write is best-effort
+
+        # --- SYNC ANOMALY CHECK (post-sync, for next-run awareness) ---
+        # Record source length for future shrinkage detection
+        try:
+            from src.sync_anomaly import SyncAnomalyDetector
+            _anomaly_det = SyncAnomalyDetector()
+            scope_key = getattr(args, "scope", "all")
+            # Check for anomaly hints surfaced by orchestrator
+            if "_anomalies" in results:
+                _anomaly_report = _anomaly_det.format_report(results["_anomalies"])
+                if _anomaly_report:
+                    print(_anomaly_report)
+        except Exception:
+            pass
+
+        # --- DESKTOP NOTIFICATION (regular sync, not just watch mode) ---
+        try:
+            _total_synced = sum(
+                sum(getattr(r, "synced", 0) for r in tr.values() if hasattr(r, "synced"))
+                for tr in results.values()
+                if isinstance(tr, dict) and not str(list(tr.keys())[:1]).startswith("['_")
+            )
+            _total_failed = sum(
+                sum(getattr(r, "failed", 0) for r in tr.values() if hasattr(r, "failed"))
+                for tr in results.values()
+                if isinstance(tr, dict) and not str(list(tr.keys())[:1]).startswith("['_")
+            )
+            _targets_synced = [k for k in results if not k.startswith("_")]
+            _notif_msg = (
+                f"{_total_synced} file(s) synced to {len(_targets_synced)} target(s)"
+                if _total_failed == 0
+                else f"{_total_synced} synced, {_total_failed} failed"
+            )
+            _send_desktop_notification(
+                "HarnessSync",
+                _notif_msg,
+                is_error=_total_failed > 0,
+            )
+        except Exception:
+            pass  # Desktop notifications are always best-effort
 
 
 def _run_monorepo_sync(project_dir: Path, args) -> None:
