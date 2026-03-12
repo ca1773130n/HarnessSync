@@ -22,7 +22,7 @@ from src.diff_formatter import DiffFormatter
 from src.secret_detector import SecretDetector
 from src.source_reader import SourceReader
 from src.state_manager import StateManager
-from src.sync_filter import filter_rules_for_target, has_sync_tags
+from src.sync_filter import filter_rules_for_target, filter_rules_for_env, has_sync_tags
 from src.symlink_cleaner import SymlinkCleaner
 from src.utils.hashing import hash_file_sha256
 from src.utils.logger import Logger
@@ -39,7 +39,8 @@ class SyncOrchestrator:
                  allow_secrets: bool = False, account: str = None, cc_home: Path = None,
                  only_sections: set = None, skip_sections: set = None,
                  incremental: bool = False,
-                 cli_only_targets: set = None, cli_skip_targets: set = None):
+                 cli_only_targets: set = None, cli_skip_targets: set = None,
+                 harness_env: str = None):
         """Initialize orchestrator.
 
         Args:
@@ -52,6 +53,8 @@ class SyncOrchestrator:
             only_sections: If set, only sync these sections (rules/skills/agents/commands/mcp/settings)
             skip_sections: If set, skip these sections
             incremental: If True, skip targets where no source files changed since last sync
+            harness_env: Environment name for env-tagged section filtering (e.g. 'production', 'dev').
+                         Falls back to HARNESS_ENV environment variable if not provided.
         """
         self.project_dir = project_dir
         self.scope = scope
@@ -65,6 +68,9 @@ class SyncOrchestrator:
         # CLI-level target filters (applied before per-project .harnesssync overrides)
         self.cli_only_targets: set[str] = cli_only_targets or set()
         self.cli_skip_targets: set[str] = cli_skip_targets or set()
+        # Environment-aware sync: resolve from arg, then HARNESS_ENV env var
+        import os as _os
+        self.harness_env: str | None = harness_env or _os.environ.get("HARNESS_ENV") or None
         self.logger = Logger()
         self.state_manager = StateManager()
         self.account_config = None
@@ -392,6 +398,16 @@ class SyncOrchestrator:
             if isinstance(r, dict)
         )
 
+        # --- USER-DEFINED TRANSFORM RULES: load once per sync run ---
+        _transform_engine = None
+        try:
+            from src.transform_engine import TransformEngine
+            _transform_engine = TransformEngine.load(self.project_dir)
+            if _transform_engine.has_rules():
+                self.logger.info(f"Transform engine: {len(_transform_engine.rules)} rule(s) loaded")
+        except Exception:
+            pass  # Transform rules are best-effort
+
         # --- INCREMENTAL: PRE-COMPUTE CURRENT FILE HASHES (for delta check) ---
         _current_hashes: dict[str, str] = {}
         if self.incremental:
@@ -442,14 +458,28 @@ class SyncOrchestrator:
                 except ImportError:
                     pass  # offline_queue not available — proceed normally
 
-                # Build target-specific data (applying sync tag filtering)
+                # Build target-specific data (applying env + sync tag filtering)
                 target_data = dict(adapter_data)
-                if _rules_have_tags:
+                # Step 1: filter env-tagged sections (e.g. @env:production blocks)
+                if self.harness_env:
                     target_data['rules'] = [
-                        {**r, 'content': filter_rules_for_target(r.get('content', ''), target)}
+                        {**r, 'content': filter_rules_for_env(r.get('content', ''), self.harness_env)}
                         for r in adapter_data.get('rules', [])
                         if isinstance(r, dict)
                     ]
+                # Step 2: filter per-target sync tags (e.g. <!-- sync:codex-only -->)
+                if _rules_have_tags:
+                    _rules_source = target_data.get('rules', adapter_data.get('rules', []))
+                    target_data['rules'] = [
+                        {**r, 'content': filter_rules_for_target(r.get('content', ''), target)}
+                        for r in _rules_source
+                        if isinstance(r, dict)
+                    ]
+                # Step 3: apply user-defined transform rules
+                if _transform_engine and _transform_engine.has_rules():
+                    target_data['rules'] = _transform_engine.apply_to_rules(
+                        target_data.get('rules', adapter_data.get('rules', [])), target
+                    )
 
                 # --- PER-HARNESS OVERRIDE FILES: append CLAUDE.<target>.md content ---
                 _override_content = reader.get_harness_override(target)
@@ -513,7 +543,7 @@ class SyncOrchestrator:
             except ImportError as e:
                 self.logger.warn(f"SymlinkCleaner unavailable: {e}")
 
-        # --- POST-SYNC: COMPATIBILITY REPORT + COVERAGE SCORE ---
+        # --- POST-SYNC: COMPATIBILITY REPORT + COVERAGE SCORE + FIDELITY ---
         try:
             compatibility_reporter = CompatibilityReporter()
             report = compatibility_reporter.generate(results)
@@ -528,6 +558,14 @@ class SyncOrchestrator:
                 coverage_str = compatibility_reporter.format_coverage_scores(coverage)
                 if coverage_str.strip():
                     self.logger.info(coverage_str)
+
+            # Fidelity scores: translation quality per target (0-100)
+            fidelity = compatibility_reporter.calculate_fidelity_score(results)
+            if fidelity:
+                results['_fidelity_scores'] = fidelity
+                fidelity_str = compatibility_reporter.format_fidelity_scores(fidelity)
+                if fidelity_str.strip():
+                    results['_fidelity_report'] = fidelity_str
         except ImportError as e:
             self.logger.warn(f"CompatibilityReporter unavailable: {e}")
 

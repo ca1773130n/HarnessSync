@@ -162,3 +162,11 @@
 [2026-03-11T04:41:50.024Z] Discovered 1 new + -1 carried-over = 0 total items, 0 groups, selected 0
 [2026-03-11T04:41:50.024Z] No groups to process. Done.
 [2026-03-11T04:41:50.024Z] Done: 18 iteration(s) completed
+[2026-03-12T00:12:37.981Z] Starting iteration 19
+[2026-03-12T00:15:38.039Z] Discovered 38 new + -3 carried-over = 35 total items, 1 groups, selected 1
+[2026-03-12T00:15:38.039Z] Capped batch from 35 to 30 items (max 30)
+[2026-03-12T00:15:38.039Z] Batch-executing 1 groups (30 items) in one subprocess
+[2026-03-12T00:32:34.605Z] Read iteration feedback: 6 decisions, 4 patterns, 5 takeaways
+[2026-03-12T00:32:34.686Z] Batch execute completed (code changes detected)
+[2026-03-12T00:32:34.686Z] Running single review for all 1 groups
+[2026-03-12T00:34:00.471Z] Batch review completed

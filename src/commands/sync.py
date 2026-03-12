@@ -224,6 +224,16 @@ def main():
         action="store_true",
         help="Discover and sync each monorepo sub-package with its own config"
     )
+    parser.add_argument(
+        "--env",
+        type=str,
+        default=None,
+        metavar="ENV",
+        help=(
+            "Filter env-tagged sections for this environment "
+            "(e.g. 'production', 'dev'). Also reads HARNESS_ENV env var."
+        ),
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -337,6 +347,10 @@ def main():
                 _run_monorepo_sync(project_dir, args)
                 return
 
+            harness_env = getattr(args, 'env', None)
+            if harness_env:
+                print(f"[env: {harness_env}]")
+
             if args.account:
                 # Sync specific account
                 orchestrator = SyncOrchestrator(
@@ -350,6 +364,7 @@ def main():
                     incremental=getattr(args, 'incremental', False),
                     cli_only_targets=cli_only_targets,
                     cli_skip_targets=cli_skip_targets,
+                    harness_env=harness_env,
                 )
                 results = orchestrator.sync_all()
                 elapsed = time.time() - start_time
@@ -367,6 +382,7 @@ def main():
                     incremental=getattr(args, 'incremental', False),
                     cli_only_targets=cli_only_targets,
                     cli_skip_targets=cli_skip_targets,
+                    harness_env=harness_env,
                 )
 
                 # Check for multi-account setup
@@ -473,6 +489,10 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
         # Display compatibility report if issues detected
         if '_compatibility_report' in results:
             print(results['_compatibility_report'])
+
+        # Display fidelity scores (0-100 per target)
+        if '_fidelity_report' in results:
+            print(results['_fidelity_report'])
 
 
 def _run_monorepo_sync(project_dir: Path, args) -> None:
