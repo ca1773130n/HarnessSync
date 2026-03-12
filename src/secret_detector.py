@@ -323,6 +323,109 @@ class SecretDetector:
         # Scan extracted env vars
         return self.scan(all_env_vars)
 
+    def scrub_env_vars(self, env_vars: dict[str, str]) -> tuple[dict[str, str], list[str]]:
+        """Replace detected secret values with ${VAR_NAME} placeholder references.
+
+        Instead of blocking sync, this method produces a version of env_vars
+        safe to write to target configs — secret values are replaced with
+        portable env var reference syntax (``${VAR_NAME}``).
+
+        CRITICAL: Never logs or displays actual secret values.
+
+        Args:
+            env_vars: Dict mapping var_name -> var_value.
+
+        Returns:
+            Tuple of (scrubbed_env_vars, scrubbed_names) where:
+              - scrubbed_env_vars: New dict with secret values replaced by
+                ``${VAR_NAME}`` placeholders.
+              - scrubbed_names: List of var names that were scrubbed.
+        """
+        detections = self.scan(env_vars)
+        detected_names = {d["var_name"] for d in detections}
+
+        scrubbed: dict[str, str] = {}
+        scrubbed_names: list[str] = []
+
+        for var_name, var_value in env_vars.items():
+            if var_name in detected_names:
+                scrubbed[var_name] = f"${{{var_name}}}"
+                scrubbed_names.append(var_name)
+            else:
+                scrubbed[var_name] = var_value
+
+        return scrubbed, scrubbed_names
+
+    def scrub_mcp_env(self, mcp_servers: dict) -> tuple[dict, list[str]]:
+        """Replace secret env var values in MCP server configs with placeholder refs.
+
+        Produces a scrubbed copy of mcp_servers suitable for writing to
+        target harness config files. Secret values are replaced with
+        ``${VAR_NAME}`` placeholders — recipients set the real value from
+        their local environment.
+
+        This enables ``--scrub-secrets`` mode: sync proceeds with redacted
+        env vars instead of blocking. The resulting config is portable and
+        does not contain credentials.
+
+        CRITICAL: Never logs or displays actual secret values.
+
+        Args:
+            mcp_servers: Dict of MCP server configs (same format as
+                         SourceReader.get_mcp_servers() output).
+
+        Returns:
+            Tuple of (scrubbed_servers, scrubbed_var_names) where:
+              - scrubbed_servers: Deep copy of mcp_servers with secret env
+                values replaced by ``${VAR_NAME}`` references.
+              - scrubbed_var_names: Flat list of variable names that were
+                scrubbed across all servers.
+        """
+        import copy
+
+        scrubbed_servers = copy.deepcopy(mcp_servers)
+        all_scrubbed: list[str] = []
+
+        for server_name, server_config in scrubbed_servers.items():
+            if not isinstance(server_config, dict):
+                continue
+
+            env = server_config.get("env", {})
+            if not isinstance(env, dict) or not env:
+                continue
+
+            scrubbed_env, scrubbed_names = self.scrub_env_vars(env)
+            if scrubbed_names:
+                server_config["env"] = scrubbed_env
+                all_scrubbed.extend(scrubbed_names)
+
+        return scrubbed_servers, all_scrubbed
+
+    def format_scrub_report(self, scrubbed_names: list[str]) -> str:
+        """Format a human-readable report of scrubbed variables.
+
+        CRITICAL: Never includes actual secret values.
+
+        Args:
+            scrubbed_names: List of var names replaced with placeholders.
+
+        Returns:
+            Formatted report string, or empty string if nothing was scrubbed.
+        """
+        if not scrubbed_names:
+            return ""
+
+        lines = [
+            f"\n⚙ Scrubbed {len(scrubbed_names)} secret(s) from MCP env vars "
+            "(replaced with ${VAR_NAME} placeholders):"
+        ]
+        for name in scrubbed_names:
+            lines.append(f"  · {name} → ${{{name}}}")
+        lines.append(
+            "\nRecipients must set these env vars locally before using the config."
+        )
+        return "\n".join(lines)
+
     def should_block(self, detections: list[dict], allow_secrets: bool = False) -> bool:
         """
         Determine if sync should be blocked based on detections.

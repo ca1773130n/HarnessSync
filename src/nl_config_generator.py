@@ -385,6 +385,121 @@ _register(
     ),
 )
 
+# Docker / containerization
+_register(
+    r"docker|container|dockerfile|image|compose|k8s|kubernetes|pod",
+    BehaviorRule(
+        category="containerization",
+        title="Container and Docker Standards",
+        rule_text=(
+            "- Use multi-stage Dockerfiles to minimize final image size.\n"
+            "- Never run processes as root inside containers — use a non-root USER.\n"
+            "- Pin base image digests or exact version tags — never use `latest`.\n"
+            "- Do not store secrets in Docker images or environment declarations "
+            "in docker-compose.yml; use a secrets manager or `.env` file excluded from VCS."
+        ),
+        harness_notes={
+            "aider": "Add container security rules to CONVENTIONS.md under DevOps section",
+        },
+        confidence="high",
+    ),
+)
+
+# Input validation / sanitization
+_register(
+    r"input.valid|validate.input|sanitize|user.input|never.trust|untrusted",
+    BehaviorRule(
+        category="input_validation",
+        title="Input Validation at System Boundaries",
+        rule_text=(
+            "- Validate and sanitize all user-supplied input at the system boundary "
+            "(API handler, form field, CLI argument) before processing.\n"
+            "- Reject invalid input with a 400/422 response and a descriptive error message "
+            "— never silently truncate or coerce bad data.\n"
+            "- Use an established validation library (zod, pydantic, joi) — "
+            "do not write custom regex validators for well-known formats.\n"
+            "- Never pass raw user input to shell commands, SQL queries, or dynamic code execution."
+        ),
+        confidence="high",
+    ),
+)
+
+# Rate limiting / throttling
+_register(
+    r"rate.limit|throttle|backoff|retry|exponential|429|too.many.request",
+    BehaviorRule(
+        category="resilience",
+        title="Rate Limiting and Retry with Backoff",
+        rule_text=(
+            "- All outbound API calls must implement retry logic with "
+            "exponential backoff and jitter.\n"
+            "- Respect `Retry-After` headers from upstream services; "
+            "never hammer a 429-returning endpoint.\n"
+            "- Set a maximum retry count (≤ 5) and surface a clear error "
+            "after exhausting retries.\n"
+            "- Implement per-user rate limits on inbound endpoints to prevent abuse."
+        ),
+        confidence="high",
+    ),
+)
+
+# Internationalization / i18n
+_register(
+    r"i18n|internationali|locali|translation|locale|multi.language",
+    BehaviorRule(
+        category="i18n",
+        title="Internationalization (i18n) Standards",
+        rule_text=(
+            "- Never hardcode user-visible strings — route all text through "
+            "the i18n translation layer.\n"
+            "- Store locale files in the designated `locales/` or `i18n/` directory.\n"
+            "- Use ICU message format for plurals and gendered strings.\n"
+            "- Test UI with a pseudo-locale (e.g. `en-XA`) to catch hardcoded strings."
+        ),
+        confidence="medium",
+    ),
+)
+
+# Observability / tracing
+_register(
+    r"observ|opentelemetry|otel|instrument|monitor",
+    BehaviorRule(
+        category="observability",
+        title="Observability and Distributed Tracing",
+        rule_text=(
+            "- Propagate trace context (W3C TraceContext headers) across all "
+            "service boundaries.\n"
+            "- Emit structured log events with `traceId` and `spanId` fields.\n"
+            "- Record key business metrics (request count, latency p99, error rate) "
+            "using the project's metrics library.\n"
+            "- Every external I/O call must be wrapped in a span — "
+            "do not create spans for pure in-process computation."
+        ),
+        harness_notes={
+            "aider": "Add observability requirements to CONVENTIONS.md under Architecture",
+        },
+        confidence="medium",
+    ),
+)
+
+# Concurrency / thread safety
+_register(
+    r"thread.safe|concurren|race.condition|mutex|atomic|shared.state",
+    BehaviorRule(
+        category="concurrency",
+        title="Thread Safety and Concurrency",
+        rule_text=(
+            "- Protect shared mutable state with locks or use immutable data structures.\n"
+            "- Prefer message-passing (queues, channels) over shared memory for "
+            "cross-thread communication.\n"
+            "- Document which class members require external synchronization.\n"
+            "- Use `threading.local()` or async-context-var equivalents for "
+            "per-request state — never use module-level mutable globals."
+        ),
+        confidence="high",
+    ),
+)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Generator
@@ -675,11 +790,23 @@ class NLConfigGenerator:
         if any(k in text for k in ("sync to", "synced to", "available in", "available on")):
             return self._query_availability(text, project_dir, cc_home)
 
+        if any(k in text for k in ("agent", "agents")):
+            return self._query_agents(text, project_dir, cc_home)
+
+        if any(k in text for k in ("command", "commands", "slash")):
+            return self._query_commands(text, project_dir, cc_home)
+
+        if any(k in text for k in ("categor", "behavior", "pattern", "rule type")):
+            return self._query_categories()
+
         return (
             "I couldn't interpret that question. Try asking:\n"
             "  - 'which MCP servers are available in Gemini?'\n"
             "  - 'what rules didn't sync to Codex?'\n"
             "  - 'which harnesses support skills?'\n"
+            "  - 'which harnesses support agents?'\n"
+            "  - 'which commands synced to Cursor?'\n"
+            "  - 'what behavior categories are available?'\n"
             "  - 'is <server-name> synced to Cursor?'"
         )
 
@@ -838,4 +965,102 @@ class NLConfigGenerator:
             level = support_map.get(target, "none")
             icon = {"full": "✓", "partial": "~", "none": "✗"}.get(level, "?")
             lines.append(f"  {icon} {feature:<12} {level}")
+        return "\n".join(lines)
+
+    def _query_agents(self, text: str, project_dir, cc_home) -> str:
+        """Answer questions about agent sync state per harness."""
+        from src.harness_comparison import _FEATURE_SUPPORT
+        agent_support = _FEATURE_SUPPORT.get("agents", {})
+
+        _TARGET_ALIASES = {
+            "aider": "aider", "codex": "codex", "gemini": "gemini",
+            "opencode": "opencode", "cursor": "cursor", "windsurf": "windsurf",
+        }
+        target = next((v for k, v in _TARGET_ALIASES.items() if k in text), None)
+
+        if target:
+            level = agent_support.get(target, "none")
+            icon = {"full": "✓", "partial": "~", "none": "✗"}.get(level, "?")
+            notes = {
+                "gemini": "Agent tool bindings are dropped; agent text is inlined into GEMINI.md.",
+                "codex": "Agents are inlined into AGENTS.md (no separate agent files).",
+                "opencode": "Agents written as OpenCode project files.",
+                "cursor": "Agents inlined as .mdc rule blocks in .cursor/rules/.",
+                "aider": "Agents have no Aider equivalent — skipped during sync.",
+                "windsurf": "Agents inlined as .windsurfrules sections.",
+            }
+            note = notes.get(target, "")
+            lines = [f"{icon} {target.title()} agent support: {level}"]
+            if note:
+                lines.append(f"  Note: {note}")
+            return "\n".join(lines)
+
+        lines = ["Agent support by harness:"]
+        for harness, level in sorted(agent_support.items()):
+            icon = {"full": "✓", "partial": "~", "none": "✗"}.get(level, "?")
+            lines.append(f"  {icon} {harness:<14} {level}")
+        return "\n".join(lines)
+
+    def _query_commands(self, text: str, project_dir, cc_home) -> str:
+        """Answer questions about slash command sync state per harness."""
+        from pathlib import Path as _Path
+        from src.harness_comparison import _FEATURE_SUPPORT
+        command_support = _FEATURE_SUPPORT.get("commands", {})
+
+        _TARGET_ALIASES = {
+            "aider": "aider", "codex": "codex", "gemini": "gemini",
+            "opencode": "opencode", "cursor": "cursor", "windsurf": "windsurf",
+        }
+        target = next((v for k, v in _TARGET_ALIASES.items() if k in text), None)
+
+        # Try to get actual command count from source
+        command_count: int | None = None
+        try:
+            from src.source_reader import SourceReader
+            reader = SourceReader(
+                scope="all",
+                project_dir=_Path(project_dir) if project_dir else _Path.cwd(),
+                cc_home=_Path(cc_home) if cc_home else None,
+            )
+            data = reader.read_all()
+            commands = data.get("commands", {})
+            command_count = len(commands) if isinstance(commands, dict) else None
+        except Exception:
+            pass
+
+        count_str = f"{command_count} command(s) configured" if command_count is not None else "commands"
+
+        if target:
+            level = command_support.get(target, "none")
+            icon = {"full": "✓", "partial": "~", "none": "✗"}.get(level, "?")
+            notes = {
+                "gemini": "Slash commands converted to plain GEMINI.md instruction blocks.",
+                "codex": "Slash commands have no direct Codex equivalent; converted to AGENTS.md notes.",
+                "opencode": "Commands have no direct OpenCode equivalent.",
+                "cursor": "Commands written as .mdc rule blocks.",
+                "aider": "Commands have no Aider equivalent — skipped.",
+                "windsurf": "Commands have no Windsurf equivalent — skipped.",
+            }
+            note = notes.get(target, "")
+            lines = [f"{icon} {target.title()} command support: {level} ({count_str})"]
+            if note:
+                lines.append(f"  Note: {note}")
+            return "\n".join(lines)
+
+        lines = [f"Command support by harness ({count_str}):"]
+        for harness, level in sorted(command_support.items()):
+            icon = {"full": "✓", "partial": "~", "none": "✗"}.get(level, "?")
+            lines.append(f"  {icon} {harness:<14} {level}")
+        return "\n".join(lines)
+
+    def _query_categories(self) -> str:
+        """List all available NL behavior categories."""
+        cats = self.list_categories()
+        lines = ["Available behavior categories for NL config generation:"]
+        for cat in cats:
+            lines.append(f"  · {cat}")
+        lines.append(
+            "\nUse these in plain-English descriptions, e.g. "
+            "'enforce async I/O and rate limiting rules'."
+        )
         return "\n".join(lines)

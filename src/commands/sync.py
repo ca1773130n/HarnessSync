@@ -145,6 +145,11 @@ def main():
         help="Allow sync even when secrets detected in env vars"
     )
     parser.add_argument(
+        "--scrub-secrets",
+        action="store_true",
+        help="Replace detected secret values with ${VAR_NAME} placeholders instead of blocking"
+    )
+    parser.add_argument(
         "--account",
         type=str,
         default=None,
@@ -473,6 +478,7 @@ def main():
                     scope=args.scope,
                     dry_run=args.dry_run,
                     allow_secrets=args.allow_secrets,
+                    scrub_secrets=getattr(args, 'scrub_secrets', False),
                     account=args.account,
                     only_sections=only_sections,
                     skip_sections=skip_sections,
@@ -492,6 +498,7 @@ def main():
                     scope=args.scope,
                     dry_run=args.dry_run,
                     allow_secrets=args.allow_secrets,
+                    scrub_secrets=getattr(args, 'scrub_secrets', False),
                     only_sections=only_sections,
                     skip_sections=skip_sections,
                     incremental=getattr(args, 'incremental', False),

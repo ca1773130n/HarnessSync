@@ -36,7 +36,8 @@ class SyncOrchestrator:
     """
 
     def __init__(self, project_dir: Path, scope: str = "all", dry_run: bool = False,
-                 allow_secrets: bool = False, account: str = None, cc_home: Path = None,
+                 allow_secrets: bool = False, scrub_secrets: bool = False,
+                 account: str = None, cc_home: Path = None,
                  only_sections: set = None, skip_sections: set = None,
                  incremental: bool = False,
                  cli_only_targets: set = None, cli_skip_targets: set = None,
@@ -48,6 +49,8 @@ class SyncOrchestrator:
             scope: "user" | "project" | "all"
             dry_run: If True, preview changes without writing
             allow_secrets: If True, allow sync even when secrets detected in env vars
+            scrub_secrets: If True, replace detected secret values with ${VAR_NAME}
+                           placeholders before syncing instead of blocking.
             account: Account name for per-account sync (None = v1 behavior)
             cc_home: Custom Claude Code config directory (derived from account if provided)
             only_sections: If set, only sync these sections (rules/skills/agents/commands/mcp/settings)
@@ -60,6 +63,7 @@ class SyncOrchestrator:
         self.scope = scope
         self.dry_run = dry_run
         self.allow_secrets = allow_secrets
+        self.scrub_secrets = scrub_secrets
         self.account = account
         self.cc_home = cc_home
         self.only_sections = only_sections or set()
@@ -318,15 +322,27 @@ class SyncOrchestrator:
                 file_detections = secret_detector.scan_config_files(self.project_dir)
                 detections = detections + file_detections
 
-            if secret_detector.should_block(detections, self.allow_secrets):
-                # Block sync - return early with warning
-                formatted_warnings = secret_detector.format_warnings(detections)
-                self.logger.warn("Sync blocked: secrets detected in config files or environment variables")
-                return {
-                    '_blocked': True,
-                    '_reason': 'secrets_detected',
-                    '_warnings': formatted_warnings
-                }
+            if detections:
+                if self.scrub_secrets:
+                    # Scrub mode: replace secret values with ${VAR_NAME} placeholders
+                    # instead of blocking. Sync proceeds with sanitised MCP config.
+                    scrubbed_mcp, scrubbed_names = secret_detector.scrub_mcp_env(
+                        source_data.get('mcp_servers', {})
+                    )
+                    if scrubbed_names:
+                        source_data['mcp_servers'] = scrubbed_mcp
+                        adapter_data['mcp'] = scrubbed_mcp
+                        scrub_report = secret_detector.format_scrub_report(scrubbed_names)
+                        self.logger.warn(scrub_report)
+                elif secret_detector.should_block(detections, self.allow_secrets):
+                    # Block sync - return early with warning
+                    formatted_warnings = secret_detector.format_warnings(detections)
+                    self.logger.warn("Sync blocked: secrets detected in config files or environment variables")
+                    return {
+                        '_blocked': True,
+                        '_reason': 'secrets_detected',
+                        '_warnings': formatted_warnings
+                    }
         except ImportError as e:
             self.logger.warn(f"SecretDetector unavailable: {e}")
 
@@ -802,6 +818,7 @@ class SyncOrchestrator:
                     scope=self.scope,
                     dry_run=self.dry_run,
                     allow_secrets=self.allow_secrets,
+                    scrub_secrets=self.scrub_secrets,
                     account=account_name,
                     cc_home=cc_home
                 )

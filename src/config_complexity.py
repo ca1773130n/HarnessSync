@@ -317,3 +317,257 @@ class ConfigComplexityScorer:
             "mcp_count": float(mcp_count),
             "skill_count": float(skill_count),
         }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CLAUDE.md Content Quality Analyzer (item 28)
+# ──────────────────────────────────────────────────────────────────────────────
+
+import re as _re
+
+
+@dataclass
+class ContentIssue:
+    """A single content quality issue found in a rules file."""
+    issue_type: str   # "duplicate" | "vague" | "contradiction" | "redundant"
+    severity: str     # "warning" | "info"
+    description: str
+    line_numbers: list[int] = field(default_factory=list)
+
+
+@dataclass
+class ContentQualityReport:
+    """Content quality analysis for a rules file."""
+    file_path: str
+    issues: list[ContentIssue] = field(default_factory=list)
+    section_count: int = 0
+    rule_count: int = 0
+
+    @property
+    def has_issues(self) -> bool:
+        return bool(self.issues)
+
+    @property
+    def warning_count(self) -> int:
+        return sum(1 for i in self.issues if i.severity == "warning")
+
+    def format(self) -> str:
+        lines = [f"Content Quality: {self.file_path}"]
+        lines.append(
+            f"  {self.section_count} section(s), {self.rule_count} rule item(s)"
+        )
+        if not self.issues:
+            lines.append("  ✓ No quality issues found.")
+            return "\n".join(lines)
+
+        for issue in self.issues:
+            icon = "⚠" if issue.severity == "warning" else "·"
+            loc = ""
+            if issue.line_numbers:
+                loc = f" (lines {', '.join(str(n) for n in issue.line_numbers)})"
+            lines.append(f"  {icon} [{issue.issue_type}] {issue.description}{loc}")
+        return "\n".join(lines)
+
+
+_SECTION_HEADING_RE = _re.compile(r"^(#{1,3})\s+(.+)$", _re.MULTILINE)
+_RULE_ITEM_RE = _re.compile(r"^[ \t]*[-*+]\s+.+$", _re.MULTILINE)
+
+# Contradiction pairs: if both patterns appear near each other, flag as possible contradiction
+_CONTRADICTION_PAIRS: list[tuple[str, str]] = [
+    (r"\balways\b", r"\bnever\b"),
+    (r"\bmust\b", r"\bshould not\b"),
+    (r"\brequired\b", r"\boptional\b"),
+    (r"\bdo not\b", r"\balways do\b"),
+    (r"\bprefer\b", r"\bavoid\b"),
+]
+
+# Vague rule indicators: rules matching these are too imprecise to be actionable
+_VAGUE_PATTERNS: list[str] = [
+    r"^[-*+]\s+(?:be\s+)?(?:good|better|best|nice|clean|clear|proper|appropriate|careful)\b",
+    r"^[-*+]\s+(?:try to|attempt to|consider)\b.{0,30}$",
+    r"^[-*+]\s+.{1,20}$",  # Very short rules (< 20 chars after bullet)
+]
+_VAGUE_RES = [_re.compile(p, _re.IGNORECASE | _re.MULTILINE) for p in _VAGUE_PATTERNS]
+
+
+def analyze_claude_md_content(content: str, file_path: str = "CLAUDE.md") -> ContentQualityReport:
+    """Analyze CLAUDE.md content for quality issues.
+
+    Detects:
+    - Duplicate section headings (same heading appears twice)
+    - Vague rules (too short or non-actionable)
+    - Possible contradictions (e.g., 'always X' and 'never X' in same section)
+    - Redundant bullet points (identical or near-identical rule text)
+
+    Args:
+        content: Raw CLAUDE.md text.
+        file_path: Label used in the report (default: "CLAUDE.md").
+
+    Returns:
+        ContentQualityReport with found issues.
+    """
+    report = ContentQualityReport(file_path=file_path)
+
+    # Count sections and rules
+    headings = _SECTION_HEADING_RE.findall(content)
+    report.section_count = len(headings)
+    report.rule_count = len(_RULE_ITEM_RE.findall(content))
+
+    lines = content.splitlines()
+
+    # --- Duplicate headings ---
+    heading_lines: dict[str, list[int]] = {}
+    for i, line in enumerate(lines, start=1):
+        m = _re.match(r"^#{1,3}\s+(.+)$", line)
+        if m:
+            heading_text = m.group(1).strip().lower()
+            heading_lines.setdefault(heading_text, []).append(i)
+
+    for heading_text, linenos in heading_lines.items():
+        if len(linenos) > 1:
+            report.issues.append(ContentIssue(
+                issue_type="duplicate",
+                severity="warning",
+                description=f"Section heading appears {len(linenos)} times: '{heading_text}'",
+                line_numbers=linenos,
+            ))
+
+    # --- Redundant/duplicate rule items ---
+    rule_texts: dict[str, list[int]] = {}
+    for i, line in enumerate(lines, start=1):
+        m = _re.match(r"^[ \t]*[-*+]\s+(.+)$", line)
+        if m:
+            rule_text = m.group(1).strip().lower()
+            # Normalise whitespace for fuzzy dedup
+            rule_text = _re.sub(r"\s+", " ", rule_text)
+            rule_texts.setdefault(rule_text, []).append(i)
+
+    for rule_text, linenos in rule_texts.items():
+        if len(linenos) > 1:
+            preview = rule_text[:60] + ("..." if len(rule_text) > 60 else "")
+            report.issues.append(ContentIssue(
+                issue_type="redundant",
+                severity="warning",
+                description=f"Duplicate rule item: '{preview}'",
+                line_numbers=linenos,
+            ))
+
+    # --- Vague rules ---
+    for pattern_re in _VAGUE_RES:
+        for m in pattern_re.finditer(content):
+            lineno = content[: m.start()].count("\n") + 1
+            rule_preview = m.group(0).strip()[:60]
+            report.issues.append(ContentIssue(
+                issue_type="vague",
+                severity="info",
+                description=f"Possibly vague/non-actionable rule: '{rule_preview}'",
+                line_numbers=[lineno],
+            ))
+
+    # --- Contradiction detection ---
+    for pattern_a, pattern_b in _CONTRADICTION_PAIRS:
+        matches_a = [
+            (content[: m.start()].count("\n") + 1, m.group(0))
+            for m in _re.finditer(pattern_a, content, _re.IGNORECASE)
+        ]
+        matches_b = [
+            (content[: m.start()].count("\n") + 1, m.group(0))
+            for m in _re.finditer(pattern_b, content, _re.IGNORECASE)
+        ]
+        if matches_a and matches_b:
+            # Only flag if they appear within 30 lines of each other (same section likely)
+            for line_a, word_a in matches_a:
+                for line_b, word_b in matches_b:
+                    if abs(line_a - line_b) <= 30:
+                        report.issues.append(ContentIssue(
+                            issue_type="contradiction",
+                            severity="warning",
+                            description=(
+                                f"Possible contradiction: '{word_a}' (line {line_a}) "
+                                f"and '{word_b}' (line {line_b}) near each other"
+                            ),
+                            line_numbers=[line_a, line_b],
+                        ))
+                        break  # One report per contradiction pair is enough
+                else:
+                    continue
+                break
+
+    return report
+
+
+class ClaudeMdQualityChecker:
+    """Batch content quality checker for CLAUDE.md and related rule files.
+
+    Args:
+        project_dir: Project root to scan for CLAUDE.md and override files.
+    """
+
+    def __init__(self, project_dir: Path):
+        self.project_dir = project_dir
+
+    def check_all(self) -> list[ContentQualityReport]:
+        """Check all CLAUDE.md style files in the project directory.
+
+        Returns:
+            List of ContentQualityReport, one per file found.
+        """
+        candidates = [
+            self.project_dir / "CLAUDE.md",
+            self.project_dir / "CLAUDE.local.md",
+        ]
+        # Include per-harness override files
+        for target in ("codex", "gemini", "opencode", "cursor", "aider", "windsurf"):
+            candidates.append(self.project_dir / f"CLAUDE.{target}.md")
+            candidates.append(self.project_dir / ".claude" / f"CLAUDE.{target}.md")
+
+        reports = []
+        for path in candidates:
+            if not path.is_file():
+                continue
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            rel = path.relative_to(self.project_dir) if path.is_relative_to(self.project_dir) else path
+            report = analyze_claude_md_content(content, file_path=str(rel))
+            reports.append(report)
+
+        return reports
+
+    def format_summary(self, reports: list[ContentQualityReport] | None = None) -> str:
+        """Format a combined quality summary for all checked files.
+
+        Args:
+            reports: Pre-computed reports (runs check_all() if None).
+
+        Returns:
+            Multi-line summary string.
+        """
+        if reports is None:
+            reports = self.check_all()
+
+        if not reports:
+            return "No CLAUDE.md files found in project directory."
+
+        lines = ["CLAUDE.md Content Quality Report", "=" * 40, ""]
+        total_issues = 0
+        total_warnings = 0
+
+        for report in reports:
+            lines.append(report.format())
+            lines.append("")
+            total_issues += len(report.issues)
+            total_warnings += report.warning_count
+
+        lines.append("-" * 40)
+        lines.append(
+            f"Total: {total_issues} issue(s) across {len(reports)} file(s) "
+            f"({total_warnings} warning(s))"
+        )
+        if total_warnings > 0:
+            lines.append(
+                "\nTip: Warnings are rule quality issues that may reduce AI effectiveness.\n"
+                "     Run /sync-lint --content for detailed suggestions."
+            )
+        return "\n".join(lines)

@@ -1681,3 +1681,70 @@ _2026-03-12T02:10:06.559Z_
 - The sync_pin command gives users a panic-button checkpoint workflow (pin → experiment with rules → restore if things break) which is distinct from ConfigSnapshot (share with others) and SyncRollback (restore previous sync output)
 
 ---
+## Iteration 26
+_2026-03-12T02:27:25.191Z_
+
+### Items Attempted
+
+- **Sync Conflict Resolution Wizard** — pass
+- **Live Capability Gap Matrix** — pass
+- **Selective Sync Profiles** — pass
+- **Auto Sync Changelog** — pass
+- **Team Config Broadcast via Git** — pass
+- **MCP Server Reachability Dashboard** — pass
+- **Rule Deduplication Detector** — pass
+- **Skill Coverage Heatmap** — pass
+- **PR Sync Gate CI Check** — pass
+- **New Harness Auto-Detection** — pass
+- **Rules Priority Sorter** — pass
+- **Secret & API Key Scrubber** — pass
+- **Harness Version Compatibility Pinning** — pass
+- **Scheduled Background Sync** — pass
+- **Plugin Ecosystem Sync** — pass
+- **Cross-Harness Response Benchmarking** — pass
+- **Config Lint in CI** — pass
+- **Environment-Specific Override Layers** — pass
+- **Community Sync Template Library** — pass
+- **Adapter Deprecation Warnings** — pass
+- **Natural Language Rule Normalizer** — pass
+- **Sync Event Notifications** — pass
+- **Point-in-Time Rollback Snapshots** — pass
+- **First-Run Guided Onboarding** — pass
+- **MCP Server Auto-Discovery & Suggestion** — pass
+- **Rule Effectiveness Scoring** — pass
+- **Sync Impact Preview Before Commit** — pass
+- **Harness-Specific Rule Annotations** — pass
+- **Workspace-Aware Sync** — pass
+- **Adapter Plugin SDK for Community Extensions** — pass
+- **Config Freshness Age Indicators** — pass
+- **Cross-Harness Skill Smoke Tests** — pass
+- **Minimal Sync Mode for Sensitive Environments** — pass
+- **Harness Migration Assistant** — pass
+- **Token Cost Estimator for Synced Rules** — pass
+
+### Decisions Made
+
+- Item 1 (Conflict Resolution Wizard): The section-level interactive resolution methods already existed in conflict_detector.py but were never wired into the sync command. Added apply_section_resolutions() to actually merge section choices into final content, added --section-wizard flag to sync.py, and connected section_conflicts() + resolve_section_interactive() + apply_section_resolutions() in the conflict resolution block. The merged result is serialised as JSON in HARNESSSYNC_SECTION_MERGED env var for adapters to consume.
+- Item 11 (Rules Priority Sorter): No file existed for this. Created src/rule_priority_sorter.py as a standalone module with extract_rule_blocks(), rebuild_content(), HARNESS_ORDER_SEMANTICS (top_wins/last_wins/unordered), format_priority_preview() table, and an interactive RulePrioritySorter class with u/d/m/o/p/s/q commands. Chose to encode order semantics statically per harness rather than dynamically detecting from configs, since harness ordering behaviour is a known static property.
+- Item 16 (Cross-Harness Response Quality): The existing HarnessLatencyBenchmarker measured response time but not content. Added HarnessQualityBenchmarker as a separate class in harness_latency.py (sharing _HARNESS_CLI config) that captures full response text, renders a side-by-side comparison view per harness column, and adds a divergence_report() that flags outlier responses by word count ratio (>3x from median) and keyword presence.
+- Item 20 (Adapter Deprecation Warnings): Added DEPRECATED_FIELDS dict to harness_version_compat.py with per-harness known-deprecated config fields, their deprecation-since version, and migration hints. Added check_deprecated_fields_in_output() that skips warnings for fields deprecated in versions newer than the user's pinned version. Added check_deprecations() hook on AdapterBase and wired it into sync_all() pre-sync step so all adapters automatically surface deprecation notices.
+- Item 21 (NL Rule Normalizer): Extended llm_rule_translator.py with an offline RulePhrasingNormalizer class. Uses a table of (pattern, imperative_repl, declarative_repl, fragment_repl) tuples for common imperative openers (Always/Never/Prefer/Use/Avoid/Ensure). Transforms sentence-by-sentence, preserving code blocks and bullet prefixes. Chose regex over LLM for this since phrasing style is deterministic per harness and needs to run on every sync without latency.
+- Item 28 (@harness annotations): Added _AT_HARNESS_SKIP_RE and _AT_HARNESS_ONLY_RE regex patterns to sync_filter.py plus a _parse_at_harness_targets() helper that strips the -only suffix. Wired both patterns into filter_rules_for_target() before the existing harness:skip/only checks. Added the new format to the module docstring and updated config_linter.py to recognise @harness annotations as valid.
+
+### Patterns Discovered
+
+- The codebase consistently uses the try/except-and-continue pattern for optional features — new code follows this by wrapping conflict wizard and deprecation checks in try/except blocks so they never hard-block sync.
+- Feature flags propagate through os.environ (e.g. HARNESSSYNC_KEEP_FILES, HARNESSSYNC_SECTION_MERGED) between the command layer and the orchestrator/adapter layer. This is an established pattern in this codebase for pre-sync metadata.
+- Most 'new' features had partial implementations buried in standalone modules that were never called from the orchestrator or command layer. The gap was always integration, not core logic.
+- All src/*.py files consistently use from __future__ import annotations for Python 3.9 compatibility — new files follow the same convention.
+- The _HARNESS_CLI dict in harness_latency.py acts as the single source of truth for CLI invocation patterns. HarnessQualityBenchmarker intentionally reuses HarnessLatencyBenchmarker._find_executable() to avoid duplicating CLI detection logic.
+
+### Takeaways
+
+- The codebase has many well-implemented utility modules (conflict_detector, sync_filter, harness_version_compat) with methods that are never called from user-facing commands. Future evolve iterations should audit which utility functions lack integration points.
+- The phrasing normalizer revealed that 'Always' -> 'The assistant should always' transforms read naturally for declarative style, but fragment-style ('X preferred') is sometimes grammatically awkward. A second pass with harness-specific exception lists (e.g. skip fragment transform for multi-word phrases) would improve quality.
+- HARNESS_ORDER_SEMANTICS shows that 3 of 6 harnesses treat rules as unordered sets — the priority sorter preview table correctly surfaces this as '(no order)' rather than implying a ranking. This is an important UX clarification that was missing before.
+- Deprecation field detection works on both dict configs (JSON/TOML) and string configs (Markdown/YAML). The two-path check in check_deprecated_fields_in_output is the right approach since adapters write to different formats.
+- The @harness annotation syntax is cleaner than the existing harness:skip=/harness:only= forms for users coming from CSS/HTML backgrounds. Supporting both forms without breaking the existing filter semantics required careful regex ordering in the line-by-line state machine.
+
+---

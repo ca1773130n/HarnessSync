@@ -346,3 +346,167 @@ def _make_executable(path: Path) -> None:
 def _is_harnesssync_line(line: str) -> bool:
     """Return True if a line is part of the HarnessSync hook block."""
     return HARNESSSYNC_MARKER in line or line.strip().startswith("# HarnessSync")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pre-commit Sync Gate (item 9)
+# Blocks commits when Claude Code config has changed but harness targets are
+# out of date.  Unlike the pre-commit auto-stage hook, this hook is a hard
+# gate: it exits 1 (blocking the commit) and tells the user to run /sync first.
+# ──────────────────────────────────────────────────────────────────────────────
+
+GATE_HOOK_MARKER = "# harnesssync-gate-v1"
+
+GATE_HOOK_TEMPLATE = """\
+#!/bin/sh
+# HarnessSync pre-commit sync gate
+# Blocks commits when harness configs are stale (out of sync with CLAUDE.md).
+# Installed by: /sync-git-hook install --gate
+# Remove with:  /sync-git-hook uninstall --gate
+
+HARNESSSYNC_GATE_MARKER="# harnesssync-gate-v1"
+$HARNESSSYNC_GATE_MARKER
+
+# Only activate when source config files are staged
+staged=$(git diff --cached --name-only 2>/dev/null)
+
+triggers=0
+for pattern in CLAUDE.md .claude/ .mcp.json .harness-sync/; do
+    if echo "$staged" | grep -q "^$pattern"; then
+        triggers=1
+        break
+    fi
+done
+
+if [ "$triggers" -eq 0 ]; then
+    exit 0
+fi
+
+# Find HarnessSync plugin root
+if [ -n "$CLAUDE_PLUGIN_ROOT" ]; then
+    HS_ROOT="$CLAUDE_PLUGIN_ROOT"
+elif [ -f "$HOME/.claude/plugins/harness-sync/src/commands/sync.py" ]; then
+    HS_ROOT="$HOME/.claude/plugins/harness-sync"
+else
+    exit 0
+fi
+
+PY=$(command -v python3 || command -v python)
+if [ -z "$PY" ]; then
+    exit 0
+fi
+
+# Check if sync state is stale using drift detection
+stale=$("$PY" "$HS_ROOT/src/commands/sync.py" --drift-check 2>/dev/null; echo $?)
+
+if [ "$stale" != "0" ]; then
+    echo "" >&2
+    echo "HarnessSync GATE: commit blocked — harness configs are stale." >&2
+    echo "" >&2
+    echo "  Claude Code config changed but target harness files are out of date." >&2
+    echo "  Run: /sync" >&2
+    echo "  Then re-run: git commit" >&2
+    echo "" >&2
+    echo "  To bypass: git commit --no-verify  (not recommended)" >&2
+    echo "" >&2
+    exit 1
+fi
+
+exit 0
+"""
+
+
+def install_gate_hook(project_dir: Path) -> tuple[bool, str]:
+    """Install pre-commit sync gate hook.
+
+    The gate hook blocks commits when CLAUDE.md or related config files are
+    staged but the harness target files (AGENTS.md, GEMINI.md, etc.) are out
+    of sync.  Unlike the auto-stage pre-commit hook, this hook does NOT run
+    sync automatically — it instructs the user to run /sync first and then
+    commit again.
+
+    Args:
+        project_dir: Project directory to start searching for git repo.
+
+    Returns:
+        (success, message) tuple.
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False, "Not inside a git repository"
+
+    hooks_dir = git_dir / "hooks"
+    hooks_dir.mkdir(exist_ok=True)
+
+    hook_path = hooks_dir / "pre-commit"
+
+    if hook_path.exists():
+        existing = hook_path.read_text(encoding="utf-8")
+        if GATE_HOOK_MARKER in existing:
+            return True, f"Gate hook already installed at {hook_path}"
+        with open(hook_path, "a", encoding="utf-8") as f:
+            f.write("\n" + GATE_HOOK_TEMPLATE)
+        _make_executable(hook_path)
+        return True, f"HarnessSync gate hook appended to existing pre-commit hook at {hook_path}"
+
+    hook_path.write_text(GATE_HOOK_TEMPLATE, encoding="utf-8")
+    _make_executable(hook_path)
+    return True, f"Pre-commit sync gate hook installed at {hook_path}"
+
+
+def uninstall_gate_hook(project_dir: Path) -> tuple[bool, str]:
+    """Remove the HarnessSync sync gate from the pre-commit hook.
+
+    Args:
+        project_dir: Project directory to search for git repo.
+
+    Returns:
+        (success, message) tuple.
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False, "Not inside a git repository"
+
+    hook_path = git_dir / "hooks" / "pre-commit"
+    if not hook_path.exists():
+        return True, "No pre-commit hook found (nothing to remove)"
+
+    content = hook_path.read_text(encoding="utf-8")
+    if GATE_HOOK_MARKER not in content:
+        return True, "HarnessSync gate hook not found in pre-commit hook"
+
+    # Remove the gate block — everything between GATE_HOOK_MARKER occurrences
+    lines = content.splitlines(keepends=True)
+    in_gate_block = False
+    kept: list[str] = []
+    for line in lines:
+        if GATE_HOOK_MARKER in line:
+            in_gate_block = not in_gate_block
+            continue
+        if not in_gate_block:
+            kept.append(line)
+
+    new_content = "".join(kept).strip()
+    if not new_content or new_content == "#!/bin/sh":
+        hook_path.unlink()
+        return True, f"Gate pre-commit hook removed from {hook_path}"
+    hook_path.write_text(new_content + "\n", encoding="utf-8")
+    return True, f"HarnessSync gate section removed from pre-commit hook at {hook_path}"
+
+
+def is_gate_hook_installed(project_dir: Path) -> bool:
+    """Check if HarnessSync sync gate pre-commit hook is installed.
+
+    Args:
+        project_dir: Project directory.
+
+    Returns:
+        True if the gate hook is installed.
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False
+    hook_path = git_dir / "hooks" / "pre-commit"
+    if not hook_path.exists():
+        return False
+    return GATE_HOOK_MARKER in hook_path.read_text(encoding="utf-8")

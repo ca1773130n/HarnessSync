@@ -36,6 +36,115 @@ class CompatibilityReporter:
         'skills': 'Skills synced via symlinks'
     }
 
+    # Per-field settings translation explanations per target harness.
+    # Maps target_name -> {claude_field -> (target_field, translation_note)}
+    SETTINGS_FIELD_TRANSLATIONS: dict[str, dict[str, tuple[str, str]]] = {
+        "codex": {
+            "allowedTools": (
+                "allowedCommands",
+                "filtered to shell-executable commands only; MCP tool refs dropped",
+            ),
+            "deniedTools": (
+                "deniedCommands",
+                "non-shell tool refs silently omitted",
+            ),
+            "approvalMode": (
+                "(inlined as rule)",
+                "no native approvalMode; written as a permission note in AGENTS.md",
+            ),
+            "mcpServers": (
+                "agents.json mcpServers",
+                "MCP servers written to agents.json, not natively executed by codex",
+            ),
+        },
+        "gemini": {
+            "allowedTools": (
+                "tools.allowed",
+                "list format differs; Gemini uses string glob patterns",
+            ),
+            "deniedTools": (
+                "tools.exclude",
+                "list format differs; Gemini uses string glob patterns",
+            ),
+            "approvalMode": (
+                "(inlined as instruction)",
+                "no native approvalMode; written as an instruction block in GEMINI.md",
+            ),
+            "env": (
+                "(not synced)",
+                "environment vars not forwarded to Gemini config",
+            ),
+        },
+        "opencode": {
+            "allowedTools": (
+                "(inlined as instruction)",
+                "OpenCode has no tool allowlist; written as a rules note",
+            ),
+            "deniedTools": (
+                "(inlined as instruction)",
+                "OpenCode has no tool denylist; written as a rules note",
+            ),
+            "approvalMode": (
+                "(inlined as instruction)",
+                "no native approvalMode; written as a project rule",
+            ),
+        },
+        "cursor": {
+            "allowedTools": (
+                "(inlined in .mdc rule)",
+                "Cursor has no tool allowlist; written as an .mdc rule block",
+            ),
+            "deniedTools": (
+                "(inlined in .mdc rule)",
+                "Cursor has no tool denylist; written as an .mdc rule block",
+            ),
+            "mcpServers": (
+                ".cursor/mcp.json",
+                "MCP config written to .cursor/mcp.json (Cursor native format)",
+            ),
+            "approvalMode": (
+                "(not synced)",
+                "Cursor manages approval per-request; approvalMode not applicable",
+            ),
+        },
+        "aider": {
+            "allowedTools": (
+                "(not synced)",
+                "Aider has no tool allowlist concept",
+            ),
+            "deniedTools": (
+                "(not synced)",
+                "Aider has no tool denylist concept",
+            ),
+            "mcpServers": (
+                "(not synced)",
+                "Aider does not support MCP servers",
+            ),
+            "approvalMode": (
+                "--yes / --yes-always",
+                "mapped to aider auto-confirm flags in .aider.conf.yml",
+            ),
+        },
+        "windsurf": {
+            "allowedTools": (
+                "(inlined in .windsurfrules)",
+                "Windsurf has no native tool allowlist; written as rule text",
+            ),
+            "deniedTools": (
+                "(inlined in .windsurfrules)",
+                "Windsurf has no native tool denylist; written as rule text",
+            ),
+            "mcpServers": (
+                "(not synced)",
+                "Windsurf MCP support is IDE-managed; not written to .windsurfrules",
+            ),
+            "approvalMode": (
+                "(not synced)",
+                "Windsurf manages approval natively; approvalMode not applicable",
+            ),
+        },
+    }
+
     def __init__(self):
         """Initialize CompatibilityReporter with Logger instance."""
         self.logger = Logger()
@@ -630,6 +739,75 @@ class CompatibilityReporter:
         header = "\nHarness Capability Gap Report"
         footer = "\nRun /sync-matrix for a full feature compatibility matrix."
         return header + "\n" + "\n".join(lines) + footer
+
+    def explain_settings_translation(self, target: str, settings: dict) -> str:
+        """Return per-field translation notes for settings synced to a target harness.
+
+        Shows exactly how each Claude Code settings field maps to the target,
+        including field renames, format differences, and unsupported fields.
+
+        Args:
+            target: Target harness name (e.g., "codex", "gemini").
+            settings: Claude Code settings dict (from source_data["settings"]).
+
+        Returns:
+            Formatted string with per-field translation notes. Empty if no
+            relevant settings or no translation table for this target.
+        """
+        translations = self.SETTINGS_FIELD_TRANSLATIONS.get(target)
+        if not translations or not settings:
+            return ""
+
+        lines = [f"\nSettings translation for {target.upper()}:"]
+        any_note = False
+
+        for field, value in settings.items():
+            if field not in translations:
+                continue
+            target_field, note = translations[field]
+            # Summarise value so the user knows which setting triggered this
+            if isinstance(value, list):
+                val_summary = f"[{len(value)} item(s)]"
+            elif isinstance(value, dict):
+                val_summary = f"{{{len(value)} key(s)}}"
+            else:
+                val_summary = repr(value)
+
+            lines.append(
+                f"  {field} {val_summary} → {target_field}: {note}"
+            )
+            any_note = True
+
+        if not any_note:
+            return ""
+
+        return "\n".join(lines)
+
+    def format_settings_translation_block(self, targets: list[str], settings: dict) -> str:
+        """Format per-target settings translation notes into a single block.
+
+        Args:
+            targets: List of target harness names.
+            settings: Claude Code settings dict.
+
+        Returns:
+            Formatted multi-target settings translation string.
+        """
+        if not settings:
+            return ""
+
+        sections: list[str] = []
+        for target in sorted(targets):
+            section = self.explain_settings_translation(target, settings)
+            if section:
+                sections.append(section)
+
+        if not sections:
+            return ""
+
+        header = "\n" + "─" * 50 + "\nSettings Field Translation Notes"
+        footer = "─" * 50
+        return header + "\n".join(sections) + "\n" + footer
 
     def has_issues(self, report: dict) -> bool:
         """
