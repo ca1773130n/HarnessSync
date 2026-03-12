@@ -1748,3 +1748,69 @@ _2026-03-12T02:27:25.191Z_
 - The @harness annotation syntax is cleaner than the existing harness:skip=/harness:only= forms for users coming from CSS/HTML backgrounds. Supporting both forms without breaking the existing filter semantics required careful regex ordering in the line-by-line state machine.
 
 ---
+## Iteration 27
+_2026-03-12T02:45:52.994Z_
+
+### Items Attempted
+
+- **Conflict Resolution Wizard** — pass
+- **Feature Parity Gap Report** — pass
+- **Sync Profiles** — pass
+- **MCP Server Compatibility Matrix** — pass
+- **Dry-Run Preview Mode** — pass
+- **Rule Tagging for Selective Sync** — pass
+- **New Harness Onboarding Generator** — pass
+- **Settings Translation Explainer** — pass
+- **Git Pre-Commit Sync Gate** — pass
+- **Team Sync Server / Shared Config Hub** — pass
+- **Context-Aware Auto-Sync Triggers** — pass
+- **Config Snapshot Timeline** — pass
+- **Harness Override Files** — pass
+- **GitHub Actions / CI Sync Validator** — pass
+- **Natural Language Sync Filter** — pass
+- **Plugin Manifest Sync** — pass
+- **Sync Health Score Dashboard** — pass
+- **Secret Scrubbing Before Sync** — pass
+- **Multi-Workspace Broadcast Sync** — pass
+- **Auto-Generated Sync Changelog** — pass
+- **Third-Party Adapter Plugin API** — pass
+- **IDE Extension Settings Sync** — pass
+- **Unified MCP Proxy Layer** — pass
+- **Rule Effectiveness Scorer** — pass
+- **Bootstrap from Awesome-CLAUDE Repos** — pass
+- **PR Comment Sync Diff Poster** — pass
+- **Scheduled Drift Alerts** — pass
+- **Config Complexity Analyzer** — pass
+- **Universal Skill Format Standard** — pass
+- **.env-Aware MCP Config Sync** — pass
+- **Cross-Harness Benchmark Comparison** — pass
+- **Team vs Personal Config Namespacing** — pass
+- **Missing Capability Wishlist Tracker** — pass
+- **Offline Sync Queue** — pass
+- **AI-Powered Rule Suggester** — pass
+
+### Decisions Made
+
+- [object Object]
+- [object Object]
+- [object Object]
+- [object Object]
+- [object Object]
+
+### Patterns Discovered
+
+- Scrub-and-proceed is a recurring UX pattern: always offer a safe path alongside the blocking path for secret/validation checks.
+- Static knowledge dicts (ADAPTATION_REASONS, SETTINGS_FIELD_TRANSLATIONS, _KNOWN_GAPS) are the right model for per-target explanations — avoids LLM calls, stays fast and offline-capable.
+- Gate hooks vs sync-and-stage hooks serve different team cultures: gate for discipline, sync-and-stage for convenience. Both needed.
+- Content analysis (quality checks) belongs in the complexity module, not in a separate linter, to keep the scoring pipeline unified.
+- NL query dispatch should be exhaustive — every question type a user might ask should route somewhere useful, never fall through to a generic 'I don't understand'.
+
+### Takeaways
+
+- Most of the 30 items already had substantial implementations. The real gaps were: scrub mode (18), content quality (28), gate hook (9), per-field translation notes (8), and NL pattern breadth (15).
+- The from __future__ import annotations import is critical — added at top of all new code touching type hints.
+- Hook templates must use portable python detection (command -v python3 || command -v python) — hardcoded python3 breaks on some systems.
+- Tests run fast (0.05s for 14 tests) because they are pure unit tests with no I/O — keep it that way.
+- The deepeval pytest plugin conflicts with the test runner; always pass -p no:deepeval when running pytest.
+
+---
