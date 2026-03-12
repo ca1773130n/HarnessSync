@@ -1220,3 +1220,69 @@ _2026-03-11T04:38:50.004Z_
 - SSH-based remote sync is inherently fragile (network errors, host key verification, timeout) — the design uses best-effort semantics and never raises on individual file failures to avoid blocking the broader sync flow.
 
 ---
+## Iteration 19
+_2026-03-12T00:34:00.603Z_
+
+### Items Attempted
+
+- **Reverse Sync (Pull from Target)** — pass
+- **Named Sync Profiles** — pass
+- **Config Drift Detection & Alerts** — pass
+- **Team Config Sharing via Git** — pass
+- **Capability Gap Analysis Report** — pass
+- **Secret / Sensitive Value Auto-Exclusion** — pass
+- **Environment-Aware Sync (dev/staging/prod)** — pass
+- **User-Defined Transform Rules** — pass
+- **Auto-Sync on Git Branch Switch** — pass
+- **CI/CD Sync Verification Action** — pass
+- **Plugin Compatibility Matrix** — pass
+- **Interactive Sync Conflict Resolver** — pass
+- **MCP Server Portability Check** — pass
+- **Project Type Starter Templates** — pass
+- **Outbound Sync Webhooks** — pass
+- **Full Dry-Run Simulation** — pass
+- **Multi-Project Batch Sync** — pass
+- **Harness Performance Benchmark** — pass
+- **Remote Machine Sync via SSH** — pass
+- **Per-Section Partial Sync Override** — pass
+- **Visual Sync Dependency Graph** — pass
+- **Rollback Timeline UI** — pass
+- **Sync Fidelity Score** — pass
+- **CLAUDE.md Sync-Readiness Linter** — pass
+- **Community Adapter Plugin SDK** — pass
+- **Auto-Generated Sync Changelog** — pass
+- **Layered Config Inheritance** — pass
+- **README Sync Health Badge** — pass
+- **Conditional Sync Rules Engine** — pass
+- **MCP Transport Auto-Shim** — pass
+- **Pre-Commit Sync Impact Preview** — pass
+- **New Harness Onboarding Wizard** — pass
+- **MCP Server Registry Integration** — pass
+- **Shadow Sync Mode** — pass
+- **Sync Coverage Test Suite** — pass
+
+### Decisions Made
+
+- Item 7 (Environment-Aware Sync): filter_rules_for_env already existed in sync_filter.py but was dead code — no callers anywhere. Added harness_env param to SyncOrchestrator.__init__ with HARNESS_ENV env var fallback, applied it as Step 1 of the content filtering pipeline (before target tag filtering), and added --env flag to /sync command with a status line print.
+- Item 8 (User-Defined Transform Rules): Built TransformEngine as a standalone module loaded from .harnesssync-transforms JSON in project root or ~/.config/harnesssync/. Integrated as Step 3 of the rule pipeline in orchestrator (after env and target filtering). Used literal string replacement by default; regex mode is opt-in via 'scope': 'regex' to avoid accidental breakage.
+- Item 23 (Sync Fidelity Score): calculate_fidelity_score() and format_fidelity_scores() existed in CompatibilityReporter but were never called by the orchestrator. Added them to the post-sync block alongside the existing coverage score computation, stored result in results['_fidelity_report'], and displayed it in _display_results() in sync.py.
+- Item 25 (Community Adapter SDK): Created adapter_sdk.py that re-exports AdapterBase and SyncResult (single import point for adapter authors), provides community_adapter() decorator (wraps AdapterRegistry.register with name validation and builtin conflict check), AdapterValidator (static analysis + optional runtime smoke test), discover_community_adapters() scanner, and load_community_adapter() dynamic importer.
+- Item 28 (README Sync Health Badge): Created badge_generator.py with SVG generation using a character-width-estimation approach (no external deps). BadgeGenerator reads StateManager for last_sync_ts and fidelity_score, computes a status string and color code, and generates Shields.io-style flat SVG. readme_snippet() returns embeddable Markdown.
+- Item 30 (MCP Transport Auto-Shim): Created mcp_shim_generator.py. ShimGenerator.build_shim_plan() uses _needs_shim() to identify sse/http servers going to stdio-only targets (codex, aider), then generates stdlib-only Python bridge scripts that proxy JSON-RPC over HTTP/SSE to look like stdio to the harness. build_shimmed_server_config() returns a replacement server config pointing to the shim executable.
+
+### Patterns Discovered
+
+- The codebase has a recurring pattern of implementing a feature module (e.g., filter_rules_for_env, calculate_fidelity_score) but forgetting to wire it into the orchestrator or command layer. These become dead code that future iterations must discover and activate.
+- The orchestrator's rule pipeline is a linear filter chain: env filter → target tag filter → transform engine → adapter. Each step produces a new rules list. This composable pipeline design makes adding new filters straightforward.
+- Most post-sync analysis (compatibility, coverage, fidelity) follows the same pattern: compute → store in results['_key'] → format → store in results['_report_key'] → display in _display_results. This pattern is consistent and easy to extend.
+- The adapters/registry.py self-registration decorator pattern (AdapterRegistry.register) is clean and extensible — the community_adapter() wrapper just adds a validation layer on top of it without modifying the registry itself.
+
+### Takeaways
+
+- The codebase is very feature-rich but has a significant 'last mile' problem: many features are implemented but not connected to user-facing entry points. Future iterations should audit for orphaned modules and wire them in.
+- Adding harness_env to SyncOrchestrator required touching both orchestrator/__init__ (param + self.harness_env) and sync.py (argparse + orchestrator construction). This two-file coupling is a natural pattern for all new orchestrator params.
+- The transform engine deliberately avoids being integrated into the adapter layer (where it could run after adapter translation) and instead runs on raw rule content before adapters. This preserves adapter neutrality but means transforms must be written for the source Markdown format, not the adapter output format.
+- SVG badge generation without external dependencies requires approximating font metrics. The character-width table approach works for monospace-ish badges but would produce slightly off sizing for names with many wide characters (W, M). A future iteration could switch to a lookup table from an actual font.
+- The shim generator only supports sse-to-stdio and http-to-stdio. WebSocket shimming was deliberately omitted because it requires asyncio and is harder to express as a simple synchronous script.
+
+---

@@ -305,15 +305,23 @@ class SyncOrchestrator:
             self.logger.warn(f"MCP reachability check failed: {e}")
 
         # --- PRE-SYNC: SECRET DETECTION ---
-        # Run secret detection on MCP env vars (before any writes)
+        # Scan MCP env vars AND CLAUDE.md/rules files before any writes.
+        # Item 4: catches API keys pasted into markdown rules, not just MCP env.
         try:
             secret_detector = SecretDetector()
+
+            # Scan MCP server environment variables
             detections = secret_detector.scan_mcp_env(source_data.get('mcp_servers', {}))
+
+            # Also scan CLAUDE.md and related config files for inline secrets
+            if self.project_dir:
+                file_detections = secret_detector.scan_config_files(self.project_dir)
+                detections = detections + file_detections
 
             if secret_detector.should_block(detections, self.allow_secrets):
                 # Block sync - return early with warning
                 formatted_warnings = secret_detector.format_warnings(detections)
-                self.logger.warn("Sync blocked: secrets detected in environment variables")
+                self.logger.warn("Sync blocked: secrets detected in config files or environment variables")
                 return {
                     '_blocked': True,
                     '_reason': 'secrets_detected',
