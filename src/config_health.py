@@ -84,12 +84,19 @@ class ConfigHealthReport:
 class ConfigHealthChecker:
     """Analyzes Claude Code config and produces a health report."""
 
-    def check(self, source_data: dict, project_dir: Path | None = None) -> ConfigHealthReport:
+    def check(
+        self,
+        source_data: dict,
+        project_dir: Path | None = None,
+        cc_home: Path | None = None,
+    ) -> ConfigHealthReport:
         """Run all health checks.
 
         Args:
             source_data: Output of SourceReader.discover_all()
             project_dir: Project root (optional, for file size checks)
+            cc_home: Claude Code home directory (optional, for freshness checks).
+                     Defaults to Path.home() / ".claude".
 
         Returns:
             ConfigHealthReport
@@ -99,6 +106,7 @@ class ConfigHealthChecker:
         report.add(self._check_portability(source_data))
         report.add(self._check_security(source_data))
         report.add(self._check_size(source_data, project_dir))
+        report.add(self._check_freshness(project_dir, cc_home))
         return report
 
     def format_report(self, report: ConfigHealthReport) -> str:
@@ -226,6 +234,94 @@ class ConfigHealthChecker:
 
         label = _label(score)
         return HealthDimension("size", score, label, recs)
+
+    def _check_freshness(
+        self,
+        project_dir: Path | None,
+        cc_home: Path | None = None,
+    ) -> HealthDimension:
+        """Score config freshness — how recently were target harness files updated.
+
+        Checks the modification times of known target harness config files
+        relative to the source CLAUDE.md. A score of 100 means all detected
+        target configs are at least as recent as the source. Scores drop when
+        target configs are significantly older than the source, indicating drift.
+
+        A missing source CLAUDE.md or no target harness files means we can't
+        assess freshness, so we return 100 (no evidence of staleness).
+
+        Args:
+            project_dir: Project root directory.
+            cc_home: Claude Code home dir (defaults to ~/.claude).
+
+        Returns:
+            HealthDimension with score, label, and recommendations.
+        """
+        import time as _time
+
+        score = 100
+        recs: list[str] = []
+
+        if not project_dir:
+            return HealthDimension("freshness", score, "good", recs)
+
+        # Determine source CLAUDE.md mtime
+        source_mtime: float | None = None
+        for source_candidate in [
+            project_dir / "CLAUDE.md",
+            (cc_home or Path.home() / ".claude") / "CLAUDE.md",
+        ]:
+            if source_candidate.is_file():
+                source_mtime = source_candidate.stat().st_mtime
+                break
+
+        if source_mtime is None:
+            return HealthDimension("freshness", score, "good", recs)
+
+        # Known target harness config files relative to project dir
+        _HARNESS_CONFIG_PATHS = [
+            project_dir / "AGENTS.md",                       # Codex
+            project_dir / ".gemini" / "GEMINI.md",           # Gemini
+            project_dir / ".opencode" / "instructions.md",   # OpenCode
+            project_dir / ".cursor" / "rules",               # Cursor rules dir
+            project_dir / "CONVENTIONS.md",                  # Aider
+            project_dir / ".windsurfrules",                  # Windsurf
+        ]
+
+        stale_targets: list[str] = []
+        now = _time.time()
+
+        # Threshold: target config is "stale" if it's more than 1 hour older than source
+        STALE_THRESHOLD_SECS = 3600
+
+        for path in _HARNESS_CONFIG_PATHS:
+            if not path.exists():
+                continue
+            target_mtime = path.stat().st_mtime
+            age_vs_source = source_mtime - target_mtime
+            if age_vs_source > STALE_THRESHOLD_SECS:
+                stale_targets.append(path.name)
+
+        # Score: -15 per stale target, floor at 40
+        if stale_targets:
+            penalty = min(60, len(stale_targets) * 15)
+            score = max(40, 100 - penalty)
+            recs.append(
+                f"{len(stale_targets)} target config file(s) appear stale "
+                f"({', '.join(stale_targets)}) — run /sync to bring them up to date"
+            )
+
+        # Additionally check source mtime age (is CLAUDE.md itself very old?)
+        source_age_days = (now - source_mtime) / 86400
+        if source_age_days > 90:
+            score = min(score, 70)
+            recs.append(
+                f"CLAUDE.md hasn't been modified in {int(source_age_days)} days — "
+                "consider reviewing rules for relevance"
+            )
+
+        label = _label(score)
+        return HealthDimension("freshness", score, label, recs)
 
 
 def _label(score: int) -> str:

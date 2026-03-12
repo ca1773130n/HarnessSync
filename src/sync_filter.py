@@ -79,6 +79,22 @@ _HARNESS_ONLY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Block-level exclude tag (item 30 — Harness-Specific Section Tagging):
+#   <!-- harness:exclude:gemini -->   — open; section dropped for gemini only
+#   <!-- /harness:exclude:gemini -->  — close
+# This is a semantic alias for the <!-- harness:skip=gemini --> inline form but
+# works as a block-level open/close pair for multi-line exclusions.
+# Unlike harness:skip (which drops just one line), this drops everything between
+# the open and close tags for the named target while keeping it for all others.
+_HARNESS_EXCLUDE_OPEN_RE = re.compile(
+    r"<!--\s*harness:exclude:([a-z0-9_-]+)\s*-->",
+    re.IGNORECASE,
+)
+_HARNESS_EXCLUDE_CLOSE_RE = re.compile(
+    r"<!--\s*/harness:exclude:([a-z0-9_-]+)\s*-->",
+    re.IGNORECASE,
+)
+
 # Compliance-pinned block tags (item 16):
 #   <!-- compliance:pinned -->   — open block; content is ALWAYS included in all targets
 #   <!-- /compliance:pinned -->  — close block
@@ -143,6 +159,10 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
     # compliance_pinned: True when inside <!-- compliance:pinned --> block.
     # Content in this block bypasses ALL other filter logic.
     compliance_pinned: bool = False
+    # harness_exclude_target: set of targets currently in an exclude block.
+    # Content inside <!-- harness:exclude:X --> ... <!-- /harness:exclude:X -->
+    # is dropped for target X and included for all other targets.
+    harness_exclude_targets: set[str] = set()
 
     for line in lines:
         # --- Check for compliance:pinned open/close tags ---
@@ -174,6 +194,21 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
         if harness_target is not None:
             if harness_target == target_lower:
                 output.append(line)
+            continue
+
+        # --- Check for harness:exclude:X open/close block tags ---
+        exc_close_m = _HARNESS_EXCLUDE_CLOSE_RE.search(line)
+        if exc_close_m:
+            harness_exclude_targets.discard(exc_close_m.group(1).lower())
+            continue  # Don't emit the tag line
+
+        exc_open_m = _HARNESS_EXCLUDE_OPEN_RE.search(line)
+        if exc_open_m:
+            harness_exclude_targets.add(exc_open_m.group(1).lower())
+            continue  # Don't emit the tag line
+
+        # --- If inside a harness:exclude block for this target, drop the line ---
+        if target_lower in harness_exclude_targets:
             continue
 
         # --- Check for no-sync / sync:skip shorthands ---

@@ -246,6 +246,146 @@ _register(
 )
 
 
+# Git workflow rules
+_register(
+    r"git|commit|branch|pr|pull.request|merge|rebase",
+    BehaviorRule(
+        category="git",
+        title="Git Workflow Standards",
+        rule_text=(
+            "- Use conventional commit messages: feat/fix/chore/docs/test/refactor.\n"
+            "- One logical change per commit — do not bundle unrelated changes.\n"
+            "- Never force-push to main/master without explicit instruction.\n"
+            "- Prefer rebase over merge for integrating upstream changes."
+        ),
+        harness_notes={
+            "aider": "Aider generates its own commit messages — conventional commit "
+                     "format rules have limited effect; add --commit-prompt for control",
+            "cursor": "Cursor does not manage git commits natively",
+        },
+        confidence="high",
+    ),
+)
+
+# Package manager restrictions
+_register(
+    r"npm|yarn|pnpm|pip|uv|poetry|package.manager|install.package",
+    BehaviorRule(
+        category="package_management",
+        title="Package Manager Restrictions",
+        rule_text=(
+            "- Always use the project's established package manager (check package.json "
+            "or pyproject.toml for the lock file to identify it).\n"
+            "- Never mix package managers in the same project.\n"
+            "- Propose new dependencies before installing — do not install silently.\n"
+            "- Prefer pinned versions over floating ranges for production dependencies."
+        ),
+        confidence="high",
+    ),
+)
+
+# File creation restrictions
+_register(
+    r"no.new.file|don.t.create|avoid.creat|create.only.when|new.file",
+    BehaviorRule(
+        category="file_management",
+        title="File Creation Policy",
+        rule_text=(
+            "- Prefer editing existing files over creating new ones.\n"
+            "- Do not create new files unless explicitly required by the task.\n"
+            "- When creating a new file, explain the rationale in the commit message.\n"
+            "- Never create markdown stub files or placeholder READMEs unless asked."
+        ),
+        confidence="high",
+    ),
+)
+
+# Environment variables
+_register(
+    r"env.var|environment.variable|\.env|dotenv|never.hardcode.key|no.hardcode",
+    BehaviorRule(
+        category="env_vars",
+        title="Environment Variable Usage",
+        rule_text=(
+            "- Never hardcode API keys, passwords, or tokens — use environment variables.\n"
+            "- Reference secrets via `process.env.VAR_NAME` or equivalent for the language.\n"
+            "- Do not commit `.env` files — keep them in `.gitignore`.\n"
+            "- Add required env vars to `.env.example` with placeholder values."
+        ),
+        confidence="high",
+    ),
+)
+
+# Code review / PR readiness
+_register(
+    r"code.review|pr.ready|pull.request.ready|review.checklist|before.commit",
+    BehaviorRule(
+        category="code_review",
+        title="Pre-Commit / PR Readiness",
+        rule_text=(
+            "- Run linter and formatter before committing (`npm run lint`, `ruff check`).\n"
+            "- Ensure all tests pass locally before creating a PR.\n"
+            "- Self-review the diff for unintended changes before pushing.\n"
+            "- Link the PR to the relevant issue or ticket."
+        ),
+        confidence="medium",
+    ),
+)
+
+# API design
+_register(
+    r"api.design|rest.api|endpoint|versioning|backwards.compat|breaking.change",
+    BehaviorRule(
+        category="api_design",
+        title="API Design Standards",
+        rule_text=(
+            "- Follow RESTful conventions: GET for reads, POST for creates, "
+            "PUT/PATCH for updates, DELETE for removes.\n"
+            "- Version APIs via URL prefix (`/v1/`) or header — never remove versions "
+            "without a deprecation period.\n"
+            "- Return consistent error shapes: `{error: string, code: string}`.\n"
+            "- Document breaking changes explicitly before implementing."
+        ),
+        confidence="medium",
+    ),
+)
+
+# Database / migrations
+_register(
+    r"database|migration|schema|sql|query|orm|never.drop|no.drop",
+    BehaviorRule(
+        category="database",
+        title="Database and Migration Safety",
+        rule_text=(
+            "- Never run destructive migrations (DROP TABLE, DELETE without WHERE) "
+            "without explicit instruction.\n"
+            "- All schema changes must have a corresponding migration file.\n"
+            "- Prefer additive migrations — add columns rather than modify existing ones.\n"
+            "- Test migrations against a copy of production data before merging."
+        ),
+        confidence="high",
+    ),
+)
+
+# Monorepo / workspace awareness
+_register(
+    r"monorepo|workspace|package.boundary|cross.package|shared.lib",
+    BehaviorRule(
+        category="monorepo",
+        title="Monorepo Boundaries",
+        rule_text=(
+            "- Do not import across package boundaries without updating "
+            "the dependency declarations.\n"
+            "- Shared logic belongs in the designated shared package — "
+            "do not duplicate it in consumers.\n"
+            "- Changes to shared packages require review from all consuming teams.\n"
+            "- Run workspace-wide lint/test after any shared package change."
+        ),
+        confidence="medium",
+    ),
+)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Generator
 # ──────────────────────────────────────────────────────────────────────────────

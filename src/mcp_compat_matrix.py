@@ -455,3 +455,89 @@ class McpCompatMatrix:
             if info.get("transferability") == McpTransferability.NATIVE:
                 native.append(server.server_name)
         return sorted(native)
+
+    def portability_score(self, target: str) -> int:
+        """Return a 1-5 portability score for MCP servers transferring to a target.
+
+        Scores each server by its transferability to the target harness and
+        averages them into a 1-5 integer score suitable for display alongside
+        the compatibility table.
+
+        Scoring weights per server:
+            NATIVE      = 1.0  (no friction)
+            TRANSLATE   = 0.75 (minor config change)
+            BRIDGED     = 0.50 (shim required)
+            MANUAL      = 0.25 (significant manual setup)
+            UNSUPPORTED = 0.0  (cannot transfer)
+
+        Final scale:
+            5 = >= 90% weighted average (near-perfect portability)
+            4 = >= 70%
+            3 = >= 50%
+            2 = >= 25%
+            1 = < 25% (most servers blocked or need manual setup)
+
+        If no servers are configured, returns 5 (vacuously portable).
+
+        Args:
+            target: Target harness name (e.g. "codex", "aider").
+
+        Returns:
+            Integer 1-5 portability score.
+        """
+        _weights = {
+            McpTransferability.NATIVE:       1.0,
+            McpTransferability.URL_TRANSLATE: 0.75,
+            McpTransferability.BRIDGED:      0.50,
+            McpTransferability.MANUAL:       0.25,
+            McpTransferability.UNSUPPORTED:  0.0,
+        }
+
+        report = self.analyze()
+        if not report.servers:
+            return 5
+
+        total_weight = 0.0
+        for server in report.servers:
+            transferability = server.per_harness.get(
+                target, {}
+            ).get("transferability", McpTransferability.UNSUPPORTED)
+            total_weight += _weights.get(transferability, 0.0)
+
+        avg = total_weight / len(report.servers)
+
+        if avg >= 0.90:
+            return 5
+        elif avg >= 0.70:
+            return 4
+        elif avg >= 0.50:
+            return 3
+        elif avg >= 0.25:
+            return 2
+        return 1
+
+    def format_portability_scores(self) -> str:
+        """Return a formatted table of portability scores per harness.
+
+        Produces a concise one-line-per-harness summary useful for a quick
+        overview before diving into the full compatibility matrix.
+
+        Returns:
+            Multi-line string with harness name and 1-5 score (with stars).
+        """
+        report = self.analyze()
+        if not report.harnesses:
+            return "No harnesses configured."
+
+        lines = ["MCP Portability Scores", "=" * 30, ""]
+        for harness in report.harnesses:
+            score = self.portability_score(harness)
+            stars = "★" * score + "☆" * (5 - score)
+            label = {5: "excellent", 4: "good", 3: "fair", 2: "limited", 1: "poor"}.get(
+                score, "unknown"
+            )
+            lines.append(f"  {harness:<12} {stars}  {score}/5  [{label}]")
+
+        lines.append("")
+        lines.append(f"Based on {len(report.servers)} configured MCP server(s).")
+        return "\n".join(lines)

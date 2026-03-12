@@ -603,3 +603,117 @@ def translate_rule_with_ai_fallback(
         return ai_result, True
 
     return regex_translated, False
+
+
+# ---------------------------------------------------------------------------
+# Translation Annotation Comments (Item 29)
+# ---------------------------------------------------------------------------
+#
+# When syncing skills and agents to target harnesses, optionally inject
+# comments explaining *what* was translated and *why*, so users who open
+# AGENTS.md or Codex config directly understand why it looks the way it does.
+# This turns the synced output from a black box into self-documenting config.
+
+
+def generate_translation_annotation(
+    original: str,
+    translated: str,
+    skill_name: str,
+    target_name: str,
+) -> str:
+    """Generate a comment block documenting the translation decisions applied.
+
+    The annotation is designed to be prepended to the translated skill content
+    in a target harness file. It explains:
+    - The source skill name
+    - What CC-specific constructs were rewritten
+    - Any limitations (capabilities dropped entirely)
+
+    Args:
+        original: Raw source skill content (from Claude Code).
+        translated: Content after translate_skill_content().
+        skill_name: Name of the skill (for the comment header).
+        target_name: Target harness name.
+
+    Returns:
+        A multi-line comment string ready to be prepended to translated content.
+        Returns empty string if there is nothing worth documenting (clean copy).
+    """
+    changes: list[str] = []
+
+    # Detect tool reference rewrites
+    orig_tool_refs = _INLINE_TOOL_RE.findall(original)
+    trans_tool_refs = _INLINE_TOOL_RE.findall(translated)
+    dropped_tools = len(orig_tool_refs) - len(trans_tool_refs)
+    if dropped_tools > 0:
+        tool_names = list(dict.fromkeys(m[1] for m in orig_tool_refs))  # unique, ordered
+        changes.append(
+            f"Rewrote {dropped_tools} Claude Code tool reference(s): "
+            + ", ".join(tool_names[:5])
+            + (" ..." if len(tool_names) > 5 else "")
+        )
+
+    # Detect XML tool-call block removal
+    xml_orig = _TOOL_CALL_BLOCK_RE.findall(original)
+    if xml_orig:
+        changes.append(f"Removed {len(xml_orig)} XML tool-call block(s) (CC-only syntax)")
+
+    # Detect frontmatter key stripping
+    fm_orig = _count_frontmatter_keys(original)
+    fm_trans = _count_frontmatter_keys(translated)
+    if fm_orig > fm_trans:
+        changes.append(
+            f"Stripped {fm_orig - fm_trans} CC-specific frontmatter key(s) "
+            f"(e.g. 'allowed-tools')"
+        )
+
+    # Detect MCP references still present in translated content
+    mcp_pattern = re.compile(r"mcp__\w+__\w+")
+    if mcp_pattern.search(translated):
+        changes.append(
+            "MCP tool references remain — ensure these servers are configured "
+            f"in {target_name}"
+        )
+
+    # If nothing changed, no annotation is needed
+    if not changes:
+        return ""
+
+    lines = [
+        f"<!-- Translated from Claude Code skill: {skill_name}",
+        f"     Target: {target_name}",
+        "     Translation decisions:",
+    ]
+    for change in changes:
+        lines.append(f"     - {change}")
+    lines.append("-->")
+
+    return "\n".join(lines) + "\n"
+
+
+def annotate_translated_content(
+    original: str,
+    translated: str,
+    skill_name: str,
+    target_name: str,
+) -> str:
+    """Return translated content with a translation annotation comment prepended.
+
+    Convenience wrapper: if no annotation is needed (clean copy), returns
+    translated content unchanged. Otherwise, prepends the annotation block.
+
+    Args:
+        original: Raw source content.
+        translated: Content after translation.
+        skill_name: Skill/agent name for the annotation header.
+        target_name: Target harness name.
+
+    Returns:
+        Annotated content string.
+    """
+    annotation = generate_translation_annotation(
+        original, translated, skill_name, target_name
+    )
+    if not annotation:
+        return translated
+    return annotation + "\n" + translated

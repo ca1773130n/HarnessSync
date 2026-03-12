@@ -1414,3 +1414,70 @@ _2026-03-12T01:05:01.981Z_
 - The compliance:pinned tag in sync_filter bypasses sync-tag filtering but not section-level filtering (only_sections/skip_sections in the orchestrator). A future PR should wire extract_compliance_pinned() into the orchestrator so compliance content survives even when the rules section is explicitly skipped.
 
 ---
+## Iteration 22
+_2026-03-12T01:20:06.027Z_
+
+### Items Attempted
+
+- **Config Conflict Resolution Wizard** — pass
+- **Sync Preview / Dry Run Mode** — pass
+- **New Harness Onboarding Flow** — pass
+- **MCP Server Health Dashboard** — pass
+- **Skill Compatibility Matrix** — pass
+- **Named Sync Profiles** — pass
+- **Human-Readable Sync Changelog** — pass
+- **Team Sync Server Mode** — pass
+- **Secret Leak Prevention Scanner** — pass
+- **Cross-Harness Rules Deduplication** — pass
+- **Agent Capability Fallback Mapping** — pass
+- **Git Commit Auto-Sync Hook** — pass
+- **Harness Version Compatibility Checker** — pass
+- **Natural Language Sync Query** — pass
+- **Starter Config Template Library** — pass
+- **Sync Regression Detection** — pass
+- **Cross-Harness Context Bridging** — pass
+- **Permission Model Translator** — pass
+- **Sync Impact Preview for PRs** — pass
+- **Harness Cost & Token Usage Comparison** — pass
+- **Plugin Sync Marketplace Connector** — pass
+- **Incremental Sync Rollout** — pass
+- **Daily Sync Health Digest** — pass
+- **Offline Sync Queue** — pass
+- **Config Time Machine** — pass
+- **Multi-Project Sync Dashboard** — pass
+- **AI Rules Quality Optimizer** — pass
+- **Sync Annotation Comments in Config** — pass
+- **MCP Server Catalog & Discovery** — pass
+- **Rules Coverage Heatmap** — pass
+- **Config-as-Code Export** — pass
+- **Harness Plugin Gap Report** — pass
+
+### Decisions Made
+
+- Added restore_to() to ConfigTimeMachine — the docstring listed it as a core operation but it was completely missing. Used a temporary directory approach to feed historical CLAUDE.md content to SyncOrchestrator without touching the real project source files.
+- Added take_snapshot() and list_snapshots() to ConfigTimeMachine as a non-git fallback. Power users without git need a way to capture and restore config state; the git-only approach was too narrow.
+- Added format_snapshots() alongside format_timeline() to keep the API consistent — every data method has a paired format method.
+- Added coverage_heatmap() + format_heatmap() to RuleUsageTracker rather than creating a new file. The existing analytics() method already aggregated usage data; heatmap() just normalizes and classifies it. Kept the heat levels semantic ('hot/warm/cool/cold') rather than numeric to make the output actionable.
+- Added bootstrap_new_harness() and prompt_bootstrap_new_harnesses() to harness_detector.py rather than a new file — the detector already had detect_new_harnesses(); bootstrapping is the natural next step after detection.
+- Added query_sync_state() to NLConfigGenerator with separate _query_* helpers per domain (mcp, rules, skills, compatibility, availability). Chose a keyword-dispatch approach over NLP to keep it fast, offline-capable, and deterministic — consistent with the existing parse_exclusion() philosophy.
+- Added MultiProjectDashboard to harness_adoption.py since it's conceptually 'adoption/status at scale'. Scanning heuristic uses .harnesssync config file OR .git + CLAUDE.md presence to identify managed projects without requiring a registry.
+- Added canary_sync() to SyncOrchestrator rather than a separate file. The orchestrator already manages all sync coordination; canary is just a phased invocation of sync_all() with the same orchestrator. Used cli_only_targets to restrict each phase.
+- Added translate_permissions() + format_translation() to PermissionDiffReporter. The existing generate() method only reported mismatches; translate() actually produces the target-native config fragments. Added secret-key filtering in env var translation to prevent accidental token leakage during permission migration.
+
+### Patterns Discovered
+
+- The codebase follows a consistent pattern: data class + collector class + format_*() method. Every new feature should follow this triple.
+- Many docstrings listed operations that weren't implemented (e.g., restore_to in config_time_machine.py). The module-level docstrings served as reliable TODO lists.
+- The _FEATURE_SUPPORT dict in harness_comparison.py is reused by multiple modules (nl_config_generator, skill_compatibility). It's a de-facto feature matrix — future items should consult it before building their own.
+- Interactive methods consistently check sys.stdin.isatty() before prompting, with sensible non-interactive defaults. This pattern should be followed for all new user-facing interactive features.
+- cli_only_targets / cli_skip_targets in SyncOrchestrator is the right lever for restricting scope — using it for canary sync is cleaner than subclassing.
+
+### Takeaways
+
+- The permission translation gap (item 18) is the most practically valuable addition: users migrating from Claude Code to Gemini lose their tool restrictions silently. The translate_permissions() output gives them a concrete config snippet to paste.
+- The MultiProjectDashboard scan heuristic may produce false positives (any git repo with CLAUDE.md). A future improvement would be to track projects in a registry file (~/.harnesssync/projects.json) rather than scanning file system.
+- canary_sync() in orchestrator relies on list_targets() from AdapterRegistry for the rollout phase; if that method doesn't exist on all adapter registry implementations, it will fall back gracefully to an empty remaining list.
+- The natural language query_sync_state() approach (keyword dispatch + static analysis) is fast but limited. For 'is file-system MCP synced to Cursor?' style questions that need runtime config inspection, the method delegates to SourceReader — this could fail if called outside a project context.
+- The coverage heatmap format_heatmap() uses emoji (🔥🌡❄⬛) which may not render in all terminals. A future --ascii flag could substitute text labels for environments without Unicode support.
+
+---

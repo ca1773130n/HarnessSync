@@ -215,6 +215,144 @@ def check_transport_support(server_name: str, config: dict, target: str) -> tupl
     )
 
 
+# ---------------------------------------------------------------------------
+# Cross-Harness Env Var Name Mapping (Item 25)
+# ---------------------------------------------------------------------------
+#
+# Different AI coding harnesses use different environment variable names for
+# the same semantic purpose. When syncing rules or instructions that mention
+# specific env var names, we can translate them to the correct name for each
+# target harness so the synced output is immediately actionable.
+#
+# Format: {canonical_name: {harness: harness_specific_name}}
+# Canonical names follow Claude Code / Anthropic conventions.
+
+HARNESS_ENV_VAR_REMAP: dict[str, dict[str, str]] = {
+    # Primary API authentication key
+    "ANTHROPIC_API_KEY": {
+        "codex":    "ANTHROPIC_API_KEY",   # Codex supports Anthropic directly
+        "gemini":   "GEMINI_API_KEY",      # Gemini CLI uses its own key name
+        "opencode": "ANTHROPIC_API_KEY",
+        "cursor":   "ANTHROPIC_API_KEY",
+        "aider":    "ANTHROPIC_API_KEY",
+        "windsurf": "ANTHROPIC_API_KEY",
+    },
+    # Default model selection
+    "CLAUDE_MODEL": {
+        "codex":    "OPENAI_DEFAULT_MODEL",
+        "gemini":   "GEMINI_MODEL",
+        "opencode": "OPENCODE_MODEL",
+        "cursor":   "CURSOR_DEFAULT_MODEL",
+        "aider":    "AIDER_MODEL",
+        "windsurf": "WINDSURF_MODEL",
+    },
+    # Base URL for API proxy / custom endpoints
+    "ANTHROPIC_BASE_URL": {
+        "codex":    "OPENAI_BASE_URL",
+        "gemini":   "GEMINI_API_BASE",
+        "opencode": "ANTHROPIC_BASE_URL",
+        "cursor":   "OPENAI_API_BASE",
+        "aider":    "OPENAI_API_BASE",
+        "windsurf": "ANTHROPIC_BASE_URL",
+    },
+    # Disable streaming (useful in CI)
+    "ANTHROPIC_STREAMING": {
+        "codex":    "OPENAI_STREAM",
+        "gemini":   "GEMINI_STREAMING",
+        "opencode": "ANTHROPIC_STREAMING",
+        "cursor":   "CURSOR_STREAMING",
+        "aider":    "AIDER_STREAM",
+        "windsurf": "WINDSURF_STREAMING",
+    },
+    # Max token budget
+    "ANTHROPIC_MAX_TOKENS": {
+        "codex":    "OPENAI_MAX_TOKENS",
+        "gemini":   "GEMINI_MAX_OUTPUT_TOKENS",
+        "opencode": "ANTHROPIC_MAX_TOKENS",
+        "cursor":   "CURSOR_MAX_TOKENS",
+        "aider":    "AIDER_MAX_TOKENS",
+        "windsurf": "WINDSURF_MAX_TOKENS",
+    },
+}
+
+# Reverse map: harness-specific name -> canonical name
+_REVERSE_REMAP: dict[str, dict[str, str]] = {}
+for _canonical, _per_harness in HARNESS_ENV_VAR_REMAP.items():
+    for _harness, _name in _per_harness.items():
+        _REVERSE_REMAP.setdefault(_harness, {})[_name] = _canonical
+
+
+def translate_env_var_names_in_text(text: str, target: str) -> tuple[str, list[str]]:
+    """Rewrite canonical env var names in text content for a specific target harness.
+
+    When CLAUDE.md instructions mention environment variable names (e.g.,
+    "set ANTHROPIC_API_KEY"), this function rewrites them to the name the
+    target harness expects, so the synced output is immediately actionable.
+
+    Only rewrites names that appear as standalone tokens (word boundaries) to
+    avoid false positives in code examples or prose.
+
+    Args:
+        text: Rules/instructions text that may mention env var names.
+        target: Target harness name (e.g. "gemini", "codex").
+
+    Returns:
+        Tuple of (translated_text, list_of_replacements_made).
+        replacements_made contains human-readable strings describing each change.
+    """
+    if not text:
+        return text, []
+
+    replacements: list[str] = []
+    result = text
+
+    for canonical, per_harness in HARNESS_ENV_VAR_REMAP.items():
+        target_name = per_harness.get(target)
+        if not target_name or target_name == canonical:
+            continue  # No rename needed for this target
+
+        # Replace whole-word occurrences only (avoid partial matches)
+        pattern = re.compile(r'\b' + re.escape(canonical) + r'\b')
+        if pattern.search(result):
+            result = pattern.sub(target_name, result)
+            replacements.append(f"{canonical} -> {target_name}")
+
+    return result, replacements
+
+
+def get_canonical_env_var_name(harness_name: str, harness: str) -> str | None:
+    """Return the canonical (Claude Code) name for a harness-specific env var.
+
+    Useful for reverse-translating harness configs back to CLAUDE.md format.
+
+    Args:
+        harness_name: Env var name as used in the target harness.
+        harness: Target harness name.
+
+    Returns:
+        Canonical name if found, or None if not in the mapping.
+    """
+    return _REVERSE_REMAP.get(harness, {}).get(harness_name)
+
+
+def list_env_var_mappings(target: str) -> list[tuple[str, str]]:
+    """Return all env var name changes that would apply when syncing to target.
+
+    Args:
+        target: Target harness name.
+
+    Returns:
+        List of (canonical_name, target_name) tuples for vars that change names.
+        Empty list if no renames are needed for this target.
+    """
+    result = []
+    for canonical, per_harness in HARNESS_ENV_VAR_REMAP.items():
+        target_name = per_harness.get(target)
+        if target_name and target_name != canonical:
+            result.append((canonical, target_name))
+    return result
+
+
 if __name__ == "__main__":
     # Inline sanity tests
 
