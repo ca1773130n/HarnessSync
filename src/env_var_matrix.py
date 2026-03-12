@@ -25,6 +25,7 @@ Or from the CLI:
 import os
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 
 class EnvSupport(str, Enum):
@@ -485,3 +486,75 @@ def check_env_portability(
                 ))
 
     return report
+
+
+def scan_project_env_vars(
+    project_dir: Path,
+    targets: list[str] | None = None,
+    current_env: dict[str, str] | None = None,
+) -> EnvPortabilityReport:
+    """Auto-discover project config files and scan them for env var portability issues.
+
+    Unlike ``check_env_portability()`` (which requires callers to extract text
+    snippets manually), this function discovers the canonical config files itself:
+      - CLAUDE.md / CLAUDE.local.md — rule text that may reference ${VAR}
+      - .mcp.json / .claude/mcp.json — MCP server env fields
+      - .harnesssync — project-level config overrides
+
+    This implements the *Environment Variable Audit* feature (item 12): scan
+    synced configs for hardcoded env var names or secrets that may not exist
+    in target environments, and flag them with suggested per-harness overrides.
+
+    Args:
+        project_dir:  Project root directory (Path object).
+        targets:      Harness names to check. Defaults to all known targets.
+        current_env:  If provided, only report vars that are actually set in
+                      this environment. Pass None to report all referenced vars.
+
+    Returns:
+        EnvPortabilityReport aggregating issues across all discovered files.
+    """
+    import json as _json_local
+
+    config_texts: dict[str, str] = {}
+
+    # --- Rules files ---
+    for rules_candidate in ("CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md"):
+        rules_path = project_dir / rules_candidate
+        if rules_path.is_file():
+            try:
+                config_texts[rules_candidate] = rules_path.read_text(encoding="utf-8")
+            except OSError:
+                pass
+
+    # --- MCP config files: extract env field values ---
+    for mcp_candidate in (".mcp.json", ".claude/mcp.json"):
+        mcp_path = project_dir / mcp_candidate
+        if mcp_path.is_file():
+            try:
+                mcp_data = _json_local.loads(mcp_path.read_text(encoding="utf-8"))
+            except (OSError, _json_local.JSONDecodeError):
+                continue
+            for server_name, server_cfg in mcp_data.get("mcpServers", {}).items():
+                env_dict = server_cfg.get("env", {})
+                for env_key, env_val in env_dict.items():
+                    if isinstance(env_val, str):
+                        label = f"{mcp_candidate} > {server_name} > env.{env_key}"
+                        config_texts[label] = env_val
+                # Also scan command/args strings for inline $VAR references
+                cmd = server_cfg.get("command", "")
+                if isinstance(cmd, str) and _ENV_REF_RE.search(cmd):
+                    config_texts[f"{mcp_candidate} > {server_name} > command"] = cmd
+                for i, arg in enumerate(server_cfg.get("args", [])):
+                    if isinstance(arg, str) and _ENV_REF_RE.search(arg):
+                        config_texts[f"{mcp_candidate} > {server_name} > args[{i}]"] = arg
+
+    # --- .harnesssync project config ---
+    hs_path = project_dir / ".harnesssync"
+    if hs_path.is_file():
+        try:
+            config_texts[".harnesssync"] = hs_path.read_text(encoding="utf-8")
+        except OSError:
+            pass
+
+    return check_env_portability(config_texts, targets=targets, current_env=current_env)

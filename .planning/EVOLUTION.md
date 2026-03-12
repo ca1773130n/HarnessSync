@@ -2350,3 +2350,68 @@ _2026-03-12T04:58:10.422Z_
 - A shared TARGETS constant across modules would eliminate the pattern where adding a new harness requires updating 6-8 separate files.
 
 ---
+## Iteration 36
+_2026-03-12T05:09:13.244Z_
+
+### Items Attempted
+
+- **Tag-Based Selective Sync** — pass
+- **Per-Harness Rule Overrides** — pass
+- **Import From Other Harnesses** — pass
+- **Cross-Machine Config Sync** — pass
+- **Team Config Bundles** — pass
+- **Community Rules Marketplace** — pass
+- **Semantic Rule Translation** — pass
+- **Duplicate Rule Detector** — pass
+- **Drift Alert Notifications** — pass
+- **Config Quality Score** — pass
+- **New Harness Auto-Detection** — pass
+- **Config Change Timeline** — pass
+- **MCP Server Discovery Browser** — pass
+- **Rule Inheritance Hierarchy** — pass
+- **Unified Dotfiles Export** — pass
+- **Onboarding Wizard** — pass
+- **Section-Level Incremental Sync** — pass
+- **Config Sandbox Testing** — pass
+- **Capability Gap Analysis** — pass
+- **MCP Server Health Monitor** — pass
+- **CI/CD Sync Action** — pass
+- **Auto-Sync on Git Commit** — pass
+- **Cross-Harness Session Handoff** — pass
+- **Encrypted Secret Rules** — pass
+- **PR Config Diff Comment Bot** — pass
+- **Rule Effectiveness Feedback Loop** — pass
+- **Skill Dependency Visualizer** — pass
+- **Context-Aware Config Profiles** — pass
+- **Rollback With Diff Preview** — pass
+- **MCP Compatibility Matrix** — pass
+- **Natural Language Rule Writer** — pass
+- **Harness Update Tracker** — pass
+- **New Project Bootstrap** — pass
+- **Interactive Dry-Run Mode** — pass
+- **Sync Conflict Resolution Flow** — pass
+
+### Decisions Made
+
+- Implemented inline harness annotation parsing as a module-level function in source_reader.py so it can be used both as a standalone utility and as a SourceReader method — avoids threading it through every adapter separately
+- Quality score uses a simple deduction-from-100 model (structural issues -10, portability -5, duplicates -3) rather than a weighted average, making it easy to reason about what hurts your score
+- Rollback diff preview uses difflib.unified_diff against the *current* working directory files rather than the previous backup, so users see exactly what restore would undo
+- Session handoff prompt uses fixed-width separator lines instead of markdown headings so it renders cleanly in any harness regardless of how it parses Markdown
+- sync_handoff.py --load/--save JSON round-trip was added so teams can checkpoint a handoff mid-session and resume it later or share it with a teammate
+- Added both --diff-preview (show diff then proceed) and --dry-run (show diff then stop) to rollback, consistent with how other sync commands handle preview vs dry-run semantics
+
+### Patterns Discovered
+
+- Many high-value features already have skeleton modules (session_handoff, config_time_machine, mcp_compat_matrix) but the command-layer wiring is missing — the pattern is: module exists, /sync-* command doesn't yet call it
+- config_linter.py has _suggest_rule_fixes and _suggest_portability_fixes already separated by concern, making it trivial to compose a quality_score that aggregates them
+- The project uses a consistent add_argument pattern in all sync_* commands — repeatable flags use action='append', booleans use action='store_true' — new commands should follow this
+- filter_rules_for_harness is a pure function (no class state) which makes it easy to unit-test and use from adapters without constructing a full SourceReader
+
+### Takeaways
+
+- The codebase is unusually deep for an evolve project — almost every feature idea in the 30-item list already has a corresponding module stub, suggesting the evolve loop has been running for many iterations and the low-hanging fruit is integration rather than invention
+- The test suite is thin (14 tests for ~60 modules) — the main risk for future iterations is that new functionality goes untested, so any new module worth keeping should have at least one integration test
+- source_reader.py is a central hub; adding filter_rules_for_harness there means adapters can opt-in to annotation-aware sync with a one-line call change in their get_rules usage
+- session_handoff.py solves a real pain point with zero dependencies — it's pure stdlib and will work in any environment where HarnessSync is installed
+
+---

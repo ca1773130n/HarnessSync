@@ -237,6 +237,147 @@ class DesktopNotifier:
             return False
 
 
+class SyncDigestCollector:
+    """Accumulate sync events during a session and emit a single digest summary.
+
+    Rather than bombarding users with per-event notifications, SyncDigestCollector
+    gathers each sync event and provides a single human-readable digest (either
+    as a formatted string or as a desktop notification) at the end of the session
+    or on demand.
+
+    Usage::
+
+        digest = SyncDigestCollector()
+        digest.record_sync(targets_updated=["codex"], targets_skipped=[], errors=[])
+        digest.record_sync(targets_updated=["gemini"], targets_skipped=["aider"], errors=[])
+        print(digest.format_digest())
+        digest.send_digest()   # optional OS notification at session end
+    """
+
+    def __init__(self) -> None:
+        self._events: list[dict] = []
+
+    def record_sync(
+        self,
+        targets_updated: list[str],
+        targets_skipped: list[str],
+        errors: list[str],
+        details: str = "",
+    ) -> None:
+        """Record a single sync event.
+
+        Args:
+            targets_updated: Harness names that were synced.
+            targets_skipped: Harness names with no changes.
+            errors:          Error messages from failed targets.
+            details:         Optional extra detail (e.g. "added 1 skill").
+        """
+        self._events.append({
+            "updated": list(targets_updated),
+            "skipped": list(targets_skipped),
+            "errors": list(errors),
+            "details": details,
+        })
+
+    def record_from_results(self, results: dict) -> None:
+        """Record a sync event from an orchestrator results dict.
+
+        Args:
+            results: Dict from SyncOrchestrator.sync_all().
+        """
+        targets_updated: list[str] = []
+        targets_skipped: list[str] = []
+        errors: list[str] = []
+
+        for key, val in results.items():
+            if key.startswith("_") or not isinstance(val, dict):
+                continue
+            has_error = any(
+                getattr(v, "failed", 0) for v in val.values() if hasattr(v, "failed")
+            )
+            all_skipped = all(
+                getattr(v, "skipped", 0) > 0 and getattr(v, "synced", 0) == 0
+                for v in val.values()
+                if hasattr(v, "skipped")
+            )
+            if has_error:
+                errors.append(f"{key}: error")
+            elif all_skipped:
+                targets_skipped.append(key)
+            else:
+                targets_updated.append(key)
+
+        self.record_sync(targets_updated, targets_skipped, errors)
+
+    @property
+    def event_count(self) -> int:
+        """Number of recorded sync events."""
+        return len(self._events)
+
+    def format_digest(self) -> str:
+        """Return a human-readable session digest string.
+
+        Returns:
+            Multi-line summary of all sync activity this session.
+        """
+        if not self._events:
+            return "No sync events this session."
+
+        total_syncs = len(self._events)
+        all_updated: list[str] = []
+        all_errors: list[str] = []
+        all_details: list[str] = []
+        skipped_count = 0
+
+        for ev in self._events:
+            all_updated.extend(ev["updated"])
+            all_errors.extend(ev["errors"])
+            if ev["details"]:
+                all_details.append(ev["details"])
+            skipped_count += len(ev["skipped"])
+
+        # Deduplicate updated target names with counts
+        from collections import Counter
+        updated_counts = Counter(all_updated)
+
+        lines = [
+            f"Session Sync Digest — {total_syncs} sync{'s' if total_syncs != 1 else ''}",
+        ]
+        if updated_counts:
+            parts = [f"{t} ×{c}" if c > 1 else t for t, c in sorted(updated_counts.items())]
+            lines.append(f"  Updated: {', '.join(parts)}")
+        if skipped_count:
+            lines.append(f"  Skipped (no changes): {skipped_count} target(s)")
+        if all_errors:
+            lines.append(f"  Errors: {'; '.join(all_errors[:3])}")
+        if all_details:
+            lines.append("  Details: " + "; ".join(all_details[:5]))
+
+        return "\n".join(lines)
+
+    def send_digest(self, enabled: bool | None = None) -> bool:
+        """Send the digest as a desktop notification.
+
+        Args:
+            enabled: Override notification enable state.
+
+        Returns:
+            True if the notification was sent.
+        """
+        if not self._events:
+            return False
+        notifier = DesktopNotifier(enabled=enabled)
+        if not notifier._enabled:
+            return False
+        digest_text = self.format_digest()
+        body = digest_text[:_MAX_BODY] + ("..." if len(digest_text) > _MAX_BODY else "")
+        return notifier._send("HarnessSync: Session Digest", body)
+
+    def clear(self) -> None:
+        """Clear all recorded events (e.g. at session start)."""
+        self._events.clear()
+
+
 def notify_from_results(
     results: dict,
     enabled: bool | None = None,

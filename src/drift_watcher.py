@@ -167,6 +167,31 @@ class DriftWatcher:
         except KeyboardInterrupt:
             print("\nDrift watcher stopped.")
 
+    def get_status_summary(self) -> dict:
+        """Return a compact status dict for the watcher (suitable for status bars).
+
+        Returns:
+            Dict with keys:
+                - running: bool — whether the watcher thread is alive
+                - poll_interval: float — configured poll interval in seconds
+                - alert_count: int — total alerts fired this session
+                - last_alert_at: str | None — ISO timestamp of last alert (or None)
+                - targets_drifted: list[str] — target names with active drift alerts
+        """
+        with self._history_lock:
+            history = list(self._alert_history)
+
+        last_alert_at: str | None = history[-1].detected_at if history else None
+        targets_drifted = sorted({a.target for a in history})
+
+        return {
+            "running": self.is_running(),
+            "poll_interval": self.poll_interval,
+            "alert_count": len(history),
+            "last_alert_at": last_alert_at,
+            "targets_drifted": targets_drifted,
+        }
+
     def get_alert_history(self) -> list[DriftAlert]:
         """Return a copy of the alert history (most-recent last)."""
         with self._history_lock:
@@ -433,6 +458,74 @@ def make_notifying_alert_callback(
             last_notified[key] = now
 
     return _callback
+
+
+def format_status_line(watcher: "DriftWatcher | None" = None, status: dict | None = None) -> str:
+    """Render a compact one-line watcher status indicator for terminal display.
+
+    Can be used in shell prompts, VS Code status bars, or watch-mode headers.
+
+    Args:
+        watcher: Live DriftWatcher instance (preferred).
+        status:  Pre-built status dict from get_status_summary() (alternative
+                 when a watcher instance is unavailable).
+
+    Returns:
+        A single-line string such as::
+
+            [HS WATCH ◉ active | poll: 30s | alerts: 0]
+            [HS WATCH ○ stopped | last alert: codex 2m ago]
+
+    Examples::
+
+        watcher = DriftWatcher(project_dir)
+        watcher.start()
+        print(format_status_line(watcher))
+        # → [HS WATCH ◉ active | poll: 30s | alerts: 0]
+    """
+    if watcher is not None:
+        s = watcher.get_status_summary()
+    elif status is not None:
+        s = status
+    else:
+        return "[HS WATCH ○ not started]"
+
+    running = s.get("running", False)
+    poll = s.get("poll_interval", 30.0)
+    alert_count = s.get("alert_count", 0)
+    last_alert_at = s.get("last_alert_at")
+    targets_drifted = s.get("targets_drifted", [])
+
+    state_icon = "◉" if running else "○"
+    state_label = "active" if running else "stopped"
+    poll_str = f"{int(poll)}s" if poll < 60 else f"{int(poll // 60)}m"
+
+    parts = [f"HS WATCH {state_icon} {state_label}", f"poll: {poll_str}"]
+
+    if alert_count == 0:
+        parts.append("alerts: 0")
+    else:
+        drift_str = f"drift: {', '.join(targets_drifted)}" if targets_drifted else ""
+        parts.append(f"alerts: {alert_count}")
+        if drift_str:
+            parts.append(drift_str)
+
+    if last_alert_at and not running:
+        # Show relative time of last alert when watcher is stopped
+        try:
+            last_dt = datetime.fromisoformat(last_alert_at)
+            delta_s = (datetime.now(tz=last_dt.tzinfo) - last_dt).total_seconds()
+            if delta_s < 60:
+                rel = f"{int(delta_s)}s ago"
+            elif delta_s < 3600:
+                rel = f"{int(delta_s // 60)}m ago"
+            else:
+                rel = f"{int(delta_s // 3600)}h ago"
+            parts.append(f"last alert: {rel}")
+        except (ValueError, TypeError):
+            pass
+
+    return "[" + " | ".join(parts) + "]"
 
 
 def drift_summary(project_dir: Path, state_manager: StateManager | None = None) -> dict:

@@ -20,6 +20,52 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Per-harness recommended max token budget for synced rules files.
+# Sourced from token_estimator.CONTEXT_WINDOWS — using 25% of the context
+# window as a rule-file budget leaves room for conversation and code context.
+# Values are approximate conservative recommendations (2025 harness defaults).
+_HARNESS_TOKEN_BUDGETS: dict[str, int] = {
+    "codex":    2_048,   # 25% of 8,192 (Codex CLI context)
+    "gemini":   8_192,   # 25% of 32,768 (Gemini 1.5)
+    "opencode": 8_192,   # 25% of 32,768
+    "cursor":   2_048,   # 25% of 8,192
+    "aider":    2_048,   # 25% of 8,192
+    "windsurf": 2_048,   # 25% of 8,192
+    "cline":    4_096,   # 25% of 16,384
+    "continue": 8_192,   # 25% of 32,768
+    "zed":      4_096,   # 25% of 16,384
+    "neovim":   4_096,   # 25% of 16,384
+}
+
+# Fraction thresholds for budget levels
+_BUDGET_WARN_FRACTION = 0.75    # 75% of budget used → warn
+_BUDGET_CRITICAL_FRACTION = 1.0 # 100% → critical
+
+
+@dataclass
+class HarnessBudgetWarning:
+    """Budget warning for a single harness."""
+
+    harness: str
+    token_count: int
+    budget: int
+    fraction: float   # token_count / budget (can exceed 1.0)
+    level: str        # "ok" | "warn" | "critical"
+
+    @property
+    def percent_used(self) -> float:
+        return self.fraction * 100.0
+
+    def format(self) -> str:
+        """Format a single harness budget line."""
+        bar_len = min(int(self.percent_used / 5), 20)
+        bar = "█" * bar_len + "░" * (20 - bar_len)
+        icon = {"ok": "✓", "warn": "⚠", "critical": "✗"}.get(self.level, "?")
+        return (
+            f"  {icon} {self.harness:<12} {bar} {self.percent_used:5.1f}%  "
+            f"({self.token_count:,} / {self.budget:,} tokens)"
+        )
+
 
 # Hedging phrases that often signal verbosity
 _HEDGING_RE = re.compile(
@@ -120,6 +166,79 @@ class ConfigSizeOptimizer:
             project_dir: Project root directory.
         """
         self.project_dir = project_dir
+
+    def check_harness_budgets(
+        self,
+        content: str,
+        targets: list[str] | None = None,
+    ) -> list[HarnessBudgetWarning]:
+        """Check whether config content fits within per-harness recommended token budgets.
+
+        Different harnesses have different context windows, so a verbose CLAUDE.md
+        that is fine for Gemini may exceed Codex's effective rules budget.
+
+        Args:
+            content: Rules/config text (e.g. CLAUDE.md contents).
+            targets: Harness names to check. Defaults to all known harnesses.
+
+        Returns:
+            List of HarnessBudgetWarning, sorted by fraction used (highest first).
+        """
+        if targets is None:
+            targets = list(_HARNESS_TOKEN_BUDGETS.keys())
+
+        token_count = max(1, len(content) // 4)
+        warnings: list[HarnessBudgetWarning] = []
+
+        for harness in targets:
+            budget = _HARNESS_TOKEN_BUDGETS.get(harness, 8_192)
+            fraction = token_count / budget
+            if fraction >= _BUDGET_CRITICAL_FRACTION:
+                level = "critical"
+            elif fraction >= _BUDGET_WARN_FRACTION:
+                level = "warn"
+            else:
+                level = "ok"
+            warnings.append(HarnessBudgetWarning(
+                harness=harness,
+                token_count=token_count,
+                budget=budget,
+                fraction=fraction,
+                level=level,
+            ))
+
+        warnings.sort(key=lambda w: w.fraction, reverse=True)
+        return warnings
+
+    def format_budget_report(
+        self,
+        warnings: list[HarnessBudgetWarning],
+        show_ok: bool = False,
+    ) -> str:
+        """Format harness budget warnings for terminal output.
+
+        Args:
+            warnings: Output of check_harness_budgets().
+            show_ok:  Include harnesses within budget (default: show warnings only).
+
+        Returns:
+            Formatted multi-line string.
+        """
+        shown = warnings if show_ok else [w for w in warnings if w.level != "ok"]
+        if not shown:
+            return "Config size OK — within recommended budget for all harnesses."
+
+        lines = ["Config Token Budget Check:", ""]
+        for w in shown:
+            lines.append(w.format())
+        critical = [w.harness for w in shown if w.level == "critical"]
+        if critical:
+            lines.append("")
+            lines.append(
+                f"  CRITICAL: {', '.join(critical)} — config exceeds recommended budget. "
+                "Run /sync-optimize to reduce token usage."
+            )
+        return "\n".join(lines)
 
     def analyze_all(self) -> list[SizeReport]:
         """Analyze all CLAUDE.md-style files in the project.

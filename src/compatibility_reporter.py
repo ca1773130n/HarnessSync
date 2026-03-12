@@ -9,6 +9,8 @@ items with explanations. Implements SAF-04 from Phase 5 safety validation.
 Based on aggregate SyncResult data for compatibility reporting (existing adapter pattern).
 """
 
+from dataclasses import dataclass
+
 from src.adapters.result import SyncResult
 from src.utils.logger import Logger
 
@@ -957,6 +959,106 @@ class CompatibilityReporter:
         )
         return "\n".join(lines)
 
+    def calculate_parity_score(
+        self,
+        results: dict,
+        source_data: dict,
+    ) -> dict[str, dict]:
+        """Calculate a single parity percentage per target harness.
+
+        The parity score combines:
+          - Coverage score (breadth): what fraction of source capability categories
+            are represented in the target at all.
+          - Fidelity score (depth): how faithfully items within each category
+            are translated (direct sync vs adapted vs lost).
+
+        Combined formula:
+            parity = (coverage_score * 0.5) + (fidelity_score * 0.5)
+
+        This gives a single 0-100 number per target that answers:
+          "How faithfully does this harness reflect your Claude Code setup?"
+
+        Args:
+            results:     Dict from SyncOrchestrator.sync_all() (target -> SyncResult map).
+            source_data: Output of SourceReader.discover_all().
+
+        Returns:
+            Dict mapping target_name -> {
+                "parity": float,        # 0-100 combined parity score
+                "coverage": float,      # 0-100 coverage sub-score
+                "fidelity": float,      # 0-100 fidelity sub-score
+                "grade": str,           # "A" | "B" | "C" | "D" | "F"
+                "label": str,           # "excellent" | "good" | "fair" | "poor" | "critical"
+            }
+        """
+        coverage_scores = self.calculate_coverage_score(results, source_data)
+        fidelity_scores = self.calculate_fidelity_score(results)
+
+        parity: dict[str, dict] = {}
+        all_targets = set(coverage_scores) | set(fidelity_scores)
+
+        for target in all_targets:
+            cov = coverage_scores.get(target, {}).get("score", 100.0)
+            fid = fidelity_scores.get(target, {}).get("overall", 100.0)
+            combined = round((cov * 0.5) + (fid * 0.5), 1)
+
+            if combined >= 90:
+                grade, label = "A", "excellent"
+            elif combined >= 75:
+                grade, label = "B", "good"
+            elif combined >= 60:
+                grade, label = "C", "fair"
+            elif combined >= 40:
+                grade, label = "D", "poor"
+            else:
+                grade, label = "F", "critical"
+
+            parity[target] = {
+                "parity": combined,
+                "coverage": round(cov, 1),
+                "fidelity": round(fid, 1),
+                "grade": grade,
+                "label": label,
+            }
+
+        return parity
+
+    def format_parity_scores(self, parity: dict[str, dict]) -> str:
+        """Format parity scores as a compact harness comparison table.
+
+        Args:
+            parity: Output of calculate_parity_score().
+
+        Returns:
+            Formatted multi-line string.
+        """
+        if not parity:
+            return "No parity data available."
+
+        # Sort by parity score descending
+        ranked = sorted(parity.items(), key=lambda x: x[1]["parity"], reverse=True)
+        lines = [
+            "Harness Parity Scores",
+            "=" * 50,
+            f"  {'Harness':<14} {'Parity':>7}  {'Coverage':>9}  {'Fidelity':>9}  Grade",
+            "  " + "-" * 48,
+        ]
+        for target, scores in ranked:
+            pct = scores["parity"]
+            cov = scores["coverage"]
+            fid = scores["fidelity"]
+            grade = scores["grade"]
+            bar_len = min(int(pct / 5), 20)
+            bar = "█" * bar_len + "░" * (20 - bar_len)
+            lines.append(
+                f"  {target:<14} {pct:6.1f}%  {cov:8.1f}%  {fid:8.1f}%   {grade}"
+            )
+        lines.append("")
+        lines.append(
+            "  Parity = 50% coverage (breadth) + 50% fidelity (translation depth)"
+        )
+        return "\n".join(lines)
+
     def has_issues(self, report: dict) -> bool:
         """
         Check if report contains adapted or failed items.
@@ -977,3 +1079,198 @@ class CompatibilityReporter:
                 return True
 
         return False
+
+
+# ---------------------------------------------------------------------------
+# Harness Feature Gap Tracker (item 24)
+# ---------------------------------------------------------------------------
+
+import json as _json
+import time as _time
+
+
+@dataclass
+class _TrackedGap:
+    """A single tracked capability gap for a harness."""
+    target: str
+    feature: str
+    description: str
+    upstream_url: str
+    logged_at: str   # ISO 8601 timestamp
+    resolved: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "target": self.target,
+            "feature": self.feature,
+            "description": self.description,
+            "upstream_url": self.upstream_url,
+            "logged_at": self.logged_at,
+            "resolved": self.resolved,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "_TrackedGap":
+        return cls(
+            target=d["target"],
+            feature=d["feature"],
+            description=d["description"],
+            upstream_url=d.get("upstream_url", ""),
+            logged_at=d.get("logged_at", ""),
+            resolved=d.get("resolved", False),
+        )
+
+
+class GapTracker:
+    """Track and persist harness capability gaps with upstream issue links.
+
+    When HarnessSync detects a capability that can't be fully synced, users
+    can log it here as a tracked gap. Gaps are stored in
+    ``~/.harnesssync/gaps.json`` and can be reviewed, filtered, and marked
+    resolved as upstream harnesses add feature support.
+
+    Usage::
+
+        tracker = GapTracker()
+        tracker.log_gap(
+            target="codex",
+            feature="skills",
+            description="Codex has no native skill/command system — skills are dropped",
+            upstream_url="https://github.com/openai/codex/issues/1234",
+        )
+        print(tracker.format_gap_report())
+    """
+
+    def __init__(self, gaps_dir: Path | None = None) -> None:
+        self._gaps_path = (gaps_dir or (Path.home() / ".harnesssync")) / "gaps.json"
+
+    def _load(self) -> list[_TrackedGap]:
+        try:
+            data = _json.loads(self._gaps_path.read_text(encoding="utf-8"))
+            return [_TrackedGap.from_dict(d) for d in data]
+        except (OSError, _json.JSONDecodeError, KeyError):
+            return []
+
+    def _save(self, gaps: list[_TrackedGap]) -> None:
+        self._gaps_path.parent.mkdir(parents=True, exist_ok=True)
+        self._gaps_path.write_text(
+            _json.dumps([g.to_dict() for g in gaps], indent=2),
+            encoding="utf-8",
+        )
+
+    def log_gap(
+        self,
+        target: str,
+        feature: str,
+        description: str,
+        upstream_url: str = "",
+    ) -> _TrackedGap:
+        """Log a new capability gap.
+
+        If a gap with the same (target, feature) already exists and is not
+        resolved, returns the existing entry rather than creating a duplicate.
+
+        Args:
+            target:       Target harness name (e.g. "codex").
+            feature:      Feature category (e.g. "skills", "mcp", "agents").
+            description:  Human-readable description of what's missing.
+            upstream_url: Link to upstream issue tracker (optional).
+
+        Returns:
+            The new or existing _TrackedGap entry.
+        """
+        gaps = self._load()
+        # Avoid duplicates for active (unresolved) gaps
+        for existing in gaps:
+            if existing.target == target and existing.feature == feature and not existing.resolved:
+                return existing
+
+        gap = _TrackedGap(
+            target=target,
+            feature=feature,
+            description=description,
+            upstream_url=upstream_url,
+            logged_at=_time.strftime("%Y-%m-%dT%H:%M:%S"),
+        )
+        gaps.append(gap)
+        self._save(gaps)
+        return gap
+
+    def get_gaps(
+        self,
+        target: str | None = None,
+        include_resolved: bool = False,
+    ) -> list[_TrackedGap]:
+        """Retrieve tracked gaps, optionally filtered by target.
+
+        Args:
+            target:           Filter by harness name (None = all targets).
+            include_resolved: Include resolved gaps (default: active only).
+
+        Returns:
+            List of _TrackedGap entries.
+        """
+        gaps = self._load()
+        if not include_resolved:
+            gaps = [g for g in gaps if not g.resolved]
+        if target:
+            gaps = [g for g in gaps if g.target == target]
+        return gaps
+
+    def resolve_gap(self, target: str, feature: str) -> bool:
+        """Mark a tracked gap as resolved.
+
+        Args:
+            target:  Target harness name.
+            feature: Feature category.
+
+        Returns:
+            True if a gap was found and marked resolved; False if not found.
+        """
+        gaps = self._load()
+        found = False
+        for gap in gaps:
+            if gap.target == target and gap.feature == feature and not gap.resolved:
+                gap.resolved = True
+                found = True
+        if found:
+            self._save(gaps)
+        return found
+
+    def format_gap_report(
+        self,
+        target: str | None = None,
+        include_resolved: bool = False,
+    ) -> str:
+        """Format tracked gaps as a readable report.
+
+        Args:
+            target:           Filter by harness (None = all).
+            include_resolved: Show resolved gaps too.
+
+        Returns:
+            Formatted multi-line report.
+        """
+        gaps = self.get_gaps(target=target, include_resolved=include_resolved)
+        if not gaps:
+            label = f"for {target}" if target else "across all targets"
+            return f"No active capability gaps tracked {label}."
+
+        by_target: dict[str, list[_TrackedGap]] = {}
+        for gap in gaps:
+            by_target.setdefault(gap.target, []).append(gap)
+
+        lines = [
+            f"Tracked Capability Gaps — {len(gaps)} active",
+            "=" * 50,
+        ]
+        for tgt, tgt_gaps in sorted(by_target.items()):
+            lines.append(f"\n  {tgt.upper()} ({len(tgt_gaps)} gap{'s' if len(tgt_gaps) != 1 else ''}):")
+            for g in tgt_gaps:
+                status = "[resolved]" if g.resolved else "[open]"
+                lines.append(f"    {status} {g.feature}: {g.description}")
+                if g.upstream_url:
+                    lines.append(f"      ↳ {g.upstream_url}")
+                if g.logged_at:
+                    lines.append(f"      logged: {g.logged_at}")
+        return "\n".join(lines)
