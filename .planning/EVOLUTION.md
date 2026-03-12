@@ -1880,3 +1880,73 @@ _2026-03-12T03:03:46.542Z_
 - Cost advisor identified that CLAUDE.md file size is the most universally impactful cost lever since it injects context into every single session across all harnesses — this cross-cutting concern wasn't obvious without building the advisor
 
 ---
+## Iteration 29
+_2026-03-12T03:21:14.318Z_
+
+### Items Attempted
+
+- **Bootstrap Claude Code from Any Harness** — pass
+- **Capability Gap Report** — pass
+- **Harness-Specific Override Blocks** — pass
+- **Config Inheritance: Personal → Team → Org** — pass
+- **Secret Leak Prevention** — pass
+- **Interactive Sync Preview (Dry Run Mode)** — pass
+- **Guided Conflict Resolution** — pass
+- **Per-Harness Compatibility Score** — pass
+- **CI/CD Sync Verification Action** — pass
+- **Visual Sync Timeline** — pass
+- **Auto-Generate Config Documentation** — pass
+- **Sync Config Templates** — pass
+- **MCP Server Health Dashboard** — pass
+- **Target Harness Version Pinning** — pass
+- **Named Sync Profiles** — pass
+- **Remote Machine Sync over SSH** — pass
+- **Adapter Format Change Detector** — pass
+- **Rule Effectiveness Annotations** — pass
+- **MCP Routing Rules** — pass
+- **First-Time Setup Wizard** — pass
+- **Cross-Harness Skill Search** — pass
+- **Config Dependency Visualizer** — pass
+- **Sync Event Notifications** — pass
+- **Harness Migration Path Planner** — pass
+- **Sync Anomaly Detection** — pass
+- **Rule Tagging and Filtering** — pass
+- **Shadow Mode (Write to Temp, Diff Only)** — pass
+- **Sync Plugin Manifests Across Harnesses** — pass
+- **A/B Config Testing Across Harnesses** — pass
+- **Config Change Attribution** — pass
+- **Live Reload Watch Mode** — pass
+- **Multi-Project Sync Sweep** — pass
+- **Sync Coverage Badge for READMEs** — pass
+- **Harness Config Changelog Generator** — pass
+- **Environment-Aware Sync (Dev / Staging / Prod)** — pass
+- **Team Config Server (Central Truth)** — pass
+- **Rule Quality Linter** — pass
+- **Deprecated Feature Warnings** — pass
+
+### Decisions Made
+
+- Implemented A/B Config Testing as a standalone module (ab_config_tester.py) rather than extending the existing harness_comparison.py, because A/B testing is stateful (requires persistent experiment configs and annotations) while comparison is stateless. Keeping them separate avoids coupling.
+- Rule Effectiveness Annotations were added to sync_filter.py as new functions (extract_effectiveness_annotations, propagate_effectiveness_annotations) following the existing tag-parsing pattern in that module, keeping all CLAUDE.md annotation logic co-located.
+- Effectiveness annotation propagation was integrated into AdapterBase.prepare_rules_content() so all adapters can opt-in via a single method call, rather than duplicating the transformation in each adapter. Only wired it into the Aider adapter's sync_rules since Aider is the only plain-text target that currently loses HTML comment metadata.
+- Skills scaffold generation was added as new methods on MigrationAssistant rather than a separate module, since it directly extends the scan/apply workflow and operates on MigrationPlan data. The --scaffold-skills flag was added to the existing /sync-migrate command rather than creating a new command.
+- Git attribution in changelog_manager uses a subprocess approach (git log, git config) wrapped in broad exception handling so the changelog never fails when git is unavailable or the project is not in a git repo. Empty strings are used as safe fallbacks.
+- The sync_ab command uses SyncOrchestrator with cli_only_targets to apply variant rules per harness group, reusing the existing sync pipeline without building a parallel sync path.
+
+### Patterns Discovered
+
+- The codebase consistently uses dataclasses for domain objects (MigrationPlan, ABExperiment, ConfigCommit) with to_dict/from_dict for JSON serialization — a clean pattern to follow for any new stateful objects.
+- All command modules follow the same pattern: PLUGIN_ROOT path manipulation, argparse with shlex.split, and a main() entry point. This is enforced across 40+ commands and should be followed exactly for new commands.
+- The adapters use a prepare_* pattern (prepare_rules_content) to centralize transformation concerns in the base class, allowing individual adapters to opt-in without reimplementing transformation logic.
+- A/B annotation markers use <!-- @ab:experiment=NAME:VARIANT --> syntax consistent with existing harness filter tags (<!-- @harness:skip=... -->, <!-- harness:codex -->). This consistency makes the annotation language predictable.
+- Pre-existing test failures (8 tests): all in verify_task1_gemini and verify_task1_opencode/verify_task2_opencode — these test gemini skill inlining and opencode MCP URL handling that appear not implemented in the current adapter versions.
+
+### Takeaways
+
+- The codebase has extremely broad coverage — nearly every product idea from a 30-item list already had a corresponding module. Future iterations should focus on deepening existing modules rather than creating new ones.
+- The sync_filter.py module is the right home for all CLAUDE.md annotation parsing — it already handles 8+ tag formats and is the de-facto annotation DSL for the project.
+- The migration_assistant.py was missing skills scaffold generation despite being described as a bootstrap tool — the gap between 'import rules to CLAUDE.md' and 'generate skills scaffold' is the most meaningful improvement for new users coming from Cursor or Aider.
+- Git attribution in changelogs is a lightweight but high-value addition for teams — it turns the changelog from a sync log into an audit trail that supports 'who changed what rule and when' queries without requiring users to correlate git blame manually.
+- A/B config testing fills a genuine product gap: the harness_comparison.py does static analysis, but users need a way to run the same question empirically across different harnesses and record subjective feedback about which felt better.
+
+---

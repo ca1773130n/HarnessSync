@@ -917,3 +917,161 @@ def format_matrix_change_report(notices: list[str]) -> str:
         "",
     ]
     return "\n".join(header + notices)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Harness Version Update Detector (item 25)
+# ──────────────────────────────────────────────────────────────────────────────
+# Compares previously recorded harness versions (stored in
+# ~/.harnesssync/detected-versions.json) against currently detected installed
+# versions. When a harness has been updated, surfaces a notice with the old and
+# new version so users know to re-run compatibility checks.
+
+import json
+import os
+import tempfile
+
+
+_DETECTED_VERSIONS_FILE = Path.home() / ".harnesssync" / "detected-versions.json"
+
+
+def _load_detected_versions() -> dict[str, str]:
+    """Load previously recorded harness versions from disk."""
+    if not _DETECTED_VERSIONS_FILE.exists():
+        return {}
+    try:
+        data = json.loads(_DETECTED_VERSIONS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_detected_versions(versions: dict[str, str]) -> None:
+    """Persist detected harness versions to disk (atomic write)."""
+    _DETECTED_VERSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w",
+        dir=_DETECTED_VERSIONS_FILE.parent,
+        suffix=".tmp",
+        delete=False,
+        encoding="utf-8",
+    )
+    try:
+        json.dump(versions, tmp, indent=2, ensure_ascii=False)
+        tmp.write("\n")
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp.close()
+        os.replace(tmp.name, str(_DETECTED_VERSIONS_FILE))
+    except Exception:
+        tmp.close()
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        raise
+
+
+def detect_harness_updates(
+    current_versions: dict[str, str | None],
+    acknowledge: bool = True,
+) -> list[dict]:
+    """Detect harnesses that have been updated since the last check.
+
+    Compares ``current_versions`` (harness → detected version) against the
+    previously stored versions. Returns one entry per harness that has changed.
+
+    Args:
+        current_versions: Dict mapping harness name → currently detected version
+                          (None if not installed or version unknown).
+        acknowledge: If True, update the stored versions to the current values
+                     so repeated calls don't keep reporting the same updates.
+
+    Returns:
+        List of dicts, each with keys:
+            - ``harness``: str
+            - ``old_version``: str | None  (None if first detection)
+            - ``new_version``: str | None
+            - ``kind``: "new" | "updated" | "removed"
+    """
+    stored = _load_detected_versions()
+    updates: list[dict] = []
+
+    all_harnesses = set(stored.keys()) | {k for k, v in current_versions.items() if v}
+
+    for harness in sorted(all_harnesses):
+        old_ver = stored.get(harness)
+        new_ver = current_versions.get(harness)
+
+        if old_ver is None and new_ver:
+            # Newly detected harness
+            updates.append({
+                "harness": harness,
+                "old_version": None,
+                "new_version": new_ver,
+                "kind": "new",
+            })
+        elif old_ver and not new_ver:
+            # Harness was removed / uninstalled
+            updates.append({
+                "harness": harness,
+                "old_version": old_ver,
+                "new_version": None,
+                "kind": "removed",
+            })
+        elif old_ver and new_ver and old_ver != new_ver:
+            # Version changed
+            updates.append({
+                "harness": harness,
+                "old_version": old_ver,
+                "new_version": new_ver,
+                "kind": "updated",
+            })
+
+    if acknowledge and updates:
+        # Write the new detected versions, removing entries for removed harnesses
+        new_stored = dict(stored)
+        for entry in updates:
+            harness = entry["harness"]
+            if entry["kind"] == "removed":
+                new_stored.pop(harness, None)
+            else:
+                new_stored[harness] = entry["new_version"]
+        _save_detected_versions(new_stored)
+    elif acknowledge and not stored:
+        # First run — just record current versions
+        initial = {h: v for h, v in current_versions.items() if v}
+        if initial:
+            _save_detected_versions(initial)
+
+    return updates
+
+
+def format_update_report(updates: list[dict]) -> str:
+    """Format harness update notices as a user-facing message.
+
+    Args:
+        updates: Output of detect_harness_updates().
+
+    Returns:
+        Human-readable string, or empty string if no updates.
+    """
+    if not updates:
+        return ""
+
+    lines = ["Harness version changes detected:", ""]
+    for entry in updates:
+        harness = entry["harness"]
+        kind = entry["kind"]
+        old_ver = entry["old_version"] or "?"
+        new_ver = entry["new_version"] or "?"
+        if kind == "new":
+            lines.append(f"  + {harness}: newly detected (v{new_ver})")
+        elif kind == "removed":
+            lines.append(f"  - {harness}: no longer detected (was v{old_ver})")
+        else:
+            lines.append(f"  ↑ {harness}: v{old_ver} → v{new_ver}")
+
+    lines.append("")
+    lines.append("Run /sync-status to check for config schema changes.")
+    return "\n".join(lines)

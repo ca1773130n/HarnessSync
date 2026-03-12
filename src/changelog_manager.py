@@ -419,6 +419,118 @@ class ChangelogManager:
             lines.append(f"- **BLOCKED**: {results.get('_reason', 'unknown')}")
             return lines
 
+    def _build_plain_summary(self, results: dict, scope: str) -> str:
+        """Generate a one-line human-readable summary of a sync event.
+
+        Produces text like:
+          "Synced rules+MCP to 3 targets (codex, gemini, cursor) — 2 files updated."
+        or:
+          "Rules-only sync to codex — no changes detected."
+
+        Args:
+            results: Sync results dict (same as record()).
+            scope: Sync scope string.
+
+        Returns:
+            Single-line plain-language summary string.
+        """
+        target_names = [
+            t for t in sorted(results.keys())
+            if not t.startswith("_") and isinstance(results[t], dict)
+        ]
+
+        total_synced = 0
+        total_files: list[str] = []
+        sections_touched: set[str] = set()
+
+        for target, target_results in results.items():
+            if target.startswith("_") or not isinstance(target_results, dict):
+                continue
+            for config_type, r in target_results.items():
+                if isinstance(r, SyncResult) and r.synced > 0:
+                    total_synced += r.synced
+                    sections_touched.add(config_type)
+                    if hasattr(r, "synced_files"):
+                        total_files.extend(r.synced_files)
+
+        n_targets = len(target_names)
+        targets_str = (
+            ", ".join(target_names[:3])
+            + (f", +{n_targets - 3} more" if n_targets > 3 else "")
+        )
+
+        sections_str = "+".join(sorted(sections_touched)) if sections_touched else scope
+
+        if total_synced == 0:
+            return f"Sync to {n_targets} target(s) ({targets_str}) — no changes detected."
+
+        unique_files = list(dict.fromkeys(total_files))
+        file_count = len(unique_files)
+        file_part = (
+            f"{file_count} file(s) updated"
+            if file_count > 0
+            else f"{total_synced} item(s) synced"
+        )
+        return f"{sections_str} sync to {n_targets} target(s) ({targets_str}) — {file_part}."
+
+
+def record_with_diff(
+    manager: "ChangelogManager",
+    results: dict,
+    scope: str = "all",
+    account: str | None = None,
+    rule_diffs: dict[str, list[str]] | None = None,
+) -> None:
+    """Append a sync event with optional rule-level diff attribution.
+
+    Extends ``ChangelogManager.record()`` by including a per-section diff
+    summary in the changelog entry — showing WHICH rules/sections changed,
+    not just aggregate counts.
+
+    Args:
+        manager: ChangelogManager instance.
+        results: Sync results dict from SyncOrchestrator.sync_all().
+        scope: Sync scope used.
+        account: Account name (None for single-account).
+        rule_diffs: Optional per-target diff info. Each key is a target name;
+                    each value is a list of diff lines (unified diff format
+                    or plain descriptions like "+Added: rule about testing").
+    """
+    # Use the base record method so core changelog logic stays in one place
+    manager.record(results, scope=scope, account=account)
+
+    if not rule_diffs:
+        return
+
+    # Append diff details to the last entry in the changelog
+    diff_lines: list[str] = ["", "<!-- rule-level diff:"]
+    for target, diff in sorted(rule_diffs.items()):
+        if not diff:
+            continue
+        diff_lines.append(f"  {target}:")
+        for line in diff[:20]:  # cap at 20 lines per target
+            diff_lines.append(f"    {line}")
+        if len(diff) > 20:
+            diff_lines.append(f"    ... and {len(diff) - 20} more lines")
+    diff_lines.append("-->")
+    diff_lines.append("")
+
+    diff_text = "\n".join(diff_lines)
+
+    # Append to both changelog files
+    try:
+        with open(manager._path, "a", encoding="utf-8") as fh:
+            fh.write(diff_text)
+    except OSError:
+        pass
+
+    if manager._root_path is not None:
+        try:
+            with open(manager._root_path, "a", encoding="utf-8") as fh:
+                fh.write(diff_text)
+        except OSError:
+            pass
+
         for target, target_results in sorted(results.items()):
             if target.startswith("_") or not isinstance(target_results, dict):
                 continue

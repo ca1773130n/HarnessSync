@@ -160,7 +160,37 @@ class ProfileManager:
         if "targets" in profile and profile["targets"]:
             result["profile_targets"] = list(profile["targets"])
 
+        # MCP server subset: only sync specific named MCP servers.
+        # Allows profiles to define "work" (only internal tools) vs "oss"
+        # (only public servers) without requiring separate CLAUDE.md files.
+        if "mcp_servers" in profile and profile["mcp_servers"]:
+            result["profile_mcp_servers"] = list(profile["mcp_servers"])
+
         return result
+
+    def filter_mcp_servers(self, mcp_servers: dict, name: str) -> dict:
+        """Filter an MCP servers dict to only include servers listed in a profile.
+
+        If the profile has no ``mcp_servers`` key (or an empty list), the full
+        dict is returned unchanged — this is an opt-in filter.
+
+        Args:
+            mcp_servers: Dict mapping server name → server config.
+            name: Profile name to read the ``mcp_servers`` allowlist from.
+
+        Returns:
+            Filtered dict (subset of mcp_servers), or original if no filter.
+        """
+        profile = self.get_profile(name)
+        if profile is None:
+            return mcp_servers
+
+        allowlist = profile.get("mcp_servers", [])
+        if not allowlist:
+            return mcp_servers
+
+        allowed_set = set(allowlist)
+        return {k: v for k, v in mcp_servers.items() if k in allowed_set}
 
     # ------------------------------------------------------------------
     # Team Sync via Git
@@ -380,6 +410,19 @@ class ProfileManager:
             "scope": "all",
             "only_sections": ["rules", "mcp"],
         },
+        "work-mcp-only": {
+            "description": "Work context — sync only internal/work MCP servers",
+            "scope": "all",
+            "only_sections": ["rules", "mcp"],
+            # mcp_servers is intentionally empty here (template — fill in your servers)
+            # Example: "mcp_servers": ["internal-jira", "company-github"]
+        },
+        "oss-mcp-only": {
+            "description": "OSS context — sync only public/open-source MCP servers",
+            "scope": "all",
+            "only_sections": ["rules", "mcp"],
+            # Example: "mcp_servers": ["context7", "github-public", "brave-search"]
+        },
     }
 
     def list_templates(self) -> list[str]:
@@ -455,6 +498,9 @@ class ProfileManager:
                 lines.append(f"    skip: {', '.join(skip)}")
             if targets:
                 lines.append(f"    targets: {', '.join(targets)}")
+            mcp_servers = cfg.get("mcp_servers", [])
+            if mcp_servers:
+                lines.append(f"    mcp-servers: {', '.join(mcp_servers)}")
 
         return "\n".join(lines)
 

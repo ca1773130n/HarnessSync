@@ -376,3 +376,201 @@ class ConfigSnapshot:
             raise ValueError(
                 f"Unsupported snapshot version {version!r} (expected {_SNAPSHOT_VERSION!r})"
             )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Named Checkpoint Store
+# ──────────────────────────────────────────────────────────────────────────────
+
+import os
+import tempfile
+
+
+_CHECKPOINTS_DIR = Path.home() / ".harnesssync" / "checkpoints"
+
+
+class NamedCheckpointStore:
+    """Store and restore named configuration checkpoints.
+
+    Allows users to tag the current synced state with a meaningful name
+    (e.g. 'before-big-refactor', 'v2.1-release-setup') and restore any
+    checkpoint later. Goes beyond ephemeral rollback to provide permanent,
+    human-readable snapshots.
+
+    Checkpoints are stored as JSON files under
+    ``~/.harnesssync/checkpoints/<tag>.json``.
+
+    Usage::
+
+        store = NamedCheckpointStore()
+        store.save("before-big-refactor", snapshot_dict)
+        store.save("v2.1-release", snapshot_dict, notes="Release candidate config")
+
+        tags = store.list_tags()
+        snap = store.load("before-big-refactor")
+        store.delete("old-tag")
+    """
+
+    def __init__(self, checkpoints_dir: Path | None = None):
+        self.checkpoints_dir = checkpoints_dir or _CHECKPOINTS_DIR
+
+    def _path(self, tag: str) -> Path:
+        return self.checkpoints_dir / f"{tag}.json"
+
+    @staticmethod
+    def _validate_tag(tag: str) -> None:
+        """Raise ValueError if tag contains unsafe characters."""
+        # Allow alphanumeric, hyphens, underscores, dots — no slashes or spaces
+        import re
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", tag):
+            raise ValueError(
+                f"Invalid checkpoint tag {tag!r}. "
+                "Use alphanumeric characters, hyphens, underscores, or dots (max 64 chars)."
+            )
+
+    def list_tags(self) -> list[dict]:
+        """Return checkpoint metadata sorted by creation time (newest first).
+
+        Returns:
+            List of dicts, each with keys: ``tag``, ``created_at``, ``notes``.
+        """
+        if not self.checkpoints_dir.exists():
+            return []
+
+        entries: list[dict] = []
+        for path in self.checkpoints_dir.glob("*.json"):
+            tag = path.stem
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                entries.append({
+                    "tag": tag,
+                    "created_at": data.get("_checkpoint_created_at", ""),
+                    "notes": data.get("_checkpoint_notes", ""),
+                })
+            except (json.JSONDecodeError, OSError):
+                entries.append({"tag": tag, "created_at": "", "notes": ""})
+
+        entries.sort(key=lambda e: e["created_at"], reverse=True)
+        return entries
+
+    def save(
+        self,
+        tag: str,
+        snapshot: dict,
+        notes: str = "",
+        overwrite: bool = True,
+    ) -> Path:
+        """Save a named checkpoint.
+
+        Args:
+            tag: Unique checkpoint name (e.g. 'before-big-refactor').
+            snapshot: Snapshot dict (from ConfigSnapshot.create()).
+            notes: Optional human-readable note about this checkpoint.
+            overwrite: If False, raise FileExistsError if tag already exists.
+
+        Returns:
+            Path to the saved checkpoint file.
+
+        Raises:
+            ValueError: If tag is invalid.
+            FileExistsError: If tag exists and overwrite=False.
+        """
+        self._validate_tag(tag)
+        dest = self._path(tag)
+
+        if dest.exists() and not overwrite:
+            raise FileExistsError(
+                f"Checkpoint {tag!r} already exists. Pass overwrite=True to replace it."
+            )
+
+        # Embed checkpoint metadata into the snapshot dict (non-destructive copy)
+        data = dict(snapshot)
+        data["_checkpoint_tag"] = tag
+        data["_checkpoint_created_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        if notes:
+            data["_checkpoint_notes"] = notes
+
+        self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
+
+        # Atomic write
+        tmp_fd = tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=self.checkpoints_dir,
+            suffix=".tmp",
+            delete=False,
+            encoding="utf-8",
+        )
+        try:
+            json.dump(data, tmp_fd, indent=2, ensure_ascii=False)
+            tmp_fd.write("\n")
+            tmp_fd.flush()
+            os.fsync(tmp_fd.fileno())
+            tmp_fd.close()
+            os.replace(tmp_fd.name, str(dest))
+        except Exception:
+            tmp_fd.close()
+            try:
+                os.unlink(tmp_fd.name)
+            except OSError:
+                pass
+            raise
+
+        return dest
+
+    def load(self, tag: str) -> dict:
+        """Load a named checkpoint.
+
+        Args:
+            tag: Checkpoint name to load.
+
+        Returns:
+            Snapshot dict (with checkpoint metadata keys prefixed with ``_``).
+
+        Raises:
+            KeyError: If tag does not exist.
+            ValueError: If the checkpoint file is not valid JSON.
+        """
+        self._validate_tag(tag)
+        path = self._path(tag)
+        if not path.exists():
+            available = ", ".join(e["tag"] for e in self.list_tags()) or "none"
+            raise KeyError(
+                f"Checkpoint {tag!r} not found. Available: {available}"
+            )
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Checkpoint {tag!r} contains invalid JSON: {e}") from e
+
+    def delete(self, tag: str) -> bool:
+        """Delete a named checkpoint.
+
+        Args:
+            tag: Checkpoint name to delete.
+
+        Returns:
+            True if deleted, False if not found.
+        """
+        self._validate_tag(tag)
+        path = self._path(tag)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
+
+    def format_list(self) -> str:
+        """Return a human-readable list of all checkpoints."""
+        tags = self.list_tags()
+        if not tags:
+            return (
+                "No named checkpoints. Create one with:\n"
+                "  /sync-snapshot save <tag> [--notes 'description']"
+            )
+
+        lines = [f"Named Checkpoints ({len(tags)})", "=" * 40]
+        for entry in tags:
+            tag = entry["tag"]
+            created = entry["created_at"][:19].replace("T", " ") if entry["created_at"] else "unknown"
+            notes = f"  — {entry['notes']}" if entry["notes"] else ""
+            lines.append(f"  {tag:<30} {created}{notes}")
+        return "\n".join(lines)

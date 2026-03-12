@@ -43,6 +43,15 @@ _OVERRIDE_MARKER_END = "\n<!-- End HarnessSync override: {harness} -->\n"
 
 _DEFAULT_OVERRIDES_DIR = Path.home() / ".harnesssync" / "overrides"
 
+# File-based override pattern: CLAUDE.<harness>.md in the project directory.
+# This provides an alternative to JSON overrides for rule content — users can
+# keep harness-specific additions as plain Markdown next to CLAUDE.md.
+# Supported file patterns (tried in order, first match wins):
+_FILE_OVERRIDE_PATTERNS = [
+    "CLAUDE.{harness}.md",     # canonical: CLAUDE.codex.md, CLAUDE.gemini.md
+    ".harness-{harness}.md",   # dotfile alternative
+]
+
 
 class HarnessOverride:
     """Per-harness config override manager.
@@ -277,6 +286,121 @@ class HarnessOverride:
         override = self.load(harness)
         override["description"] = description
         self.save(harness, override)
+
+    # ------------------------------------------------------------------
+    # File-Based Override Discovery (CLAUDE.<harness>.md pattern)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def find_file_override(project_dir: Path, harness: str) -> Path | None:
+        """Find a CLAUDE.<harness>.md (or .harness-<harness>.md) override file.
+
+        Implements the ``CLAUDE.codex.md`` / ``CLAUDE.gemini.md`` pattern:
+        users can place a harness-specific Markdown file next to CLAUDE.md and
+        HarnessSync will merge its content on top of the base rules when syncing
+        to that target.
+
+        File patterns tried in order (first match wins):
+          1. CLAUDE.<harness>.md   — e.g. CLAUDE.codex.md
+          2. .harness-<harness>.md — e.g. .harness-codex.md (dotfile form)
+
+        Args:
+            project_dir: Project root directory to search in.
+            harness: Target harness name (e.g. "codex", "gemini", "cursor").
+
+        Returns:
+            Path to the override file, or None if not found.
+        """
+        for pattern in _FILE_OVERRIDE_PATTERNS:
+            candidate = project_dir / pattern.format(harness=harness)
+            if candidate.is_file():
+                return candidate
+        return None
+
+    @staticmethod
+    def load_file_override_rules(project_dir: Path, harness: str) -> str:
+        """Load rule content from a CLAUDE.<harness>.md file override.
+
+        Reads the file found by :func:`find_file_override`. Returns an empty
+        string if no file override exists, making it safe to call unconditionally.
+
+        Args:
+            project_dir: Project root directory.
+            harness: Target harness name.
+
+        Returns:
+            Content of the file-based override, or empty string.
+        """
+        path = HarnessOverride.find_file_override(project_dir, harness)
+        if path is None:
+            return ""
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError:
+            return ""
+
+    def apply_file_override(
+        self,
+        synced_content: str,
+        harness: str,
+        project_dir: Path,
+    ) -> str:
+        """Append file-based override rules (CLAUDE.<harness>.md) after synced content.
+
+        This is an ADDITIVE operation: the file content is appended after the
+        synced base and after any JSON-based rules override, in a clearly-marked
+        section. The file content is NEVER included when syncing to other targets.
+
+        Use this AFTER ``apply_rules_override()`` so JSON overrides come first
+        and file-based overrides come last.
+
+        Args:
+            synced_content: Rules content already written (possibly with JSON
+                            override appended by apply_rules_override()).
+            harness: Target harness name.
+            project_dir: Project root to search for CLAUDE.<harness>.md.
+
+        Returns:
+            Content with file override appended, or original if no file override.
+        """
+        extra = self.load_file_override_rules(project_dir, harness)
+        if not extra.strip():
+            return synced_content
+
+        file_path = self.find_file_override(project_dir, harness)
+        file_name = file_path.name if file_path else f"CLAUDE.{harness}.md"
+
+        marker_start = (
+            f"\n\n<!-- HarnessSync file-override: {file_name} -->\n"
+        )
+        marker_end = f"\n<!-- End file-override: {file_name} -->\n"
+
+        return synced_content + marker_start + extra.strip() + marker_end
+
+    @staticmethod
+    def discover_file_overrides(project_dir: Path) -> dict[str, Path]:
+        """Scan project_dir for all CLAUDE.<harness>.md override files.
+
+        Args:
+            project_dir: Project root to scan.
+
+        Returns:
+            Dict mapping harness name → override file path for each discovered
+            file-based override.
+        """
+        found: dict[str, Path] = {}
+        for pattern in _FILE_OVERRIDE_PATTERNS:
+            # Extract harness name by matching existing files against the pattern
+            prefix, _, suffix = pattern.partition("{harness}")
+            for candidate in project_dir.iterdir():
+                if not candidate.is_file():
+                    continue
+                name = candidate.name
+                if name.startswith(prefix) and name.endswith(suffix):
+                    harness = name[len(prefix):len(name) - len(suffix)]
+                    if harness and harness not in found:
+                        found[harness] = candidate
+        return found
 
     def format_summary(self) -> str:
         """Return a formatted summary of all active overrides."""
