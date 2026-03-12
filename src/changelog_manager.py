@@ -22,6 +22,18 @@ from src.adapters.result import SyncResult
 from src.utils.paths import ensure_dir
 
 
+# Human-readable nouns for each config section type (used in NL summaries)
+_SECTION_NOUNS: dict[str, str] = {
+    "rules":    "rule",
+    "skills":   "skill",
+    "agents":   "agent",
+    "commands": "command",
+    "mcp":      "MCP server",
+    "settings": "setting",
+    "plugins":  "plugin",
+}
+
+
 def _get_git_attribution(project_dir: Path | None = None) -> dict[str, str]:
     """Return the current git author and HEAD commit for attribution (item 30).
 
@@ -445,58 +457,107 @@ class ChangelogManager:
         return lines
 
     def _build_plain_summary(self, results: dict, scope: str) -> str:
-        """Generate a one-line human-readable summary of a sync event.
+        """Generate a human-readable audit summary of a sync event.
 
-        Produces text like:
-          "Synced rules+MCP to 3 targets (codex, gemini, cursor) — 2 files updated."
+        Produces natural language like:
+          "Added 3 skills to codex, updated MCP server URL for gemini,
+           removed deprecated rule from cursor — 2 targets synced."
         or:
-          "Rules-only sync to codex — no changes detected."
+          "Sync to 3 targets (codex, gemini, cursor) — no changes detected."
+
+        The summary decomposes changes per-target and per-section so users
+        have an audit trail they can explain to teammates.
 
         Args:
             results: Sync results dict (same as record()).
             scope: Sync scope string.
 
         Returns:
-            Single-line plain-language summary string.
+            Multi-sentence natural-language summary string.
         """
         target_names = [
             t for t in sorted(results.keys())
             if not t.startswith("_") and isinstance(results[t], dict)
         ]
 
-        total_synced = 0
-        total_files: list[str] = []
-        sections_touched: set[str] = set()
+        # Per-target per-section breakdown
+        target_changes: dict[str, list[str]] = {}
 
         for target, target_results in results.items():
             if target.startswith("_") or not isinstance(target_results, dict):
                 continue
+            phrases: list[str] = []
             for config_type, r in target_results.items():
-                if isinstance(r, SyncResult) and r.synced > 0:
-                    total_synced += r.synced
-                    sections_touched.add(config_type)
-                    if hasattr(r, "synced_files"):
-                        total_files.extend(r.synced_files)
+                if not isinstance(r, SyncResult):
+                    continue
+                synced = r.synced
+                failed = r.failed
+                skipped = r.skipped
+
+                if synced > 0:
+                    # Build a verb phrase: "added/updated N <type>(s)"
+                    noun = _SECTION_NOUNS.get(config_type, config_type)
+                    plural = f"{noun}s" if synced > 1 and not noun.endswith("s") else noun
+                    verb = "synced"
+                    # Heuristic: if skipped==0 and synced is small, likely a fresh add
+                    if skipped == 0 and synced <= 3:
+                        verb = "added"
+                    elif failed > 0:
+                        verb = "partially synced"
+                    phrases.append(f"{verb} {synced} {plural}")
+
+                if failed > 0:
+                    noun = _SECTION_NOUNS.get(config_type, config_type)
+                    phrases.append(f"{failed} {noun} error(s)")
+
+            if phrases:
+                target_changes[target] = phrases
 
         n_targets = len(target_names)
         targets_str = (
             ", ".join(target_names[:3])
-            + (f", +{n_targets - 3} more" if n_targets > 3 else "")
+            + (f" +{n_targets - 3} more" if n_targets > 3 else "")
         )
 
-        sections_str = "+".join(sorted(sections_touched)) if sections_touched else scope
-
-        if total_synced == 0:
+        if not target_changes:
             return f"Sync to {n_targets} target(s) ({targets_str}) — no changes detected."
 
-        unique_files = list(dict.fromkeys(total_files))
-        file_count = len(unique_files)
-        file_part = (
-            f"{file_count} file(s) updated"
-            if file_count > 0
-            else f"{total_synced} item(s) synced"
-        )
-        return f"{sections_str} sync to {n_targets} target(s) ({targets_str}) — {file_part}."
+        # Build per-target sentences
+        sentences: list[str] = []
+        for target in sorted(target_changes):
+            detail = ", ".join(target_changes[target])
+            sentences.append(f"{detail} to {target}")
+
+        body = "; ".join(sentences)
+        n_changed = len(target_changes)
+        return f"{body.capitalize()} — {n_changed} target(s) updated."
+
+    def natural_language_diff_summary(self, results: dict) -> str:
+        """Generate a bullet-point changelog entry for human consumption.
+
+        Returns a multi-line string suitable for appending to a CHANGELOG.md
+        or pasting into a PR description. Each bullet describes one target's
+        changes in plain language.
+
+        Args:
+            results: Sync results dict from SyncOrchestrator.sync_all().
+
+        Returns:
+            Bullet-point summary string (empty string if no changes).
+        """
+        bullets: list[str] = []
+        for target, target_results in sorted(results.items()):
+            if target.startswith("_") or not isinstance(target_results, dict):
+                continue
+            for config_type, r in target_results.items():
+                if not isinstance(r, SyncResult) or r.synced == 0:
+                    continue
+                noun = _SECTION_NOUNS.get(config_type, config_type)
+                plural = f"{noun}s" if r.synced > 1 and not noun.endswith("s") else noun
+                bullets.append(f"- [{target}] Synced {r.synced} {plural}")
+                if r.failed:
+                    bullets.append(f"  ⚠ {r.failed} {noun}(s) failed to sync")
+        return "\n".join(bullets)
 
 
 def record_with_diff(

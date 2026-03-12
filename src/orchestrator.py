@@ -82,6 +82,8 @@ class SyncOrchestrator:
         self._project_skip_targets: set[str] = set()
         self._project_only_targets: set[str] = set()
         self._profile_targets: list[str] | None = None
+        self._per_target_skip: dict[str, set] = {}
+        self._per_target_only: dict[str, set] = {}
 
         # Resolve account config if account specified
         if account and not cc_home:
@@ -105,10 +107,14 @@ class SyncOrchestrator:
 
         {
             "profile": "minimal",         // activate a named profile
-            "skip_sections": ["mcp"],     // sections to skip
-            "only_sections": ["rules"],   // only these sections
+            "skip_sections": ["mcp"],     // sections to skip (all targets)
+            "only_sections": ["rules"],   // only these sections (all targets)
             "skip_targets": ["aider"],    // harness targets to exclude
-            "only_targets": ["codex"]     // only these harness targets
+            "only_targets": ["codex"],    // only these harness targets
+            "targets": {                  // per-target section overrides (item 3)
+                "cursor": {"skip_sections": ["skills"]},
+                "aider":  {"only_sections": ["rules"]}
+            }
         }
 
         Returns:
@@ -170,6 +176,24 @@ class SyncOrchestrator:
         # Target overrides stored for use in sync_all
         self._project_skip_targets = set(project_cfg.get("skip_targets", []))
         self._project_only_targets = set(project_cfg.get("only_targets", []))
+
+        # Per-target section overrides (item 3 — Per-Feature Sync Toggles).
+        # Stored as: {target_name: {"skip": set(...), "only": set(...)}}
+        # Config format in .harnesssync:
+        #   "targets": {
+        #     "cursor": {"skip_sections": ["skills"]},
+        #     "aider":  {"only_sections": ["rules"]}
+        #   }
+        self._per_target_skip: dict[str, set] = {}
+        self._per_target_only: dict[str, set] = {}
+        for tgt, tgt_cfg in project_cfg.get("targets", {}).items():
+            tgt = tgt.lower()
+            tgt_skip = set(tgt_cfg.get("skip_sections", []))
+            tgt_only = set(tgt_cfg.get("only_sections", []))
+            if tgt_skip:
+                self._per_target_skip[tgt] = tgt_skip
+            if tgt_only:
+                self._per_target_only[tgt] = tgt_only
 
         # Apply git branch-aware profile overrides (most specific branch match wins)
         try:
@@ -562,8 +586,8 @@ class SyncOrchestrator:
                 except Exception:
                     pass  # Skill tag filtering is best-effort, never blocks
 
-                # Apply --only / --skip section filtering
-                target_data = self._apply_section_filter(target_data)
+                # Apply --only / --skip section filtering (global + per-target)
+                target_data = self._apply_section_filter(target_data, target=target)
 
                 # Sync with backup/rollback protection
                 try:
@@ -741,20 +765,38 @@ class SyncOrchestrator:
 
         return results
 
-    def _apply_section_filter(self, data: dict) -> dict:
+    def _apply_section_filter(self, data: dict, target: str = "") -> dict:
         """Apply --only and --skip section filters to adapter data.
 
         Sections: rules, skills, agents, commands, mcp, settings.
         If only_sections is set, zero out all sections not in it.
         Then zero out any sections in skip_sections.
 
+        Per-target overrides (item 3 — Per-Feature Sync Toggles) are applied on top:
+          - ``.harnesssync`` → ``targets.cursor.skip_sections`` adds to global skip for cursor
+          - ``.harnesssync`` → ``targets.aider.only_sections`` restricts to those sections for aider
+
         Args:
-            data: Source data dict for a target adapter
+            data:   Source data dict for a target adapter.
+            target: Harness target name (used to look up per-target overrides).
 
         Returns:
             Filtered data dict (sections cleared to empty, not removed)
         """
-        if not self.only_sections and not self.skip_sections:
+        # Merge global + per-target overrides
+        effective_skip = set(self.skip_sections)
+        effective_only = set(self.only_sections)
+
+        if target:
+            tgt_lower = target.lower()
+            if tgt_lower in self._per_target_skip:
+                effective_skip = effective_skip | self._per_target_skip[tgt_lower]
+            if tgt_lower in self._per_target_only:
+                tgt_only = self._per_target_only[tgt_lower]
+                # Intersect with global only_sections if both are set
+                effective_only = (effective_only & tgt_only) if effective_only else tgt_only
+
+        if not effective_only and not effective_skip:
             return data
 
         # Mapping from section name to default empty value
@@ -775,10 +817,10 @@ class SyncOrchestrator:
             section_key = "mcp" if section == "mcp_scoped" else section
 
             # If only_sections specified and this section is not in it → zero out
-            if self.only_sections and section_key not in self.only_sections:
+            if effective_only and section_key not in effective_only:
                 filtered[section] = default
             # If skip_sections specified and this section is in it → zero out
-            elif section_key in self.skip_sections:
+            elif section_key in effective_skip:
                 filtered[section] = default
 
         return filtered

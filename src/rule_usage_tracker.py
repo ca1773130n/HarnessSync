@@ -385,6 +385,111 @@ class RuleUsageTracker:
         stale.sort(key=lambda x: x["days_inactive"], reverse=True)
         return stale
 
+    # ------------------------------------------------------------------
+    # Harness × File-Type Affinity (item 26)
+    # ------------------------------------------------------------------
+
+    def record_file_access(self, harness: str, file_path: str, context: str = "tool_call") -> None:
+        """Record that *harness* was used to edit or view *file_path*.
+
+        Extracts the file extension from *file_path* and appends an event
+        to the usage log with the harness name stored in ``extra``.
+
+        Args:
+            harness:   Harness name (e.g. ``"codex"``, ``"gemini"``).
+            file_path: Absolute or relative path to the accessed file.
+            context:   Event context label.
+        """
+        ext = Path(file_path).suffix.lstrip(".").lower() or "no-ext"
+        self.record(
+            rule=f"filetype:{ext}",
+            context=context,
+            extra={"harness": harness, "file_path": file_path, "ext": ext},
+        )
+
+    def file_type_affinity(self, days: int = 30) -> dict[str, dict[str, int]]:
+        """Compute per-file-extension harness usage counts.
+
+        Returns a nested dict: ``{ext: {harness: count}}``.
+        Only events that have ``extra.harness`` and ``extra.ext`` are counted.
+
+        Args:
+            days: Look-back window (0 = all time).
+
+        Returns:
+            Dict mapping file extension → harness → use count.
+        """
+        events = self.load_events(days=days)
+        result: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        for ev in events:
+            harness = ev.extra.get("harness") if ev.extra else None
+            ext = ev.extra.get("ext") if ev.extra else None
+            if harness and ext:
+                result[ext][harness] += 1
+        return {ext: dict(counts) for ext, counts in result.items()}
+
+    def preferred_harness_by_filetype(self, days: int = 30) -> dict[str, str]:
+        """Return the most-used harness for each file extension.
+
+        Args:
+            days: Look-back window (0 = all time).
+
+        Returns:
+            Dict mapping file extension → preferred harness name.
+        """
+        affinity = self.file_type_affinity(days=days)
+        return {
+            ext: max(harnesses, key=harnesses.__getitem__)
+            for ext, harnesses in affinity.items()
+            if harnesses
+        }
+
+    def format_affinity_report(self, days: int = 30) -> str:
+        """Format a harness × file-type affinity report for terminal display.
+
+        Shows which harness you tend to use for each file type and surfaces
+        routing suggestions (e.g. "You edit .py files most in Codex — consider
+        syncing your Python rules there first.").
+
+        Args:
+            days: Look-back window in days.
+
+        Returns:
+            Formatted report string.
+        """
+        affinity = self.file_type_affinity(days=days)
+        if not affinity:
+            return (
+                "No file-type affinity data recorded.\n"
+                "Call record_file_access(harness, file_path) in PostToolUse hooks."
+            )
+
+        preferred = self.preferred_harness_by_filetype(days=days)
+        window_label = f"last {days} days" if days > 0 else "all time"
+
+        lines = [
+            f"Harness × File-Type Affinity — {window_label}",
+            "=" * 60,
+            "",
+            f"  {'Ext':<10} {'Preferred':<12}  Distribution",
+            "  " + "-" * 55,
+        ]
+
+        for ext in sorted(affinity, key=lambda e: sum(affinity[e].values()), reverse=True):
+            counts = affinity[ext]
+            total = sum(counts.values())
+            pref = preferred.get(ext, "—")
+            dist_parts = [f"{h}: {c}" for h, c in sorted(counts.items(), key=lambda x: x[1], reverse=True)]
+            dist = "  ".join(dist_parts[:4])
+            lines.append(f"  .{ext:<9} {pref:<12}  {dist}")
+
+        lines.append("")
+        lines.append("  Suggestions:")
+        for ext, pref in sorted(preferred.items()):
+            lines.append(f"    .{ext} files → consider syncing {pref}-specific rules for .{ext} tasks")
+
+        return "\n".join(lines)
+
     def format_stale_harness_report(
         self,
         stale_days: int = 30,

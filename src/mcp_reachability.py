@@ -67,13 +67,17 @@ def _get_install_hint(command: str) -> str:
 class McpReachabilityResult:
     """Result of a reachability check for a single MCP server."""
 
-    def __init__(self, name: str, reachable: bool, reason: str = ""):
+    def __init__(self, name: str, reachable: bool, reason: str = "",
+                 response_ms: float | None = None):
         self.name = name
         self.reachable = reachable
         self.reason = reason
+        self.response_ms = response_ms  # TCP connect time in ms (None for stdio/unknown)
 
     def __repr__(self) -> str:
         status = "ok" if self.reachable else f"unreachable ({self.reason})"
+        if self.response_ms is not None:
+            status += f" ({self.response_ms:.0f}ms)"
         return f"McpReachabilityResult({self.name!r}, {status})"
 
 
@@ -211,13 +215,17 @@ class McpReachabilityChecker:
     def _check_url(self, name: str, url: str) -> McpReachabilityResult:
         """Check a URL-based MCP server via TCP socket connect.
 
+        Measures connection latency (TCP connect time in ms) for the
+        health dashboard response-time column.
+
         Args:
             name: Server name
             url: Server URL (http/https/ws/wss)
 
         Returns:
-            McpReachabilityResult
+            McpReachabilityResult with response_ms populated on success
         """
+        import time as _time
         try:
             parsed = urllib.parse.urlparse(url)
             host = parsed.hostname
@@ -230,9 +238,11 @@ class McpReachabilityChecker:
                 scheme = parsed.scheme.lower()
                 port = 443 if scheme in ("https", "wss") else 80
 
+            t0 = _time.monotonic()
             sock = socket.create_connection((host, port), timeout=self.timeout)
+            elapsed_ms = (_time.monotonic() - t0) * 1000
             sock.close()
-            return McpReachabilityResult(name, True)
+            return McpReachabilityResult(name, True, response_ms=elapsed_ms)
         except socket.timeout:
             return McpReachabilityResult(name, False, f"connection timed out ({self.timeout}s)")
         except (socket.error, OSError) as e:

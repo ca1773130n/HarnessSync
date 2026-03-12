@@ -128,13 +128,24 @@ def _collect_harness_mcp(project_dir: Path) -> dict[str, dict]:
     return harness_mcp
 
 
+def _latency_label(response_ms: float | None) -> str:
+    """Return a human-readable latency label with colour hint."""
+    if response_ms is None:
+        return ""
+    if response_ms < 100:
+        return f"  ({response_ms:.0f}ms ✓)"
+    if response_ms < 500:
+        return f"  ({response_ms:.0f}ms ~)"
+    return f"  ({response_ms:.0f}ms ⚠)"
+
+
 def _format_results(
     harness: str,
     servers: dict,
     results: list[McpReachabilityResult],
     verbose: bool,
 ) -> list[str]:
-    """Format health check results for one harness."""
+    """Format health check results for one harness including response times."""
     ok = [r for r in results if r.reachable]
     fail = [r for r in results if not r.reachable]
 
@@ -144,8 +155,11 @@ def _format_results(
     if verbose or fail:
         for r in results:
             icon = "✓" if r.reachable else "✗"
-            reason = f"  — {r.reason}" if not r.reachable else ""
-            lines.append(f"  {icon} {r.name}{reason}")
+            latency = _latency_label(r.response_ms)
+            if r.reachable:
+                lines.append(f"  {icon} {r.name}{latency}")
+            else:
+                lines.append(f"  {icon} {r.name}  — {r.reason}")
 
     return lines
 

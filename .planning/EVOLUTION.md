@@ -2484,3 +2484,33 @@ _2026-03-12T05:24:26.029Z_
 - drift_watcher.py's format_status_line() fills a genuine UX gap: the existing is_running()/get_alert_history() API exposed the data but there was no formatting layer for shell prompt or status bar integration.
 
 ---
+## Iteration 38
+_2026-03-12T05:36:44.449Z_
+
+### Items Attempted
+
+- **MCP Tool Compatibility Matrix** — pass
+
+### Decisions Made
+
+- Created src/mcp_tool_compat.py as the authoritative source for MCP compatibility data rather than embedding it in sync_matrix.py or env_translator.py — this keeps concerns separated and lets any module import the checker functions without circular deps
+- Used three sub-tables (transport, capabilities, features) rather than one flat table because the dimensions are orthogonal: you can have native transport support but still silently drop capability types (e.g. Zed supports stdio but only tools/resources partially)
+- Defined 'error' vs 'warning' severities on CompatIssue so callers can filter: transport mismatches and no-MCP harnesses are errors (silent failures), env var format issues are warnings (degraded behavior)
+- Extended TRANSPORT_SUPPORT in env_translator.py to all 11 harnesses — it was previously only 3. This makes check_transport_support() callable for any target without returning a false 'supported' due to missing dict key
+- Added --mcp-tools and --mcp-section flags to sync_matrix.py to expose the new matrix via the existing /sync-matrix command rather than creating a new command — reduces surface area
+
+### Patterns Discovered
+
+- The project consistently uses frozenset for transport support sets in new code but dict with plain set in env_translator.py — mcp_tool_compat.py uses frozenset for immutability, env_translator.py kept mutable set for backwards compatibility
+- Silent failure is the dominant user pain pattern: config gets written but server never executes (aider, vscode) or connects on wrong transport (SSE on codex). Flagging these as errors rather than warnings is the right call
+- The walrus operator (:=) is used in dict comprehensions in check_all_targets and check_servers_batch — clean Python 3.8+ pattern already used elsewhere in the codebase
+- HARNESS_MCP_NOTES follows the same pattern as CAPABILITY_MATRIX in sync_matrix.py — one-line human notes per harness paired with the symbol matrix
+
+### Takeaways
+
+- env_translator.TRANSPORT_SUPPORT was already the right abstraction but was only populated for 3 harnesses — extending it was low-risk and immediately usable by existing check_transport_support() callers in all adapters
+- Cline/Roo-Code has the most complete MCP implementation of any harness (tools + resources + prompts, allowedTools, alwaysAllow) — worth documenting prominently since users migrating from Claude Code lose capability on every other target
+- The 'unknown' support level is important for honesty: many harnesses haven't published docs on resource/prompt/sampling support — ? is more accurate than ✗ and avoids false alarms in future version checks
+- format_mcp_tool_matrix() could be extended in future to also accept a list of actual configured servers and emit per-server warnings inline — the check_servers_batch() function already does the heavy lifting for that
+
+---
