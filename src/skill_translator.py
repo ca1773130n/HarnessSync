@@ -717,3 +717,99 @@ def annotate_translated_content(
     if not annotation:
         return translated
     return annotation + "\n" + translated
+
+
+# ---------------------------------------------------------------------------
+# Skill translation quality report (item 13)
+# ---------------------------------------------------------------------------
+
+def format_skill_translation_report(
+    skills_dir: Path,
+    targets: list[str] | None = None,
+) -> str:
+    """Report translation quality for all skills in a directory across targets.
+
+    Scans *skills_dir* for ``.md`` skill files, translates each for every
+    requested target, and returns a formatted summary table with per-skill
+    grades and an overall fidelity assessment.
+
+    Helps users understand which skills translate well and which need
+    harness-portable rewrites before syncing (item 13: Skill Translation
+    Quality Report).
+
+    Args:
+        skills_dir: Path to the skills directory (e.g. ``~/.claude/skills/``).
+        targets: Target harness names to report on. Defaults to
+                 ``["codex", "gemini", "cursor", "aider"]``.
+
+    Returns:
+        Formatted multi-line report string.
+    """
+    if targets is None:
+        targets = ["codex", "gemini", "cursor", "aider"]
+
+    # Collect skill files (top-level .md or SKILL.md inside sub-dirs)
+    skill_paths: list[tuple[str, Path]] = []
+    if skills_dir.is_dir():
+        for item in sorted(skills_dir.iterdir()):
+            if item.is_file() and item.suffix == ".md":
+                skill_paths.append((item.stem, item))
+            elif item.is_dir():
+                candidate = item / "SKILL.md"
+                if candidate.is_file():
+                    skill_paths.append((item.name, candidate))
+
+    if not skill_paths:
+        return f"Skill Translation Report: No skills found in {skills_dir}"
+
+    # Grade symbols
+    grade_sym = {"excellent": "A", "good": "B", "fair": "C", "poor": "D"}
+
+    # Header
+    col_skill = max(14, max(len(name) for name, _ in skill_paths) + 2)
+    col_target = 8
+    header_targets = "".join(f"{t:^{col_target}}" for t in targets)
+    lines = [
+        "Skill Translation Quality Report",
+        "=" * (col_skill + col_target * len(targets) + 4),
+        "",
+        f"  {'Skill':<{col_skill}}{header_targets}",
+        "  " + "-" * (col_skill + col_target * len(targets)),
+    ]
+
+    # Per-skill rows
+    skill_scores: list[dict] = []
+    for skill_name, skill_path in skill_paths:
+        row = f"  {skill_name:<{col_skill}}"
+        scores_for_skill: list[int] = []
+        for target in targets:
+            result = score_skill_file(skill_path, target)
+            grade = grade_sym.get(result.get("grade", "poor"), "D")
+            score = result.get("score", 0)
+            scores_for_skill.append(score)
+            row += f"{grade}({score:>3})".center(col_target)
+        lines.append(row)
+        skill_scores.append({
+            "name": skill_name,
+            "path": str(skill_path),
+            "avg_score": sum(scores_for_skill) / max(1, len(scores_for_skill)),
+        })
+
+    lines.append("")
+    lines.append("  Grade: A=excellent(90+)  B=good(70+)  C=fair(50+)  D=poor(<50)")
+    lines.append("")
+
+    # Highlight skills that need attention
+    poor_skills = [s for s in skill_scores if s["avg_score"] < 50]
+    if poor_skills:
+        lines.append("Skills needing attention (avg score < 50):")
+        for s in poor_skills:
+            lines.append(f"  - {s['name']}  (avg {s['avg_score']:.0f}/100) — "
+                         f"consider rewriting for harness portability")
+        lines.append("")
+
+    overall_avg = sum(s["avg_score"] for s in skill_scores) / max(1, len(skill_scores))
+    lines.append(f"Overall translation fidelity: {overall_avg:.0f}/100  "
+                 f"({len(skill_paths)} skill(s) across {len(targets)} target(s))")
+
+    return "\n".join(lines)

@@ -2219,3 +2219,69 @@ _2026-03-12T04:30:24.109Z_
 - sync_impact_predictor.py had no command wrapper despite being a complete, useful module — this is a recurring pattern where backend modules exist but aren't surfaced as slash commands
 
 ---
+## Iteration 34
+_2026-03-12T04:45:24.266Z_
+
+### Items Attempted
+
+- **Sync Plan Preview (Terraform-style)** — pass
+- **Conflict Merge Wizard** — pass
+- **Named Sync Profiles** — pass
+- **Git Branch-Aware Sync** — pass
+- **Team Sync Manifest (Shared via Git)** — pass
+- **CI Drift Validator** — pass
+- **VS Code AI Extension Sync** — pass
+- **Live Capability Compatibility Matrix** — pass
+- **AI-Assisted Rule Translation** — pass
+- **Sync History Timeline** — pass
+- **New Project Bootstrap Wizard** — pass
+- **Community Sync Packs** — pass
+- **Permission Divergence Audit** — pass
+- **Proactive Drift Alerts** — pass
+- **Environment Variable Vault & Translation** — pass
+- **Project-Type Aware Sync** — pass
+- **First-Time Harness Setup Wizard** — pass
+- **Rule Annotations & Rationale** — pass
+- **Bulk Multi-Project Sync** — pass
+- **Harness Upgrade Advisor** — pass
+- **Hierarchical Config Inheritance** — pass
+- **MCP Server Discovery & Sync** — pass
+- **Sync Event Webhooks** — pass
+- **Rule Coverage Analyzer** — pass
+- **Cross-Harness Response Parity Tester** — pass
+- **Skill Gap Recommender** — pass
+- **Token Cost Estimator by Harness** — pass
+- **Config Snapshot Versioning** — pass
+- **Config Share Links** — pass
+- **Rules Lint with Auto-Fix** — pass
+- **Unified Harness Account Manager** — pass
+- **AI Behavior Impact Preview** — pass
+- **Offline Sync Queue** — pass
+- **Deprecated Config Advisor** — pass
+
+### Decisions Made
+
+- Fixed critical bug in sync.py --confirm gate: build_sync_preview was called with `source_data` kwarg that doesn't exist in its signature, silently failing inside try/except. Fixed by calling get_all_native_previews() first to build preview_all dict, then passing it correctly.
+- Added terraform-style consolidated plan summary to --dry-run output. After per-target unified diffs, it now calls get_all_native_previews + build_sync_preview + format_sync_preview to show '+ created / ~ modified / = unchanged' counts grouped by harness — matching the item's Terraform-plan UX goal.
+- Wired ConfigTimeMachine.take_snapshot() into orchestrator.sync_all() pre-sync phase. Snapshot name is timestamped (pre-sync-YYYYMMDD-HHMMSS) so every sync creates a browsable restore point. Wrapped in try/except so it never blocks sync.
+- Wired detect_harness_updates() + format_update_report() into orchestrator.sync_all() post-sync phase. When a harness version change is detected, the report is stored in results['_upgrade_notices'] and displayed in sync.py output after the results table.
+- Added _lint_duplicates() method to ConfigLinter.lint() that uses RuleDeduplicator to detect cross-harness near-duplicate rule clusters. Surfaces a concise warning naming the affected harness pairs so users know to consolidate in CLAUDE.md.
+- Added send_slack_notification() to drift_watcher.py using Slack Block Kit webhook API. Added slack_webhook_url parameter to DriftWatcher.__init__ and make_notifying_alert_callback(). Reads HARNESSSYNC_SLACK_WEBHOOK env var as fallback. Cooldown applies to both OS and Slack notifications to prevent spam.
+
+### Patterns Discovered
+
+- Pattern of wrapping optional feature calls in try/except and never letting them block sync is consistent throughout orchestrator.py — all new wiring follows this pattern.
+- The codebase has many features implemented as standalone modules (config_time_machine.py, harness_version_compat.py, rule_deduplicator.py) but not wired into the main sync flow — implementation exists but activation is missing.
+- results dict uses '_' prefix keys for metadata (e.g. '_conflicts', '_warnings') to distinguish from target results — new keys follow this convention.
+- DriftWatcher uses a Callable parameter for alert_callback which makes it easy to compose behavior; the make_notifying_alert_callback factory pattern is clean for adding new notification channels.
+- The --confirm flag in sync.py was calling build_sync_preview with wrong kwargs — a subtle bug where the try/except masked a TypeError at runtime. This pattern of silent failure is risky; the fix is to use the correct API.
+
+### Takeaways
+
+- Many product features in this codebase exist as fully implemented modules but are not wired into the main execution path — future evolution passes should audit for unused modules and connect them.
+- The native_preview.py module has two separate preview pathways: adapter-level _preview_sync (unified diffs) and the terraform-style build_sync_preview/format_sync_preview (file-level status). Both are now used in dry-run mode.
+- harness_version_compat.py has sophisticated version detection (detect_harness_updates) but was only used for compat warnings, not for the upgrade advisor use case — both are now active.
+- Rule deduplication (RuleDeduplicator) was a standalone scan tool but not integrated into the lint pipeline — adding it to lint() makes it discoverable in the normal config-check workflow.
+- Slack webhook integration is a natural extension of the existing OS notification pattern in drift_watcher.py — the cooldown and key-tracking logic reuses existing infrastructure cleanly.
+
+---

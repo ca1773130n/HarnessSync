@@ -270,3 +270,49 @@ class McpReachabilityChecker:
             if install_hint:
                 reason += f". To install: {install_hint}"
             return McpReachabilityResult(name, False, reason)
+
+
+def filter_unreachable_servers(
+    mcp_servers: dict[str, dict],
+    timeout: float = 3.0,
+) -> tuple[dict[str, dict], list[McpReachabilityResult]]:
+    """Filter out unreachable MCP servers before syncing to targets.
+
+    Returns only the servers that are reachable, along with a list of
+    results for the unreachable ones so callers can emit warnings.
+
+    This implements the MCP Watchdog behaviour (item 5): syncing a dead
+    MCP server config to a target harness causes confusing startup errors
+    on the target machine. Filtering here prevents those errors at the
+    source before the config is written anywhere.
+
+    Args:
+        mcp_servers: Dict mapping server name -> server config dict.
+                     Same format accepted by McpReachabilityChecker.check_all().
+        timeout: TCP connection timeout in seconds (default: 3.0).
+
+    Returns:
+        Tuple of:
+        - reachable_servers: Dict of only the servers that passed the check.
+        - skipped: List of McpReachabilityResult for unreachable servers.
+
+    Example::
+
+        reachable, skipped = filter_unreachable_servers(all_servers)
+        for r in skipped:
+            print(f"Skipping MCP server '{r.name}': {r.reason}")
+        # sync only `reachable` to targets
+    """
+    checker = McpReachabilityChecker(timeout=timeout)
+    results = checker.check_all(mcp_servers)
+
+    reachable: dict[str, dict] = {}
+    skipped: list[McpReachabilityResult] = []
+
+    for result in results:
+        if result.reachable:
+            reachable[result.name] = mcp_servers[result.name]
+        else:
+            skipped.append(result)
+
+    return reachable, skipped

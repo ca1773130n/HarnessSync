@@ -39,6 +39,10 @@ _FEATURE_SUPPORT: dict[str, dict[str, str]] = {
         "cursor":   "full",
         "aider":    "full",
         "windsurf": "full",
+        "cline":    "full",     # Via .clinerules
+        "continue": "full",     # Via .continue/rules/
+        "zed":      "full",     # Via .zed/system-prompt.md
+        "neovim":   "partial",  # Via .avante/system-prompt.md or .codecompanion/
     },
     "skills": {
         "codex":    "none",     # No native skill concept; translates to AGENTS.md prompt
@@ -47,6 +51,10 @@ _FEATURE_SUPPORT: dict[str, dict[str, str]] = {
         "cursor":   "partial",  # Embedded in .mdc rules
         "aider":    "none",
         "windsurf": "none",
+        "cline":    "none",     # No skill concept in Cline
+        "continue": "none",     # No skill concept in Continue
+        "zed":      "none",     # No skill concept in Zed AI
+        "neovim":   "none",     # No skill concept in neovim AI plugins
     },
     "agents": {
         "codex":    "partial",  # Translated to AGENTS.md subagent descriptions
@@ -55,6 +63,10 @@ _FEATURE_SUPPORT: dict[str, dict[str, str]] = {
         "cursor":   "none",
         "aider":    "none",
         "windsurf": "none",
+        "cline":    "none",     # No subagent concept in Cline
+        "continue": "none",     # No subagent concept in Continue
+        "zed":      "none",     # No subagent concept in Zed AI
+        "neovim":   "none",     # No subagent concept in neovim AI plugins
     },
     "commands": {
         "codex":    "none",
@@ -63,6 +75,10 @@ _FEATURE_SUPPORT: dict[str, dict[str, str]] = {
         "cursor":   "none",
         "aider":    "none",
         "windsurf": "none",
+        "cline":    "none",     # No slash commands in Cline
+        "continue": "none",     # No slash commands in Continue
+        "zed":      "none",     # No slash commands in Zed AI
+        "neovim":   "none",     # No slash commands in neovim AI plugins
     },
     "mcp": {
         "codex":    "full",
@@ -71,6 +87,10 @@ _FEATURE_SUPPORT: dict[str, dict[str, str]] = {
         "cursor":   "full",
         "aider":    "none",
         "windsurf": "partial",  # Some MCP fields omitted
+        "cline":    "full",     # Via .roo/mcp.json (MCP native support)
+        "continue": "full",     # Via .continue/config.json mcpServers
+        "zed":      "partial",  # Via .zed/settings.json context_servers (different schema)
+        "neovim":   "partial",  # Via .avante/mcp.json (limited field support)
     },
     "settings": {
         "codex":    "full",
@@ -79,6 +99,10 @@ _FEATURE_SUPPORT: dict[str, dict[str, str]] = {
         "cursor":   "none",
         "aider":    "partial",  # Via .aider.conf.yml
         "windsurf": "partial",
+        "cline":    "none",     # Settings managed in VSCode UI
+        "continue": "none",     # Settings managed in IDE extension settings
+        "zed":      "partial",  # Via .zed/settings.json assistant section
+        "neovim":   "none",     # Settings via plugin config in init.lua/init.vim
     },
 }
 
@@ -116,7 +140,10 @@ class HarnessConfigComparison:
     harness binary.
     """
 
-    ALL_TARGETS = ("codex", "gemini", "opencode", "cursor", "aider", "windsurf")
+    ALL_TARGETS = (
+        "codex", "gemini", "opencode", "cursor", "aider", "windsurf",
+        "cline", "continue", "zed", "neovim",
+    )
 
     def compare(
         self,
@@ -239,9 +266,13 @@ class HarnessConfigComparison:
             ("agents", "codex"):    "agents described in AGENTS.md as subagent descriptions only",
             ("commands", "gemini"): "commands translated to GEMINI.md slash-command hints only",
             ("mcp", "windsurf"):    "some MCP fields (auth, headers) omitted in Windsurf format",
+            ("mcp", "zed"):         "MCP mapped to context_servers; different schema and no env var support",
+            ("mcp", "neovim"):      "MCP via .avante/mcp.json; limited to command/args fields only",
             ("settings", "gemini"): "subset of settings supported; approval_mode and shell only",
             ("settings", "aider"):  "settings translated to .aider.conf.yml key-value pairs",
             ("settings", "windsurf"): "limited settings via .windsurfrules",
+            ("settings", "zed"):    "assistant model/context settings only; permissions not supported",
+            ("rules", "neovim"):    "rules synced to .avante/system-prompt.md; plugin must be avante.nvim",
         }
         return notes.get((feature, target), f"{feature} approximated for {target}")
 
@@ -253,18 +284,33 @@ class HarnessConfigComparison:
             ("skills", "opencode"): "no skill concept in OpenCode",
             ("skills", "aider"):    "no skill concept in Aider",
             ("skills", "windsurf"): "no skill concept in Windsurf",
+            ("skills", "cline"):    "no skill concept in Cline",
+            ("skills", "continue"): "no skill concept in Continue",
+            ("skills", "zed"):      "no skill concept in Zed AI",
+            ("skills", "neovim"):   "no skill concept in neovim AI plugins",
             ("agents", "gemini"):   "no subagent concept in Gemini CLI",
             ("agents", "opencode"): "no subagent concept in OpenCode",
             ("agents", "cursor"):   "no subagent concept in Cursor",
             ("agents", "aider"):    "no subagent concept in Aider",
             ("agents", "windsurf"): "no subagent concept in Windsurf",
+            ("agents", "cline"):    "no subagent concept in Cline",
+            ("agents", "continue"): "no subagent concept in Continue",
+            ("agents", "zed"):      "no subagent concept in Zed AI",
+            ("agents", "neovim"):   "no subagent concept in neovim AI plugins",
             ("commands", "codex"):  "no slash commands in Codex",
             ("commands", "opencode"): "no slash commands in OpenCode",
             ("commands", "cursor"): "no slash commands in Cursor",
             ("commands", "aider"):  "no slash commands in Aider",
             ("commands", "windsurf"): "no slash commands in Windsurf",
+            ("commands", "cline"):  "no slash commands in Cline",
+            ("commands", "continue"): "no slash commands in Continue",
+            ("commands", "zed"):    "no slash commands in Zed AI",
+            ("commands", "neovim"): "no slash commands in neovim AI plugins",
             ("mcp", "aider"):       "Aider does not support MCP server configuration",
             ("settings", "cursor"): "Cursor settings managed in UI, not config files",
+            ("settings", "cline"):  "Cline settings managed in VSCode UI extension settings",
+            ("settings", "continue"): "Continue settings managed in IDE extension settings",
+            ("settings", "neovim"): "neovim AI plugin settings managed in init.lua/init.vim",
         }
         return notes.get((feature, target), f"{feature} not supported by {target}")
 

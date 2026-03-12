@@ -1086,3 +1086,174 @@ def format_section_annotation_report(content: str, targets: list[str] | None = N
                 lines.append(f"           ⚠ Unknown harness(es): {', '.join(sorted(unknown))}")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# .harnessignore file support (item 27)
+# ---------------------------------------------------------------------------
+#
+# A .harnessignore file in the project root (or ~/.harnesssync/.harnessignore
+# for global rules) lets users exclude specific rules, skills, MCPs, and
+# agents from specific targets without polluting CLAUDE.md with tags.
+#
+# File format — one directive per line, blank lines and # comments ignored:
+#
+#   # Exclude the work-slack MCP from all targets except codex
+#   mcp:work-slack-server  skip=gemini,cursor,aider,windsurf
+#
+#   # Exclude a skill from a target that doesn't support it well
+#   skill:experimental-debugger  skip=aider,windsurf
+#
+#   # Exclude a CLAUDE.md section heading from a specific target
+#   rule:## Database Guidelines  skip=codex
+#
+#   # Exclude an agent definition from all targets
+#   agent:code-reviewer  skip=all
+#
+# Supported item types: rule, skill, agent, command, mcp
+# Supported modifiers:  skip=<comma-separated targets or "all">
+#                       only=<comma-separated targets>
+#
+# ---------------------------------------------------------------------------
+
+_IGNORE_COMMENT_RE = re.compile(r"\s*#.*$")
+
+
+def _parse_harnessignore_line(line: str) -> dict | None:
+    """Parse a single .harnessignore directive.
+
+    Returns a dict with keys: item_type, item_name, mode ("skip"|"only"),
+    targets (frozenset of target names, or frozenset() meaning "all targets").
+    Returns None for blank/comment lines or unrecognised formats.
+    """
+    line = _IGNORE_COMMENT_RE.sub("", line).strip()
+    if not line:
+        return None
+
+    parts = line.split(None, 1)
+    if len(parts) < 2:
+        return None
+
+    type_name_part = parts[0]
+    modifier_part = parts[1].strip()
+
+    if ":" not in type_name_part:
+        return None
+
+    item_type, _, item_name = type_name_part.partition(":")
+    item_type = item_type.lower()
+    if item_type not in ("rule", "skill", "agent", "command", "mcp"):
+        return None
+
+    mode = "skip"
+    targets_raw = ""
+
+    if modifier_part.lower().startswith("skip="):
+        mode = "skip"
+        targets_raw = modifier_part[5:].strip()
+    elif modifier_part.lower().startswith("only="):
+        mode = "only"
+        targets_raw = modifier_part[5:].strip()
+    else:
+        return None
+
+    if targets_raw.lower() == "all":
+        targets: frozenset[str] = frozenset()  # empty = all targets
+    else:
+        targets = frozenset(t.strip() for t in targets_raw.split(",") if t.strip())
+
+    return {
+        "item_type": item_type,
+        "item_name": item_name,
+        "mode": mode,
+        "targets": targets,
+    }
+
+
+def load_harnessignore(project_dir: "Path | None" = None) -> list[dict]:
+    """Load .harnessignore rules from project and global config.
+
+    Searches in order:
+    1. ~/.harnesssync/.harnessignore  (global)
+    2. <project_dir>/.harnessignore   (project, takes precedence)
+
+    Args:
+        project_dir: Project root directory. None means global rules only.
+
+    Returns:
+        List of parsed ignore rule dicts (see _parse_harnessignore_line).
+    """
+    import pathlib
+
+    rules: list[dict] = []
+    candidates: list[pathlib.Path] = []
+
+    global_path = pathlib.Path.home() / ".harnesssync" / ".harnessignore"
+    if global_path.is_file():
+        candidates.append(global_path)
+
+    if project_dir is not None:
+        project_path = pathlib.Path(project_dir) / ".harnessignore"
+        if project_path.is_file():
+            candidates.append(project_path)
+
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for raw_line in text.splitlines():
+            parsed = _parse_harnessignore_line(raw_line)
+            if parsed is not None:
+                rules.append(parsed)
+
+    return rules
+
+
+def apply_harnessignore(
+    items: dict,
+    item_type: str,
+    target: str,
+    rules: list[dict],
+) -> dict:
+    """Filter an items dict using .harnessignore rules.
+
+    Args:
+        items: Dict mapping item name -> item data (skills, agents, MCPs, etc.)
+        item_type: One of "skill", "agent", "command", "mcp", "rule".
+        target: The target harness being synced (e.g. "codex").
+        rules: List of parsed ignore rules from load_harnessignore().
+
+    Returns:
+        Filtered dict with excluded items removed.
+    """
+    if not rules:
+        return items
+
+    result = {}
+    for name, data in items.items():
+        excluded = False
+        for rule in rules:
+            if rule["item_type"] != item_type:
+                continue
+            rule_name = rule["item_name"]
+            # Match by exact name or prefix
+            if rule_name != name and not name.startswith(rule_name):
+                continue
+
+            rule_targets = rule["targets"]
+            all_targets = len(rule_targets) == 0  # empty frozenset means "all"
+
+            if rule["mode"] == "skip":
+                if all_targets or target in rule_targets:
+                    excluded = True
+                    break
+            elif rule["mode"] == "only":
+                if not all_targets and target not in rule_targets:
+                    excluded = True
+                    break
+
+        if not excluded:
+            result[name] = data
+
+    return result

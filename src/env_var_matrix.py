@@ -357,3 +357,131 @@ class EnvVarMatrix:
             return f"***({len(value)} chars)"
         # Show first 40 chars of non-secret values
         return value[:40] + ("…" if len(value) > 40 else "")
+
+
+# ---------------------------------------------------------------------------
+# Portability checker — scan synced configs for env var references (item 28)
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+# Patterns that identify env var references in config text (e.g. ${VAR}, $VAR)
+_ENV_REF_RE = _re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}|\$([A-Z_][A-Z0-9_]{2,})")
+
+
+@dataclass
+class EnvPortabilityIssue:
+    """One env var reference in a config that may not be available in a target."""
+    var_name: str       # The referenced env var name
+    source_file: str    # Config file or field where it was found
+    targets_missing: list[str]   # Targets where this var is unavailable
+    targets_partial: list[str]   # Targets where support is partial
+
+
+@dataclass
+class EnvPortabilityReport:
+    """Report of env var portability issues across synced configs."""
+    issues: list[EnvPortabilityIssue] = field(default_factory=list)
+
+    @property
+    def total_issues(self) -> int:
+        return len(self.issues)
+
+    def is_clean(self) -> bool:
+        return not self.issues
+
+    def format(self) -> str:
+        """Format as human-readable text."""
+        if self.is_clean():
+            return "Env Portability: No issues found."
+
+        lines = ["## Env Var Portability Issues", ""]
+        for issue in self.issues:
+            lines.append(f"  ${issue.var_name}  (in {issue.source_file})")
+            if issue.targets_missing:
+                lines.append(f"    Not available in: {', '.join(issue.targets_missing)}")
+            if issue.targets_partial:
+                lines.append(f"    Partial support in: {', '.join(issue.targets_partial)}")
+        lines.append(f"\nTotal issues: {self.total_issues}")
+        return "\n".join(lines)
+
+
+def check_env_portability(
+    config_texts: dict[str, str],
+    targets: list[str] | None = None,
+    current_env: dict[str, str] | None = None,
+) -> EnvPortabilityReport:
+    """Scan config texts for env var references and check harness portability.
+
+    Finds all ``${VAR}`` and ``$VAR`` references in the provided config
+    strings, then checks whether each referenced variable has a native
+    or mapped equivalent in each target harness. Variables that are
+    only set in the source environment but have no equivalent in a target
+    will cause silent failures when those configs are used.
+
+    Args:
+        config_texts: Dict mapping a label (e.g. "mcp:my-server env.API_KEY")
+                      to a text snippet containing potential env var references.
+                      Typically the raw JSON/TOML values of MCP env fields.
+        targets: Target harness names to check. Defaults to all known targets.
+        current_env: Optional current environment (os.environ). If provided,
+                     only variables that are actually set are reported.
+                     Pass None to report all referenced variables regardless.
+
+    Returns:
+        EnvPortabilityReport with per-variable portability issues.
+    """
+    if targets is None:
+        targets = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"]
+
+    # Build a lookup: var_name -> EnvVarSpec (for vars we know about)
+    known: dict[str, EnvVarSpec] = {spec.name: spec for spec in ENV_VAR_REGISTRY}
+
+    report = EnvPortabilityReport()
+
+    for source_label, text in config_texts.items():
+        # Find all env var references in the text
+        referenced: set[str] = set()
+        for m in _ENV_REF_RE.finditer(text):
+            var_name = m.group(1) or m.group(2)
+            if var_name:
+                referenced.add(var_name)
+
+        for var_name in sorted(referenced):
+            # Skip if current_env filter is active and var isn't set
+            if current_env is not None and var_name not in current_env:
+                continue
+
+            spec = known.get(var_name)
+            if spec is None:
+                # Unknown var — assume potential portability issue on all targets
+                report.issues.append(EnvPortabilityIssue(
+                    var_name=var_name,
+                    source_file=source_label,
+                    targets_missing=list(targets),
+                    targets_partial=[],
+                ))
+                continue
+
+            missing = []
+            partial = []
+            for target in targets:
+                target_info = spec.targets.get(target)
+                if target_info is None:
+                    missing.append(target)
+                else:
+                    level, _ = target_info
+                    if level == EnvSupport.NONE:
+                        missing.append(target)
+                    elif level in (EnvSupport.PARTIAL, EnvSupport.MAPPED):
+                        partial.append(target)
+
+            if missing or partial:
+                report.issues.append(EnvPortabilityIssue(
+                    var_name=var_name,
+                    source_file=source_label,
+                    targets_missing=missing,
+                    targets_partial=partial,
+                ))
+
+    return report
