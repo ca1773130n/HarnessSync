@@ -187,3 +187,12 @@
 [2026-03-12T01:02:21.809Z] Batch execute completed (code changes detected)
 [2026-03-12T01:02:21.809Z] Running single review for all 1 groups
 [2026-03-12T01:05:01.921Z] Batch review completed
+[2026-03-12T01:05:01.981Z] Auto-committed: evolve(iteration-21): miscellaneous
+[2026-03-12T01:05:01.982Z] Starting iteration 22
+[2026-03-12T01:08:02.459Z] Discovered 36 new + -4 carried-over = 32 total items, 1 groups, selected 1
+[2026-03-12T01:08:02.459Z] Capped batch from 32 to 30 items (max 30)
+[2026-03-12T01:08:02.459Z] Batch-executing 1 groups (30 items) in one subprocess
+[2026-03-12T01:18:28.540Z] Read iteration feedback: 9 decisions, 5 patterns, 5 takeaways
+[2026-03-12T01:18:28.578Z] Batch execute completed (code changes detected)
+[2026-03-12T01:18:28.578Z] Running single review for all 1 groups
+[2026-03-12T01:20:05.969Z] Batch review completed

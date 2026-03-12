@@ -662,3 +662,238 @@ class UsageAttributionAnalyzer:
                     )
 
         return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Multi-Project Sync Dashboard (item 26)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class MultiProjectDashboard:
+    """Aggregated sync status across all tracked projects.
+
+    Scans common project roots (git repos under home, recently accessed dirs)
+    for HarnessSync state and presents a unified control-tower view showing
+    which projects are synced, drifted, or unsynced.
+
+    Useful for power users working across 10+ repositories who need to know
+    at a glance which projects have stale harness configs.
+    """
+
+    # Common project root directories to scan
+    _DEFAULT_SEARCH_ROOTS: list[str] = [
+        "~/Developer",
+        "~/Projects",
+        "~/Code",
+        "~/src",
+        "~/work",
+        "~/repos",
+    ]
+
+    def __init__(self, search_roots: list[str] | None = None, max_depth: int = 3):
+        self.search_roots = [Path(r).expanduser() for r in (search_roots or self._DEFAULT_SEARCH_ROOTS)]
+        self.max_depth = max_depth
+
+    def discover_projects(self) -> list[Path]:
+        """Find all directories that look like HarnessSync-tracked projects.
+
+        A directory qualifies if it contains a ``.harnesssync`` file or a
+        HarnessSync state file in the default state directory.
+
+        Returns:
+            Sorted list of project root Paths.
+        """
+        projects: list[Path] = []
+
+        for root in self.search_roots:
+            if not root.exists():
+                continue
+            try:
+                self._scan_dir(root, depth=0, found=projects)
+            except PermissionError:
+                pass
+
+        # Also check any explicitly tracked projects in state
+        try:
+            state_dir = Path.home() / ".harnesssync" / "projects"
+            if state_dir.exists():
+                for entry in state_dir.iterdir():
+                    if entry.is_dir():
+                        candidate = Path(entry.name.replace("_", "/"))
+                        if candidate.exists() and candidate not in projects:
+                            projects.append(candidate)
+        except OSError:
+            pass
+
+        return sorted(set(projects))
+
+    def _scan_dir(self, directory: Path, depth: int, found: list[Path]) -> None:
+        """Recursively scan for HarnessSync project markers."""
+        if depth > self.max_depth:
+            return
+
+        # Project marker: .harnesssync config file or .git + CLAUDE.md
+        has_harnesssync = (directory / ".harnesssync").exists()
+        has_claude_md = (directory / "CLAUDE.md").exists()
+        has_git = (directory / ".git").exists()
+
+        if has_harnesssync or (has_git and has_claude_md):
+            found.append(directory)
+            return  # Don't recurse into found projects
+
+        try:
+            for child in directory.iterdir():
+                if child.is_dir() and not child.name.startswith("."):
+                    self._scan_dir(child, depth + 1, found)
+        except PermissionError:
+            pass
+
+    def project_status(self, project_dir: Path) -> dict:
+        """Get sync status for a single project.
+
+        Args:
+            project_dir: Project root directory.
+
+        Returns:
+            Dict with keys:
+                - path: str — project path
+                - name: str — directory name
+                - has_harnesssync: bool — config file present
+                - has_claude_md: bool — CLAUDE.md present
+                - last_sync: str | None — ISO timestamp of last sync
+                - targets_synced: list[str] — targets with sync state
+                - drift_targets: list[str] — targets with detected drift
+                - status: str — "synced" | "drifted" | "never_synced" | "no_config"
+        """
+        has_harnesssync = (project_dir / ".harnesssync").exists()
+        has_claude_md = (project_dir / "CLAUDE.md").exists()
+
+        last_sync: str | None = None
+        targets_synced: list[str] = []
+        drift_targets: list[str] = []
+
+        try:
+            from src.state_manager import StateManager
+            sm = StateManager(project_dir=project_dir)
+            state = sm.load()
+
+            last_sync_ts = state.get("last_sync")
+            if last_sync_ts:
+                last_sync = last_sync_ts[:19]
+
+            for target, info in state.get("targets", {}).items():
+                if info:
+                    targets_synced.append(target)
+
+            # Check for drift using conflict detector
+            try:
+                from src.conflict_detector import ConflictDetector
+                detector = ConflictDetector(state_manager=sm)
+                for target in targets_synced:
+                    conflicts = detector.check(target)
+                    if conflicts:
+                        drift_targets.append(target)
+            except Exception:
+                pass
+
+        except Exception:
+            pass
+
+        if not has_claude_md:
+            status = "no_config"
+        elif not targets_synced and not last_sync:
+            status = "never_synced"
+        elif drift_targets:
+            status = "drifted"
+        else:
+            status = "synced"
+
+        return {
+            "path": str(project_dir),
+            "name": project_dir.name,
+            "has_harnesssync": has_harnesssync,
+            "has_claude_md": has_claude_md,
+            "last_sync": last_sync,
+            "targets_synced": targets_synced,
+            "drift_targets": drift_targets,
+            "status": status,
+        }
+
+    def dashboard(self, projects: list[Path] | None = None) -> list[dict]:
+        """Generate status for all discovered (or provided) projects.
+
+        Args:
+            projects: Projects to check. If None, auto-discovers via discover_projects().
+
+        Returns:
+            List of project status dicts, sorted by status severity then name.
+        """
+        if projects is None:
+            projects = self.discover_projects()
+
+        statuses = [self.project_status(p) for p in projects]
+
+        # Sort: drifted first, then never_synced, then synced, then no_config
+        priority = {"drifted": 0, "never_synced": 1, "synced": 2, "no_config": 3}
+        statuses.sort(key=lambda s: (priority.get(s["status"], 9), s["name"]))
+
+        return statuses
+
+    def format_dashboard(self, statuses: list[dict] | None = None) -> str:
+        """Format the multi-project dashboard for terminal display.
+
+        Args:
+            statuses: Output of dashboard(). If None, auto-discovers.
+
+        Returns:
+            Formatted dashboard string.
+        """
+        if statuses is None:
+            statuses = self.dashboard()
+
+        if not statuses:
+            return (
+                "No HarnessSync projects found.\n"
+                "Projects with .harnesssync or CLAUDE.md + .git will appear here."
+            )
+
+        status_icons = {
+            "synced": "✓",
+            "drifted": "⚠",
+            "never_synced": "○",
+            "no_config": "—",
+        }
+
+        lines = [
+            "Multi-Project Sync Dashboard",
+            "=" * 70,
+            "",
+            f"  {'Project':<30} {'Status':<14} {'Last Sync':<20} Targets",
+            "  " + "-" * 68,
+        ]
+
+        for s in statuses:
+            icon = status_icons.get(s["status"], "?")
+            name = s["name"][:29]
+            status_str = f"{icon} {s['status'].replace('_', ' ')}"
+            last = s["last_sync"] or "never"
+            targets = ", ".join(s["targets_synced"][:4])
+            if len(s["targets_synced"]) > 4:
+                targets += f" (+{len(s['targets_synced']) - 4})"
+            if s["drift_targets"]:
+                targets += f"  [drift: {', '.join(s['drift_targets'])}]"
+            lines.append(f"  {name:<30} {status_str:<14} {last:<20} {targets}")
+
+        lines.append("")
+        counts = {k: sum(1 for s in statuses if s["status"] == k)
+                  for k in ("synced", "drifted", "never_synced", "no_config")}
+        lines.append(
+            f"  Summary: {counts['synced']} synced  "
+            f"{counts['drifted']} drifted  "
+            f"{counts['never_synced']} never synced  "
+            f"{counts['no_config']} no config"
+        )
+        lines.append("")
+        lines.append("  ✓=synced  ⚠=drifted  ○=never synced  —=no CLAUDE.md")
+
+        return "\n".join(lines)

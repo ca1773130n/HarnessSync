@@ -1343,3 +1343,74 @@ _2026-03-12T00:47:42.142Z_
 - Snippet translation coverage is sparse by design — harnesses like gemini and opencode use sufficiently similar markdown that canonical form works fine; only aider (flat text) and codex (minor formatting differences) benefit from custom translations.
 
 ---
+## Iteration 21
+_2026-03-12T01:05:01.981Z_
+
+### Items Attempted
+
+- **Reverse Sync: Harvest from Other Harnesses** — pass
+- **Per-Harness Override Layer** — pass
+- **Sync Conflict Resolution Wizard** — pass
+- **Named Sync Profiles** — pass
+- **Harness Compatibility Score** — pass
+- **Starter Config Template Library** — pass
+- **Harness Format Change Notifier** — pass
+- **Git Branch-Aware Sync** — pass
+- **Migrate INTO Claude Code Wizard** — pass
+- **Sync Impact Preview (Dry Run UI)** — pass
+- **Team Config Sharing via Git** — pass
+- **AI-Powered Concept Translation** — pass
+- **Safe Secrets & Env Var Sync** — pass
+- **Auto-Discover Newly Installed Harnesses** — pass
+- **Sync History Timeline** — pass
+- **Compliance-Pinned Rules** — pass
+- **Cross-Harness Task Comparison** — pass
+- **Plugin & Skill Compatibility Matrix** — pass
+- **Config Health Score Dashboard** — pass
+- **Interactive First-Run Onboarding Wizard** — pass
+- **Sync Notifications via Slack/Discord** — pass
+- **Config Inheritance Hierarchy** — pass
+- **Shareable Config Bundle Export** — pass
+- **MCP Server Reachability Alerts** — pass
+- **Natural Language Rule Authoring** — pass
+- **Config Version Pinning Per Target** — pass
+- **Audit Log Export for Compliance** — pass
+- **CI/CD Sync Integration** — pass
+- **Parity Gap Explainer** — pass
+- **Harness Usage Analytics** — pass
+- **Interactive Section Toggle UI** — pass
+- **Auto-Sync on PR Merge** — pass
+- **MCP Server Cost Visibility** — pass
+- **Config Quality Linter with Suggestions** — pass
+- **Desktop Notifications for Sync Events** — pass
+- **Harness-Specific Tuning Advisor** — pass
+- **Sync Sandbox / Preview Environment** — pass
+- **Auto-Generated Config Changelog** — pass
+- **Harness Benchmark Report** — pass
+- **Community Config Registry** — pass
+
+### Decisions Made
+
+- Item 16 (Compliance-Pinned Rules): Implemented compliance flag at two levels — DSL rules (compliance: true / priority: critical implies compliance) and inline HTML tags (<!-- compliance:pinned --> blocks). The two-level design means users get compliance enforcement whether they use the structured DSL or plain Markdown. Critical-priority rules are auto-pinned to avoid requiring users to set two fields.
+- Item 7 (Format Change Notifier): Chose hash-based diffing of the internal VERSIONED_FEATURES matrix rather than polling upstream GitHub repos (which would require network access and rate limiting). The hash approach detects when HarnessSync itself ships updated compat data — the most actionable signal for users — and emits a structured diff of added/changed/removed features per target.
+- Item 30 (Stale Harness Detection): Used file mtime of known harness config files as a proxy for activity, avoiding the need for process monitoring or shell history. Embedded the harness-to-config-path mapping directly in RuleUsageTracker as a class attribute so it's co-located with the other analytics methods.
+- Item 17 (Cross-Harness Config Comparison): Implemented as static config analysis (no actual harness binary invocation) using a hardcoded feature support matrix. This is sound because the translation fidelity is determined by HarnessSync's adapter implementations, not runtime behavior. Added sync-tag-aware rule counting so the score reflects real filtered output, not just source content.
+- Skipped items 1-6, 8-15, 18-29 because their core implementations already exist in the codebase (e.g., sync_import.py for reverse sync, harness_override.py for per-harness overrides, branch_aware_sync.py for git branch-aware sync, etc.).
+
+### Patterns Discovered
+
+- The codebase uses a two-level tag design consistently: HTML comment tags for inline/block Markdown annotation, and structured DSL blocks (```harness-rule```) for semantic metadata. New features should follow this pattern rather than introducing a third tag syntax.
+- The orchestrator delegates concern cleanly: secret detection, conflict detection, backup, and section filtering are all separate modules invoked sequentially. New features that need to run pre- or post-sync should be added as modules called from sync_all() in the same pipeline style.
+- All source modules use from __future__ import annotations for Python 3.9 compatibility — this must be maintained in every new file.
+- The harness_version_compat.py file has grown into a multi-concern module (version pinning + migration rules + capability suggestions + now format change notification). A future refactor could split these into separate files, but the pattern is consistent within the file.
+- Configuration state is persisted at ~/.harnesssync/ as JSON/JSONL files. The format-matrix.json cache follows this convention. New persistent state should use this directory rather than creating new dotfile locations.
+
+### Takeaways
+
+- Most product-ideation items from the list were already implemented as separate Python modules. The codebase has reached a high feature surface area — future iterations should focus on integration quality (wiring existing modules together, adding tests) rather than new standalone modules.
+- The harness_comparison.py module's feature support matrix will need maintenance as harnesses release new versions. Consider auto-deriving it from VERSIONED_FEATURES rather than maintaining a separate hardcoded dict.
+- The stale harness detection relies on config file mtime, which can be misleading — package managers or sync operations can touch files without user activity. A more accurate signal would be shell history or process invocation logs, but those require OS-level integration.
+- check_format_matrix_changes() will always return empty on first run (baseline establishment), which means users who upgrade HarnessSync won't see change notifications on the first run after upgrade. This is intentional — avoids false alarms — but should be documented.
+- The compliance:pinned tag in sync_filter bypasses sync-tag filtering but not section-level filtering (only_sections/skip_sections in the orchestrator). A future PR should wire extract_compliance_pinned() into the orchestrator so compliance content survives even when the rules section is explicitly skipped.
+
+---

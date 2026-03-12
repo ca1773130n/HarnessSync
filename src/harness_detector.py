@@ -256,3 +256,124 @@ def format_detection_report(detected: dict[str, dict]) -> str:
         lines.append(f"  {name:<14} v{version:<12} via {method_str}{exe_part}")
 
     return "\n".join(lines)
+
+
+def bootstrap_new_harness(
+    harness: str,
+    project_dir: "Path",
+    cc_home: "Path | None" = None,
+    dry_run: bool = False,
+    interactive: bool = True,
+) -> dict:
+    """Bootstrap a newly detected harness from Claude Code config.
+
+    Runs a targeted sync to populate the new harness's config directory
+    with rules, MCP servers, and settings translated from CLAUDE.md. This
+    eliminates the cold-start problem — newly installed harnesses start
+    fully configured rather than blank.
+
+    Args:
+        harness: Canonical harness name to bootstrap (e.g. "windsurf").
+        project_dir: Project root directory.
+        cc_home: Claude Code config home (default: ~/.claude).
+        dry_run: If True, show what would be written without writing.
+        interactive: If True and stdin is a TTY, confirm before syncing.
+
+    Returns:
+        Dict with keys:
+            - "harness": str — the harness that was bootstrapped
+            - "success": bool — True if bootstrap completed without errors
+            - "files_written": list[str] — files created/updated
+            - "skipped": bool — True if user declined in interactive mode
+            - "error": str | None — error message if failed
+            - "dry_run": bool
+    """
+    import sys
+    from pathlib import Path as _Path
+
+    result: dict = {
+        "harness": harness,
+        "success": False,
+        "files_written": [],
+        "skipped": False,
+        "error": None,
+        "dry_run": dry_run,
+    }
+
+    # Check if the harness is actually installed
+    detected = scan_all()
+    if harness not in detected:
+        result["error"] = f"Harness '{harness}' not found on this system."
+        return result
+
+    if interactive and sys.stdin.isatty():
+        version = detected[harness].get("version") or "unknown version"
+        print(f"\nNew AI coding harness detected: {harness} (v{version})")
+        print(f"Bootstrap it from your Claude Code config? (y/N): ", end="", flush=True)
+        try:
+            answer = input().strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = "n"
+        if answer not in ("y", "yes"):
+            result["skipped"] = True
+            return result
+
+    try:
+        from src.orchestrator import SyncOrchestrator
+
+        orch = SyncOrchestrator(
+            project_dir=_Path(project_dir),
+            scope="all",
+            dry_run=dry_run,
+            cc_home=_Path(cc_home) if cc_home else None,
+            cli_only_targets={harness},
+        )
+
+        sync_results = orch.sync_all()
+
+        harness_result = (sync_results or {}).get(harness)
+        if harness_result is not None:
+            success = getattr(harness_result, "success", False)
+            files = getattr(harness_result, "files_written", [])
+            result["success"] = success
+            result["files_written"] = list(files) if files else []
+            if not success:
+                result["error"] = getattr(harness_result, "error", "sync failed")
+        else:
+            result["error"] = f"No sync result returned for {harness}"
+
+    except Exception as e:
+        result["error"] = str(e)
+
+    return result
+
+
+def prompt_bootstrap_new_harnesses(
+    already_configured: list[str],
+    project_dir: "Path",
+    cc_home: "Path | None" = None,
+) -> list[dict]:
+    """Detect newly installed harnesses and offer to bootstrap each one.
+
+    Scans for harnesses not yet in ``already_configured``, then calls
+    :func:`bootstrap_new_harness` interactively for each one found.
+
+    Args:
+        already_configured: Harnesses already set up in HarnessSync.
+        project_dir: Project root directory.
+        cc_home: Claude Code config home (default: ~/.claude).
+
+    Returns:
+        List of bootstrap result dicts (one per newly detected harness).
+    """
+    new_harnesses = detect_new_harnesses(already_configured)
+    results = []
+    for harness in new_harnesses:
+        result = bootstrap_new_harness(
+            harness=harness,
+            project_dir=project_dir,
+            cc_home=cc_home,
+            interactive=True,
+        )
+        results.append(result)
+    return results

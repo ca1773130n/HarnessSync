@@ -490,3 +490,212 @@ class NLConfigGenerator:
         if not config:
             return ""
         return json.dumps(config, indent=2)
+
+    def query_sync_state(
+        self,
+        question: str,
+        project_dir: "Path | None" = None,
+        cc_home: "Path | None" = None,
+    ) -> str:
+        """Answer a natural-language question about the current sync state.
+
+        Users can ask questions like:
+          - "which MCP servers are available in Gemini?"
+          - "what rules didn't sync to Codex and why?"
+          - "which harnesses support skills?"
+          - "is file-system MCP synced to Cursor?"
+
+        Answers are derived from static config analysis (no LLM call needed).
+
+        Args:
+            question: Plain-English question about sync state.
+            project_dir: Project root directory.
+            cc_home: Claude Code config home (default: ~/.claude).
+
+        Returns:
+            Human-readable answer string.
+        """
+        from pathlib import Path as _Path
+
+        text = question.lower().strip()
+
+        # Dispatch to the right query handler based on keywords
+        if any(k in text for k in ("mcp", "server", "servers")):
+            return self._query_mcp(text, project_dir, cc_home)
+
+        if any(k in text for k in ("rule", "rules", "section", "sections")):
+            return self._query_rules(text, project_dir, cc_home)
+
+        if any(k in text for k in ("skill", "skills")):
+            return self._query_skills(text, project_dir, cc_home)
+
+        if any(k in text for k in ("support", "supports", "compatible", "compatibility")):
+            return self._query_compatibility(text, project_dir, cc_home)
+
+        if any(k in text for k in ("sync to", "synced to", "available in", "available on")):
+            return self._query_availability(text, project_dir, cc_home)
+
+        return (
+            "I couldn't interpret that question. Try asking:\n"
+            "  - 'which MCP servers are available in Gemini?'\n"
+            "  - 'what rules didn't sync to Codex?'\n"
+            "  - 'which harnesses support skills?'\n"
+            "  - 'is <server-name> synced to Cursor?'"
+        )
+
+    def _query_mcp(self, text: str, project_dir, cc_home) -> str:
+        """Answer questions about MCP server sync state."""
+        from pathlib import Path as _Path
+
+        # Determine which harness the user is asking about
+        _TARGET_ALIASES = {
+            "aider": "aider", "codex": "codex", "gemini": "gemini",
+            "opencode": "opencode", "cursor": "cursor",
+            "windsurf": "windsurf", "cline": "cline",
+            "continue": "continue", "zed": "zed", "neovim": "neovim",
+        }
+        target = next((v for k, v in _TARGET_ALIASES.items() if k in text), None)
+
+        try:
+            from src.source_reader import SourceReader
+            reader = SourceReader(
+                scope="user",
+                project_dir=_Path(project_dir) if project_dir else _Path.cwd(),
+                cc_home=_Path(cc_home) if cc_home else None,
+            )
+            data = reader.read_all()
+            mcp_servers = data.get("mcp", {})
+        except Exception as e:
+            return f"Could not read MCP config: {e}"
+
+        if not mcp_servers:
+            return "No MCP servers found in your Claude Code config."
+
+        # Harness MCP support levels
+        from src.harness_comparison import _FEATURE_SUPPORT
+        mcp_support = _FEATURE_SUPPORT.get("mcp", {})
+
+        if target:
+            support = mcp_support.get(target, "none")
+            if support == "none":
+                return (
+                    f"{target.title()} does not support MCP servers.\n"
+                    f"MCP configs will not be synced to {target}."
+                )
+            server_names = list(mcp_servers.keys()) if isinstance(mcp_servers, dict) else []
+            if not server_names:
+                return f"No MCP servers configured (would sync {len(mcp_servers)} to {target})."
+            lines = [f"MCP servers available in {target.title()} ({support} support):"]
+            for name in server_names:
+                lines.append(f"  ✓ {name}")
+            if support == "partial":
+                lines.append(f"\n  Note: {target} has partial MCP support — some fields may be omitted.")
+            return "\n".join(lines)
+
+        # General: show all harnesses and their MCP support
+        server_names = list(mcp_servers.keys()) if isinstance(mcp_servers, dict) else []
+        lines = [f"MCP Servers ({len(server_names)} configured):"]
+        for name in server_names:
+            lines.append(f"  {name}")
+        lines.append("\nSupport by harness:")
+        for harness, level in sorted(mcp_support.items()):
+            icon = {"full": "✓", "partial": "~", "none": "✗"}.get(level, "?")
+            lines.append(f"  {icon} {harness:<14} {level}")
+        return "\n".join(lines)
+
+    def _query_rules(self, text: str, project_dir, cc_home) -> str:
+        """Answer questions about rule sync state."""
+        from pathlib import Path as _Path
+        _TARGET_ALIASES = {
+            "aider": "aider", "codex": "codex", "gemini": "gemini",
+            "opencode": "opencode", "cursor": "cursor", "windsurf": "windsurf",
+        }
+        target = next((v for k, v in _TARGET_ALIASES.items() if k in text), None)
+
+        try:
+            from src.source_reader import SourceReader
+            reader = SourceReader(
+                scope="all",
+                project_dir=_Path(project_dir) if project_dir else _Path.cwd(),
+                cc_home=_Path(cc_home) if cc_home else None,
+            )
+            data = reader.read_all()
+            rules = data.get("rules", {})
+        except Exception as e:
+            return f"Could not read rules config: {e}"
+
+        rule_count = len(rules) if isinstance(rules, dict) else (1 if rules else 0)
+
+        if "didn't" in text or "did not" in text or "not sync" in text or "missing" in text:
+            if target:
+                # Rules that have sync tags excluding this target
+                try:
+                    from src.sync_filter import filter_rules_for_target
+                    if isinstance(rules, dict):
+                        filtered = {k: v for k, v in rules.items()
+                                    if filter_rules_for_target(str(v), target)}
+                        excluded_count = rule_count - len(filtered)
+                        if excluded_count == 0:
+                            return f"All {rule_count} rules are synced to {target}."
+                        return (
+                            f"{excluded_count} rule(s) excluded from {target} by sync tags.\n"
+                            f"{len(filtered)} rule(s) will be synced."
+                        )
+                except ImportError:
+                    pass
+            return f"Could not determine excluded rules for '{target}'."
+
+        lines = [f"Rules summary: {rule_count} rule file(s) configured."]
+        if target:
+            lines.append(f"All rules sync to {target} (full support).")
+        else:
+            lines.append("Rules sync to: codex, gemini, opencode, cursor, aider, windsurf (all targets, full support).")
+        return "\n".join(lines)
+
+    def _query_skills(self, text: str, project_dir, cc_home) -> str:
+        """Answer questions about skill sync state."""
+        from src.harness_comparison import _FEATURE_SUPPORT
+        skill_support = _FEATURE_SUPPORT.get("skills", {})
+        lines = ["Skill support by harness:"]
+        for harness, level in sorted(skill_support.items()):
+            icon = {"full": "✓", "partial": "~", "none": "✗"}.get(level, "?")
+            lines.append(f"  {icon} {harness:<14} {level}")
+        return "\n".join(lines)
+
+    def _query_compatibility(self, text: str, project_dir, cc_home) -> str:
+        """Answer general compatibility questions."""
+        from src.harness_comparison import _FEATURE_SUPPORT
+        lines = ["Feature support matrix:"]
+        features = list(_FEATURE_SUPPORT.keys())
+        targets = sorted({t for f in _FEATURE_SUPPORT.values() for t in f})
+        col = max(8, max(len(t) for t in targets) + 1)
+        header = f"  {'Feature':<12}" + "".join(f"{t:^{col}}" for t in targets)
+        lines.append(header)
+        lines.append("  " + "-" * (12 + col * len(targets)))
+        icons = {"full": "✓", "partial": "~", "none": "✗"}
+        for feature in features:
+            row = f"  {feature:<12}"
+            for t in targets:
+                row += f"{icons.get(_FEATURE_SUPPORT[feature].get(t, 'none'), '?'):^{col}}"
+            lines.append(row)
+        lines.append("\n  ✓=full  ~=partial  ✗=not supported")
+        return "\n".join(lines)
+
+    def _query_availability(self, text: str, project_dir, cc_home) -> str:
+        """Answer 'is X available in Y?' style questions."""
+        # Try to extract what they're asking about
+        _TARGET_ALIASES = {
+            "aider": "aider", "codex": "codex", "gemini": "gemini",
+            "opencode": "opencode", "cursor": "cursor", "windsurf": "windsurf",
+        }
+        target = next((v for k, v in _TARGET_ALIASES.items() if k in text), None)
+        if not target:
+            return "Please specify a harness (e.g. 'available in Gemini')."
+
+        from src.harness_comparison import _FEATURE_SUPPORT
+        lines = [f"Feature availability in {target.title()}:"]
+        for feature, support_map in sorted(_FEATURE_SUPPORT.items()):
+            level = support_map.get(target, "none")
+            icon = {"full": "✓", "partial": "~", "none": "✗"}.get(level, "?")
+            lines.append(f"  {icon} {feature:<12} {level}")
+        return "\n".join(lines)

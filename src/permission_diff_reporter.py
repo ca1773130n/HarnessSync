@@ -304,3 +304,167 @@ class PermissionDiffReporter:
             "networkAccess": bool(settings.get("networkAccess")),
             "fileAccess": bool(settings.get("fileAccess")),
         }
+
+    def translate_permissions(
+        self,
+        settings: dict | None = None,
+        targets: list[str] | None = None,
+    ) -> dict[str, dict]:
+        """Translate Claude Code permissions into target-harness config snippets.
+
+        For each target, produces the best available approximation of the
+        Claude Code permission model in the target's native config format.
+        Returns the translated config fragments alongside an explanation of
+        what was lost in translation.
+
+        Args:
+            settings: Claude Code settings dict. If None, loads from disk.
+            targets: Targets to translate for (None = all supported targets).
+
+        Returns:
+            Dict mapping target_name -> {
+                "config": dict — target-native config fragment to merge,
+                "gaps": list[str] — permissions that couldn't be translated,
+                "warnings": list[str] — partial-translation caveats,
+            }
+        """
+        if settings is None:
+            settings = self._load_settings()
+
+        if targets is None:
+            from src.adapters import AdapterRegistry
+            targets = AdapterRegistry.list_targets()
+
+        allowed_tools: list[str] = (
+            settings.get("allowedTools")
+            or settings.get("permissions", {}).get("allow")
+            or []
+        )
+        denied_tools: list[str] = (
+            settings.get("deniedTools")
+            or settings.get("permissions", {}).get("deny")
+            or []
+        )
+        approval_mode: str = (
+            settings.get("approvalMode")
+            or settings.get("approval_mode")
+            or ""
+        )
+        env_vars: dict = settings.get("env") or settings.get("envVars") or {}
+
+        results: dict[str, dict] = {}
+
+        for target in targets:
+            config: dict = {}
+            gaps: list[str] = []
+            warnings: list[str] = []
+            support = _PERMISSION_SUPPORT.get(target, {})
+
+            # --- allowedTools ---
+            if allowed_tools:
+                if target == "gemini":
+                    config["tools"] = {"allowed": allowed_tools}
+                elif target == "opencode":
+                    config["permission"] = {tool: "readwrite" for tool in allowed_tools}
+                elif target == "codex":
+                    # Codex uses approval_policy, not a tool list
+                    if approval_mode in ("auto", "bypassPermissions"):
+                        config["approval_policy"] = "auto"
+                    else:
+                        config["approval_policy"] = "on-request"
+                    warnings.append(
+                        "Codex does not have a per-tool allowlist — "
+                        "approval_policy set to 'on-request' as closest equivalent."
+                    )
+                elif support.get("allowedTools") == "none":
+                    gaps.append(f"allowedTools ({len(allowed_tools)} tools) — not supported in {target}")
+
+            # --- deniedTools ---
+            if denied_tools:
+                if target == "gemini":
+                    tools_cfg = config.setdefault("tools", {})
+                    tools_cfg["exclude"] = denied_tools
+                elif target == "opencode":
+                    perm_cfg = config.setdefault("permission", {})
+                    for tool in denied_tools:
+                        perm_cfg[tool] = "deny"
+                elif support.get("deniedTools") == "none":
+                    gaps.append(f"deniedTools ({len(denied_tools)} tools) — not supported in {target}")
+
+            # --- approvalMode ---
+            if approval_mode:
+                if target == "codex":
+                    mode_map = {
+                        "auto": "auto",
+                        "bypassPermissions": "auto",
+                        "default": "on-request",
+                        "manual": "on-request",
+                    }
+                    config["approval_policy"] = mode_map.get(approval_mode, "on-request")
+                elif target == "aider":
+                    if approval_mode in ("auto", "bypassPermissions"):
+                        config["yes"] = True
+                        warnings.append("aider --yes flag set — all confirmations auto-approved.")
+                elif support.get("approvalMode") == "none":
+                    gaps.append(
+                        f"approvalMode='{approval_mode}' — {target} has no approval model; "
+                        "all actions auto-approved."
+                    )
+
+            # --- envVars (only translate safe/non-secret keys) ---
+            if env_vars:
+                safe_env = {k: v for k, v in env_vars.items()
+                            if not any(s in k.upper() for s in ("KEY", "SECRET", "TOKEN", "PASSWORD", "PASS"))}
+                if safe_env and support.get("envVars") == "partial":
+                    config["env"] = safe_env
+                    if len(safe_env) < len(env_vars):
+                        warnings.append(
+                            f"{len(env_vars) - len(safe_env)} env var(s) with secret-like names "
+                            "were not translated — add them manually to avoid accidental exposure."
+                        )
+
+            results[target] = {
+                "config": config,
+                "gaps": gaps,
+                "warnings": warnings,
+            }
+
+        return results
+
+    def format_translation(self, translations: dict[str, dict]) -> str:
+        """Format translate_permissions() output as a human-readable report.
+
+        Args:
+            translations: Output of translate_permissions().
+
+        Returns:
+            Formatted string showing translated configs and gaps per target.
+        """
+        import json as _json
+
+        lines = ["Permission Translation Report", "=" * 60, ""]
+        lines.append(
+            "Shows how Claude Code permissions translate to each target harness.\n"
+        )
+
+        for target in sorted(translations):
+            data = translations[target]
+            config = data["config"]
+            gaps = data["gaps"]
+            warnings = data["warnings"]
+
+            lines.append(f"--- {target.upper()} ---")
+            if config:
+                lines.append("  Translated config fragment:")
+                for line in _json.dumps(config, indent=4).splitlines():
+                    lines.append(f"    {line}")
+            else:
+                lines.append("  No permissions can be translated to this target.")
+
+            for g in gaps:
+                lines.append(f"  ✗ GAP: {g}")
+            for w in warnings:
+                lines.append(f"  ⚠ NOTE: {w}")
+            lines.append("")
+
+        return "\n".join(lines)

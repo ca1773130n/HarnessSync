@@ -416,3 +416,138 @@ class RuleUsageTracker:
             lines.append("")
 
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Rules Coverage Heatmap (item 30)
+    # ------------------------------------------------------------------
+
+    def coverage_heatmap(
+        self,
+        known_rules: list[str],
+        days: int = 30,
+        bar_width: int = 20,
+    ) -> dict[str, dict]:
+        """Compute per-rule usage frequency for a visual heatmap.
+
+        Assigns each rule a heat level based on how often it was triggered
+        in the trailing ``days`` window. Rules with zero uses are flagged as
+        dead weight (candidates for pruning).
+
+        Args:
+            known_rules: List of rule/section names from CLAUDE.md.
+            days: Lookback window in days.
+            bar_width: Width of the ASCII heat bar in the formatted output.
+
+        Returns:
+            Dict mapping rule_name -> {
+                "uses": int,
+                "last_seen": str | None,   # ISO timestamp or None
+                "heat": str,               # "hot" | "warm" | "cool" | "cold"
+                "heat_score": float,       # 0.0–1.0 normalised
+            }
+        """
+        summaries = self.analytics(days=days)
+        max_uses = max((s.total_uses for s in summaries.values()), default=1)
+        if max_uses == 0:
+            max_uses = 1
+
+        result: dict[str, dict] = {}
+        for rule in known_rules:
+            summary = summaries.get(rule)
+            uses = summary.total_uses if summary else 0
+            last_seen = summary.last_seen if summary else None
+            heat_score = uses / max_uses
+
+            if heat_score >= 0.66:
+                heat = "hot"
+            elif heat_score >= 0.33:
+                heat = "warm"
+            elif heat_score > 0:
+                heat = "cool"
+            else:
+                heat = "cold"
+
+            result[rule] = {
+                "uses": uses,
+                "last_seen": last_seen,
+                "heat": heat,
+                "heat_score": heat_score,
+            }
+
+        # Include rules seen in analytics that aren't in known_rules
+        for rule, summary in summaries.items():
+            if rule not in result:
+                heat_score = summary.total_uses / max_uses
+                result[rule] = {
+                    "uses": summary.total_uses,
+                    "last_seen": summary.last_seen,
+                    "heat": "warm" if heat_score >= 0.33 else "cool",
+                    "heat_score": heat_score,
+                }
+
+        return result
+
+    def format_heatmap(
+        self,
+        known_rules: list[str],
+        days: int = 30,
+        bar_width: int = 20,
+    ) -> str:
+        """Format a rules coverage heatmap for terminal display.
+
+        Rules are sorted hottest-first. Cold (never-fired) rules are listed
+        at the bottom as pruning candidates.
+
+        Args:
+            known_rules: Rule/section names from CLAUDE.md.
+            days: Lookback window in days.
+            bar_width: Width of the ASCII heat bar.
+
+        Returns:
+            Formatted heatmap string.
+        """
+        heat_icons = {"hot": "🔥", "warm": "🌡", "cool": "❄", "cold": "⬛"}
+        heat_chars = {"hot": "█", "warm": "▓", "cool": "░", "cold": " "}
+
+        heatmap = self.coverage_heatmap(known_rules, days=days, bar_width=bar_width)
+        if not heatmap:
+            return "No rules to display. Add known_rules from your CLAUDE.md."
+
+        sorted_rules = sorted(
+            heatmap.items(),
+            key=lambda kv: (kv[1]["heat_score"], kv[1]["uses"]),
+            reverse=True,
+        )
+
+        lines = [
+            f"Rules Coverage Heatmap — last {days} days",
+            "=" * (bar_width + 50),
+            "",
+            f"  {'Rule':<35} {'Uses':>5}  Heat{'':>{bar_width - 4}}  Status",
+            "  " + "-" * (bar_width + 48),
+        ]
+
+        for rule, data in sorted_rules:
+            uses = data["uses"]
+            heat = data["heat"]
+            score = data["heat_score"]
+            filled = int(score * bar_width)
+            char = heat_chars[heat]
+            bar = (char * filled).ljust(bar_width)
+            icon = heat_icons.get(heat, " ")
+            last = ""
+            if data["last_seen"]:
+                last = data["last_seen"][:10]
+
+            rule_display = rule[:34]
+            status = f"last: {last}" if last else "NEVER FIRED"
+            lines.append(f"  {rule_display:<35} {uses:>5}  [{bar}]  {icon} {status}")
+
+        cold_count = sum(1 for d in heatmap.values() if d["heat"] == "cold")
+        if cold_count:
+            lines.append("")
+            lines.append(f"  ⚠ {cold_count} rule(s) never fired in {days} days — consider pruning.")
+
+        lines.append("")
+        lines.append("  🔥=high  🌡=medium  ❄=low  ⬛=never")
+        return "\n".join(lines)

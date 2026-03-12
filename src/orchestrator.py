@@ -1101,3 +1101,111 @@ class SyncOrchestrator:
             targets[target]["drift"] = drifted
 
         return state
+
+    def canary_sync(
+        self,
+        canary_target: str,
+        remaining_targets: list[str] | None = None,
+        confirm_fn=None,
+    ) -> dict[str, dict]:
+        """Incremental sync rollout: sync one canary target first, then the rest.
+
+        Syncs ``canary_target`` first as a trial. If ``confirm_fn`` approves
+        (or is None), proceeds to sync remaining targets. Prevents a bad config
+        from hitting all harnesses simultaneously for risky changes.
+
+        Args:
+            canary_target: The first target to sync as the canary.
+            remaining_targets: Targets to sync after canary succeeds. If None,
+                               syncs all registered targets except the canary.
+            confirm_fn: Optional callable(canary_result) -> bool. If it returns
+                        False, the rollout is aborted after the canary. If None,
+                        always proceeds (use for CI/automation).
+
+        Returns:
+            Dict mapping target_name -> {
+                "success": bool,
+                "phase": "canary" | "rollout" | "skipped",
+                "error": str | None,
+            }
+        """
+        results: dict[str, dict] = {}
+
+        # --- Phase 1: Canary sync ---
+        self.logger.info(f"[canary] Syncing canary target: {canary_target}")
+        canary_orchestrator = SyncOrchestrator(
+            project_dir=self.project_dir,
+            scope=self.scope,
+            dry_run=self.dry_run,
+            cc_home=self.cc_home,
+            only_sections=self.only_sections,
+            skip_sections=self.skip_sections,
+            cli_only_targets={canary_target},
+            harness_env=self.harness_env,
+        )
+
+        canary_sync_results = canary_orchestrator.sync_all()
+        canary_result = (canary_sync_results or {}).get(canary_target)
+        canary_ok = getattr(canary_result, "success", canary_result is not None)
+
+        results[canary_target] = {
+            "success": canary_ok,
+            "phase": "canary",
+            "error": getattr(canary_result, "error", None) if not canary_ok else None,
+        }
+
+        # --- Check canary success ---
+        if not canary_ok:
+            self.logger.warn(f"[canary] Canary sync to '{canary_target}' failed — aborting rollout.")
+            # Mark remaining as skipped
+            if remaining_targets:
+                for t in remaining_targets:
+                    results[t] = {"success": False, "phase": "skipped", "error": "canary failed"}
+            return results
+
+        # --- Confirm before rollout ---
+        if confirm_fn is not None:
+            proceed = confirm_fn(results[canary_target])
+            if not proceed:
+                self.logger.info("[canary] Rollout aborted by confirm_fn.")
+                if remaining_targets:
+                    for t in remaining_targets:
+                        results[t] = {"success": False, "phase": "skipped", "error": "aborted by user"}
+                return results
+
+        # --- Phase 2: Rollout to remaining targets ---
+        if remaining_targets is None:
+            # Discover all registered targets and exclude the canary
+            try:
+                from src.adapters import AdapterRegistry
+                reg = AdapterRegistry(project_dir=self.project_dir)
+                all_targets = list(reg.list_targets())
+                remaining_targets = [t for t in all_targets if t != canary_target]
+            except Exception:
+                remaining_targets = []
+
+        if not remaining_targets:
+            return results
+
+        self.logger.info(f"[canary] Rolling out to {len(remaining_targets)} remaining target(s).")
+        rollout_orchestrator = SyncOrchestrator(
+            project_dir=self.project_dir,
+            scope=self.scope,
+            dry_run=self.dry_run,
+            cc_home=self.cc_home,
+            only_sections=self.only_sections,
+            skip_sections=self.skip_sections,
+            cli_only_targets=set(remaining_targets),
+            harness_env=self.harness_env,
+        )
+
+        rollout_results = rollout_orchestrator.sync_all()
+        for target, result in (rollout_results or {}).items():
+            ok = getattr(result, "success", result is not None)
+            results[target] = {
+                "success": ok,
+                "phase": "rollout",
+                "error": getattr(result, "error", None) if not ok else None,
+            }
+
+        return results
