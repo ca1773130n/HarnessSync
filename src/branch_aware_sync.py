@@ -411,3 +411,190 @@ def adaptive_cooldown(
             pass
 
     return recommend_sync_interval_seconds(repo_dir)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Git post-checkout hook installer (item 3)
+# ──────────────────────────────────────────────────────────────────────────────
+
+_POST_CHECKOUT_HOOK = """\
+#!/usr/bin/env sh
+# HarnessSync: auto-sync when switching branches
+# Installed by: harnesssync install-hook
+#
+# $1 = previous HEAD, $2 = new HEAD, $3 = flag (1=branch checkout, 0=file checkout)
+CHECKOUT_TYPE="$3"
+[ "$CHECKOUT_TYPE" != "1" ] && exit 0   # Skip file checkouts
+
+# Only run if harnesssync is available
+if ! command -v python3 > /dev/null 2>&1; then
+    exit 0
+fi
+
+HARNESSSYNC_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "$HARNESSSYNC_ROOT" ]; then
+    exit 0
+fi
+
+# Run in background so checkout is not blocked
+(cd "$HARNESSSYNC_ROOT" && python3 -m src.orchestrator sync --scope project --non-interactive --quiet 2>/dev/null &)
+exit 0
+"""
+
+
+def install_post_checkout_hook(
+    repo_dir: Path,
+    overwrite: bool = False,
+) -> dict[str, object]:
+    """Install a git post-checkout hook that auto-syncs on branch switch.
+
+    The hook triggers a background HarnessSync run when the user switches
+    branches (not on file checkout), picking up any branch-specific profile
+    overrides defined in .harnesssync.
+
+    Args:
+        repo_dir: Git repository root.
+        overwrite: If True, replace an existing hook. If False, append
+                   the HarnessSync section to an existing hook script.
+
+    Returns:
+        Dict with keys:
+          - ``installed`` (bool): True if the hook was written.
+          - ``hook_path`` (Path): Path to the hook file.
+          - ``was_existing`` (bool): True if a hook already existed.
+          - ``message`` (str): Human-readable status.
+    """
+    import os as _os
+    import stat as _stat
+
+    if not Path(repo_dir).is_dir():
+        return {
+            "installed": False,
+            "hook_path": None,
+            "was_existing": False,
+            "message": f"Directory does not exist: {repo_dir}",
+        }
+
+    try:
+        git_dir_result = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            capture_output=True,
+            text=True,
+            cwd=str(repo_dir),
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {
+            "installed": False,
+            "hook_path": None,
+            "was_existing": False,
+            "message": f"Not a git repository: {repo_dir}",
+        }
+    if git_dir_result.returncode != 0:
+        return {
+            "installed": False,
+            "hook_path": None,
+            "was_existing": False,
+            "message": f"Not a git repository: {repo_dir}",
+        }
+
+    git_dir = Path(git_dir_result.stdout.strip())
+    if not git_dir.is_absolute():
+        git_dir = repo_dir / git_dir
+    hooks_dir = git_dir / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook_path = hooks_dir / "post-checkout"
+
+    was_existing = hook_path.exists()
+    marker = "# HarnessSync: auto-sync when switching branches"
+
+    if was_existing and not overwrite:
+        existing = hook_path.read_text(encoding="utf-8", errors="replace")
+        if marker in existing:
+            return {
+                "installed": True,
+                "hook_path": hook_path,
+                "was_existing": True,
+                "message": "HarnessSync hook already installed — skipped (use overwrite=True to replace).",
+            }
+        # Append to existing hook
+        new_content = existing.rstrip("\n") + "\n\n" + _POST_CHECKOUT_HOOK
+        hook_path.write_text(new_content, encoding="utf-8")
+    else:
+        hook_path.write_text(_POST_CHECKOUT_HOOK, encoding="utf-8")
+
+    # Make executable
+    current_mode = hook_path.stat().st_mode
+    hook_path.chmod(current_mode | _stat.S_IXUSR | _stat.S_IXGRP | _stat.S_IXOTH)
+
+    action = "updated" if was_existing and not overwrite else "installed"
+    return {
+        "installed": True,
+        "hook_path": hook_path,
+        "was_existing": was_existing,
+        "message": (
+            f"post-checkout hook {action} at {hook_path}. "
+            "HarnessSync will now auto-sync when you switch branches."
+        ),
+    }
+
+
+def uninstall_post_checkout_hook(repo_dir: Path) -> dict[str, object]:
+    """Remove the HarnessSync section from the post-checkout hook.
+
+    If the hook contains only the HarnessSync content, the file is deleted.
+    If other content exists, only the HarnessSync section is stripped.
+
+    Args:
+        repo_dir: Git repository root.
+
+    Returns:
+        Dict with ``removed`` (bool) and ``message`` (str).
+    """
+    if not Path(repo_dir).is_dir():
+        return {"removed": False, "message": f"Not a git repository: {repo_dir}"}
+
+    try:
+        git_dir_result = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            capture_output=True,
+            text=True,
+            cwd=str(repo_dir),
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {"removed": False, "message": f"Not a git repository: {repo_dir}"}
+
+    if git_dir_result.returncode != 0:
+        return {"removed": False, "message": f"Not a git repository: {repo_dir}"}
+
+    git_dir = Path(git_dir_result.stdout.strip())
+    if not git_dir.is_absolute():
+        git_dir = repo_dir / git_dir
+    hook_path = git_dir / "hooks" / "post-checkout"
+
+    if not hook_path.exists():
+        return {"removed": False, "message": "No post-checkout hook found."}
+
+    content = hook_path.read_text(encoding="utf-8", errors="replace")
+    marker = "# HarnessSync: auto-sync when switching branches"
+    if marker not in content:
+        return {"removed": False, "message": "HarnessSync hook not found in post-checkout."}
+
+    # Strip from the marker line to the end of the HarnessSync block
+    lines = content.split("\n")
+    new_lines: list[str] = []
+    skip = False
+    for line in lines:
+        if marker in line:
+            skip = True
+        if not skip:
+            new_lines.append(line)
+
+    new_content = "\n".join(new_lines).rstrip("\n")
+    if new_content.strip() in ("", "#!/usr/bin/env sh", "#!/bin/sh"):
+        hook_path.unlink()
+        return {"removed": True, "message": "post-checkout hook removed (file deleted — was HarnessSync-only)."}
+    else:
+        hook_path.write_text(new_content + "\n", encoding="utf-8")
+        return {"removed": True, "message": "HarnessSync section removed from post-checkout hook."}

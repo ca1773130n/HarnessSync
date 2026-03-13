@@ -20,6 +20,7 @@ PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__
 sys.path.insert(0, PLUGIN_ROOT)
 
 from pathlib import Path
+from src.diff_formatter import compute_semantic_diff
 
 
 # Map from target name to their primary config file(s) (relative to project root)
@@ -102,6 +103,7 @@ def _diff_target(
     project_dir: Path,
     source_text: str,
     mode: str = "unified",
+    semantic: bool = False,
 ) -> str:
     """Generate diff output for a specific target.
 
@@ -110,6 +112,7 @@ def _diff_target(
         project_dir: Project root directory.
         source_text: Claude Code source rules content.
         mode: "unified" | "side-by-side".
+        semantic: If True, append a semantic change summary.
 
     Returns:
         Formatted diff string.
@@ -133,8 +136,10 @@ def _diff_target(
 
         source_lines = source_text.splitlines()
         target_lines = target_text.splitlines()
-        added = sum(1 for l in target_lines if l not in set(source_lines))
-        removed = sum(1 for l in source_lines if l not in set(target_lines))
+        source_set = set(source_lines)
+        target_set = set(target_lines)
+        added = sum(1 for l in target_lines if l not in source_set)
+        removed = sum(1 for l in source_lines if l not in target_set)
 
         sections.append(f"  {rel_path}: +{added} lines, -{removed} lines differ\n")
 
@@ -149,6 +154,15 @@ def _diff_target(
             sections.append(header_line)
             sections.append("-" * 78)
             sections.append(_side_by_side_diff(source_text, target_text))
+
+        if semantic:
+            changes = compute_semantic_diff(source_text, target_text)
+            if changes:
+                sections.append(f"\n  Semantic Changes ({rel_path}):")
+                for change in changes:
+                    sections.append(f"    {change.format()}")
+            else:
+                sections.append(f"\n  Semantic Changes ({rel_path}): none")
 
     return "\n".join(sections)
 
@@ -177,6 +191,12 @@ def main() -> None:
         choices=["unified", "side-by-side"],
         default="unified",
         help="Diff display mode (default: unified)",
+    )
+    parser.add_argument(
+        "--semantic",
+        action="store_true",
+        default=False,
+        help="Show semantic summary of config changes (MCP servers, permissions, rule sections)",
     )
     parser.add_argument("--project-dir", type=str, default=None)
     parser.add_argument("--account", type=str, default=None, help="Account name")
@@ -218,12 +238,14 @@ def main() -> None:
     print("=" * 60)
     print(f"Source: CLAUDE.md ({len(source_text.splitlines())} lines)")
     print(f"Mode: {args.mode}")
+    if args.semantic:
+        print("Semantic: enabled")
     print()
 
     any_drift = False
     for target in targets:
         print(f"--- {target.upper()} ---")
-        diff_out = _diff_target(target, project_dir, source_text, mode=args.mode)
+        diff_out = _diff_target(target, project_dir, source_text, mode=args.mode, semantic=args.semantic)
         print(diff_out)
         if "differ" in diff_out or "unified" in diff_out:
             any_drift = True

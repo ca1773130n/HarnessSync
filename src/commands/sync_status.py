@@ -510,6 +510,17 @@ def _show_default_status():
     except Exception:
         pass  # Non-critical; don't break status output on version check failure
 
+    # Version upgrade requirements (harnesses running old versions blocking features)
+    try:
+        from src.harness_version_compat import format_upgrade_requirements
+        upgrade_req_text = format_upgrade_requirements(project_dir=project_dir)
+        if upgrade_req_text.strip():
+            print()
+            print("Version Upgrade Requirements")
+            print(upgrade_req_text)
+    except Exception:
+        pass  # Non-critical; don't break status output
+
     # Item 11 — Config health scores (0-100 per harness with trend)
     try:
         from src.config_health import SyncHealthTracker

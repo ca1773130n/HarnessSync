@@ -22,7 +22,149 @@ users can see exactly what AGENTS.md / opencode.json will look like.
 """
 
 import difflib
+import json
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Semantic diff (item 8)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class SemanticChange:
+    """A single semantic change expressed in human terms.
+
+    Instead of 'line 47 changed', this represents changes like
+    'bash tool permission: allow → deny' or 'new MCP server: filesystem'.
+    """
+    category: str    # e.g. "mcp_server", "tool_permission", "rule", "setting"
+    action: str      # "added", "removed", "changed"
+    subject: str     # e.g. "filesystem" (MCP name) or "bash" (tool name)
+    old_value: str   # Previous value, empty string if added
+    new_value: str   # New value, empty string if removed
+
+    def format(self) -> str:
+        """Return a one-line human-readable description."""
+        if self.action == "added":
+            return f"{self.category} added: {self.subject}"
+        if self.action == "removed":
+            return f"{self.category} removed: {self.subject}"
+        # changed
+        if self.old_value and self.new_value:
+            return f"{self.category} '{self.subject}': {self.old_value} → {self.new_value}"
+        return f"{self.category} '{self.subject}' changed"
+
+
+def _extract_mcp_servers(content: str) -> dict[str, str]:
+    """Extract MCP server names from JSON or TOML config content.
+
+    Returns dict of server_name → command/url summary.
+    """
+    servers: dict[str, str] = {}
+    # JSON: {"mcpServers": {"name": {"command": ..., "args": ...}}}
+    try:
+        data = json.loads(content)
+        mcp_block = (
+            data.get("mcpServers")
+            or data.get("mcp_servers")
+            or data.get("mcp", {}).get("servers", {})
+        )
+        if isinstance(mcp_block, dict):
+            for name, cfg in mcp_block.items():
+                if isinstance(cfg, dict):
+                    cmd = cfg.get("command") or cfg.get("url", "")
+                    servers[name] = str(cmd)
+            return servers
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # TOML-style: [mcp_servers."name"]
+    for m in re.finditer(r'\[mcp_servers\."([^"]+)"\]', content):
+        name = m.group(1)
+        servers[name] = ""
+    return servers
+
+
+def _extract_tool_permissions(content: str) -> dict[str, str]:
+    """Extract tool permission settings from config content.
+
+    Returns dict of tool_name → permission_value.
+    """
+    perms: dict[str, str] = {}
+    # JSON: {"permissions": {"allow": [...], "deny": [...]}}
+    try:
+        data = json.loads(content)
+        perm_block = data.get("permissions", {})
+        if isinstance(perm_block, dict):
+            for action in ("allow", "deny"):
+                for tool in perm_block.get(action, []):
+                    perms[str(tool)] = action
+        return perms
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Markdown/TOML-style: "allow: bash" or "deny: web_search"
+    for m in re.finditer(r"\b(allow|deny)\s*:\s*(\w+)", content, re.IGNORECASE):
+        perms[m.group(2)] = m.group(1).lower()
+    return perms
+
+
+def _extract_rules(content: str) -> list[str]:
+    """Extract rule headings from CLAUDE.md-style markdown content."""
+    return re.findall(r"^#{1,3}\s+(.+?)$", content, re.MULTILINE)
+
+
+def compute_semantic_diff(old_content: str, new_content: str, label: str = "") -> list[SemanticChange]:
+    """Compute a list of semantic changes between two config strings.
+
+    Compares MCP servers, tool permissions, and rule headings to produce
+    human-readable change descriptions rather than raw line diffs.
+
+    Args:
+        old_content: Previous config content.
+        new_content: New config content.
+        label: Optional label hint to select parser (e.g. "mcpServers", "rules").
+
+    Returns:
+        List of SemanticChange objects sorted by category then subject.
+    """
+    changes: list[SemanticChange] = []
+
+    # --- MCP servers ---
+    old_mcp = _extract_mcp_servers(old_content)
+    new_mcp = _extract_mcp_servers(new_content)
+    for name in set(old_mcp) | set(new_mcp):
+        if name not in old_mcp:
+            changes.append(SemanticChange("MCP server", "added", name, "", new_mcp[name]))
+        elif name not in new_mcp:
+            changes.append(SemanticChange("MCP server", "removed", name, old_mcp[name], ""))
+        elif old_mcp[name] != new_mcp[name]:
+            changes.append(SemanticChange("MCP server", "changed", name, old_mcp[name], new_mcp[name]))
+
+    # --- Tool permissions ---
+    old_perms = _extract_tool_permissions(old_content)
+    new_perms = _extract_tool_permissions(new_content)
+    for tool in set(old_perms) | set(new_perms):
+        if tool not in old_perms:
+            changes.append(SemanticChange("tool permission", "added", tool, "", new_perms[tool]))
+        elif tool not in new_perms:
+            changes.append(SemanticChange("tool permission", "removed", tool, old_perms[tool], ""))
+        elif old_perms[tool] != new_perms[tool]:
+            changes.append(SemanticChange(
+                "tool permission", "changed", tool, old_perms[tool], new_perms[tool]
+            ))
+
+    # --- Rule headings ---
+    old_rules = set(_extract_rules(old_content))
+    new_rules = set(_extract_rules(new_content))
+    for rule in sorted(new_rules - old_rules):
+        changes.append(SemanticChange("rule section", "added", rule, "", ""))
+    for rule in sorted(old_rules - new_rules):
+        changes.append(SemanticChange("rule section", "removed", rule, "", ""))
+
+    return sorted(changes, key=lambda c: (c.category, c.subject))
 
 
 class SyncCostEstimate:
@@ -343,6 +485,63 @@ class DiffFormatter:
             f"  {'Total':<14} {total_files:>5}  +{total_added:>6}  -{total_removed:>7}"
         )
         return "\n".join(lines)
+
+    def add_semantic_diff(
+        self,
+        label: str,
+        old_content: str,
+        new_content: str,
+        target: str = "",
+    ) -> list[SemanticChange]:
+        """Compute and record a semantic diff between two config strings.
+
+        Stores a human-readable semantic summary alongside the raw unified diff.
+        Returns the list of SemanticChange objects for further inspection.
+
+        Args:
+            label: Section label for display.
+            old_content: Previous config content.
+            new_content: Proposed new content.
+            target: Optional target harness name.
+
+        Returns:
+            List of SemanticChange objects.
+        """
+        changes = compute_semantic_diff(old_content, new_content, label)
+        if changes:
+            lines = [f"--- semantic diff: {label} ---"]
+            for change in changes:
+                lines.append(f"  {change.format()}")
+            self.diffs.append("\n".join(lines))
+            if target:
+                tb = self._target_breakdown.setdefault(target, {"files": 0, "added": 0, "removed": 0})
+                tb["files"] += 1
+        else:
+            self.diffs.append(f"--- semantic diff: {label} ---\n[no semantic changes]")
+        return changes
+
+    def format_semantic_summary(self) -> str:
+        """Format all semantic changes from the accumulated diffs as a summary.
+
+        Returns a compact, human-readable list of what actually changed in
+        meaningful terms rather than raw line numbers.
+
+        Returns:
+            Formatted semantic summary string.
+        """
+        semantic_lines = []
+        for entry in self.diffs:
+            if entry.startswith("--- semantic diff:"):
+                lines = entry.split("\n")
+                for line in lines[1:]:
+                    stripped = line.strip()
+                    if stripped and stripped != "[no semantic changes]":
+                        semantic_lines.append(stripped)
+        if not semantic_lines:
+            return "No semantic changes detected."
+        result = ["Semantic Changes Summary", "─" * 40]
+        result.extend(f"  {line}" for line in semantic_lines)
+        return "\n".join(result)
 
     def format_full_dry_run(self) -> str:
         """Format a complete dry-run report: summary table + diffs + cost estimate.

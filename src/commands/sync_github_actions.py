@@ -7,18 +7,20 @@ Generates a ready-to-commit GitHub Actions workflow that runs HarnessSync
 in CI whenever CLAUDE.md or .claude/ config changes. The generated workflow
 opens a PR with translated config updates for each registered harness.
 
-Two modes:
+Modes:
   sync (default) — sync on push to main, open PR with translated configs
   gate           — check on PRs, FAIL if any harness config would drift
+  pr             — PR-triggered dry-run workflow
+  matrix         — matrix-strategy workflow testing each target independently
 
 Usage:
-    /sync-github-actions [--output PATH] [--branch NAME] [--scope SCOPE] [--mode sync|gate]
+    /sync-github-actions [--output PATH] [--branch NAME] [--scope SCOPE] [--mode sync|gate|pr|matrix]
 
 Options:
     --output PATH     Write workflow to this path
     --branch NAME     Target branch for sync PRs (default: main)
     --scope SCOPE     Sync scope: user | project | all (default: all)
-    --mode MODE       Workflow mode: sync (default) or gate
+    --mode MODE       Workflow mode: sync (default), gate, pr, or matrix
     --dry-run         Print workflow YAML without writing file
 """
 
@@ -32,6 +34,7 @@ PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__
 sys.path.insert(0, PLUGIN_ROOT)
 
 from src.adapters import AdapterRegistry
+from src.ci_pipeline_generator import CIPipelineGenerator, CIPipelineConfig
 
 
 _WORKFLOW_TEMPLATE = """\
@@ -333,10 +336,12 @@ def main(args: list[str] | None = None) -> int:
     parser.add_argument(
         "--mode",
         default="sync",
-        choices=["sync", "gate"],
+        choices=["sync", "gate", "pr", "matrix"],
         help=(
             "Workflow mode: 'sync' opens a PR with updated configs on push (default); "
-            "'gate' blocks PRs that would cause harness config drift"
+            "'gate' blocks PRs that would cause harness config drift; "
+            "'pr' generates a PR-triggered dry-run workflow; "
+            "'matrix' generates a matrix-strategy workflow testing each target independently"
         ),
     )
     parser.add_argument(
@@ -349,7 +354,17 @@ def main(args: list[str] | None = None) -> int:
 
     targets = AdapterRegistry.list_targets()
 
-    if parsed.mode == "gate":
+    if parsed.mode == "pr":
+        generator = CIPipelineGenerator.for_pr_trigger(base_branch=parsed.branch)
+        workflow_yaml = generator.generate()
+        default_output = Path(".github/workflows/harness-sync-pr.yml")
+        mode_label = "PR trigger"
+    elif parsed.mode == "matrix":
+        generator = CIPipelineGenerator.for_matrix_trigger(targets=targets)
+        workflow_yaml = generator.generate()
+        default_output = Path(".github/workflows/harness-sync-matrix.yml")
+        mode_label = "matrix trigger"
+    elif parsed.mode == "gate":
         workflow_yaml = generate_gate_workflow(
             trigger_branch=parsed.branch,
             scope=parsed.scope,
@@ -377,7 +392,14 @@ def main(args: list[str] | None = None) -> int:
     print(f"GitHub Actions {mode_label} workflow written to: {output_path}")
     print()
     print("Next steps:")
-    if parsed.mode == "gate":
+    if parsed.mode == "pr":
+        print(f"  1. Commit the workflow: git add {output_path}")
+        print("  2. The workflow will run a dry-run sync on every PR")
+    elif parsed.mode == "matrix":
+        print(f"  1. Commit the workflow: git add {output_path}")
+        print("  2. The workflow will test each target independently via matrix strategy")
+        print(f"  Targets included: {', '.join(targets)}")
+    elif parsed.mode == "gate":
         print("  1. Commit the workflow: git add .github/workflows/harness-sync-gate.yml")
         print("  2. The gate will block PRs that modify CLAUDE.md without updating harness configs")
         print("  3. Reviewers will see a comment with the drift diff when the gate fails")

@@ -122,6 +122,92 @@ _COMMIT_STEP = """\
           git push
 """
 
+_PR_TRIGGER_YAML = """\
+name: HarnessSync — Validate Config on PR
+
+on:
+  pull_request:
+    branches: ["{base_branch}"]
+    paths:
+      - "CLAUDE.md"
+      - "skills/**"
+      - ".harnesssync/**"
+      - ".claude/CLAUDE.md"
+      - ".claude/skills/**"
+
+jobs:
+  validate:
+    name: Validate HarnessSync config changes
+    runs-on: {runner}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "{python_version}"
+          cache: pip
+
+      - name: Install HarnessSync
+        run: |
+          pip install -e . --quiet
+{extra_install}
+      - name: Validate config (dry-run)
+        env:{env_block}
+          HARNESSSYNC_CI: "true"
+        run: |
+          python -m src.orchestrator sync --scope all --dry-run --non-interactive
+
+      - name: Check config health
+        run: |
+          python -m src.orchestrator sync-health --non-interactive || true
+"""
+
+_MATRIX_TRIGGER_YAML = """\
+name: HarnessSync — Multi-Target Sync Matrix
+
+on:
+  push:
+    branches: ["{branch}"]
+    paths:
+      - "CLAUDE.md"
+      - "skills/**"
+      - ".harnesssync/**"
+
+jobs:
+  sync-matrix:
+    name: "Sync to ${{{{ matrix.target }}}}"
+    runs-on: {runner}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        target: {targets_json}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "{python_version}"
+          cache: pip
+
+      - name: Install HarnessSync
+        run: |
+          pip install -e . --quiet
+{extra_install}
+      - name: "Sync to ${{{{ matrix.target }}}}"
+        env:{env_block}
+          HARNESSSYNC_CI: "true"
+        run: |
+          python -m src.orchestrator sync --target "${{{{ matrix.target }}}}" --scope all --non-interactive
+{commit_step}"""
+
 _ENV_LINE = "\n          {key}: ${{{{ secrets.{secret} }}}}"
 
 
@@ -130,7 +216,7 @@ class CIPipelineConfig:
     """Configuration for the generated workflow.
 
     Attributes:
-        trigger: "push" | "schedule"
+        trigger: "push" | "schedule" | "pr" | "matrix"
         branch: Branch to watch for push trigger (default: "main").
         cron: Cron expression for schedule trigger (default: every 6 hours).
         runner: GitHub Actions runner label (default: "ubuntu-latest").
@@ -149,6 +235,10 @@ class CIPipelineConfig:
     auto_commit: bool = True
     secret_env_vars: dict[str, str] = field(default_factory=dict)
     extra_packages: list[str] = field(default_factory=list)
+    # For "matrix" trigger: list of target harness names
+    targets: list[str] = field(default_factory=lambda: ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"])
+    # For "pr" trigger: base branch to watch PRs against
+    base_branch: str = "main"
 
 
 class CIPipelineGenerator:
@@ -180,14 +270,34 @@ class CIPipelineGenerator:
             Full YAML content ready to write to disk.
         """
         cfg = self.config
-        template = (
-            _PUSH_TRIGGER_YAML if cfg.trigger == "push" else _SCHEDULE_TRIGGER_YAML
-        )
-
         env_block = self._build_env_block(cfg.secret_env_vars)
         extra_install = self._build_extra_install(cfg.extra_packages)
         commit_step = _COMMIT_STEP if cfg.auto_commit else ""
 
+        if cfg.trigger == "pr":
+            return _PR_TRIGGER_YAML.format(
+                base_branch=cfg.base_branch,
+                runner=cfg.runner,
+                python_version=cfg.python_version,
+                env_block=env_block,
+                extra_install=extra_install,
+            )
+        if cfg.trigger == "matrix":
+            import json as _json
+            targets_json = _json.dumps(cfg.targets)
+            return _MATRIX_TRIGGER_YAML.format(
+                branch=cfg.branch,
+                runner=cfg.runner,
+                python_version=cfg.python_version,
+                targets_json=targets_json,
+                env_block=env_block,
+                extra_install=extra_install,
+                commit_step=commit_step,
+            )
+
+        template = (
+            _PUSH_TRIGGER_YAML if cfg.trigger == "push" else _SCHEDULE_TRIGGER_YAML
+        )
         return template.format(
             branch=cfg.branch,
             cron=cfg.cron,
@@ -316,7 +426,55 @@ class CIPipelineGenerator:
                 trigger="schedule",
                 cron=cron,
                 runner=runner,
-                auto_commit=False,  # Schedule runs usually just run, not commit
+                auto_commit=False,
+            ),
+        )
+
+    @classmethod
+    def for_pr_trigger(
+        cls,
+        project_dir: Path | None = None,
+        base_branch: str = "main",
+        runner: str = "ubuntu-latest",
+    ) -> "CIPipelineGenerator":
+        """Create a generator that validates config on pull requests.
+
+        Runs a dry-run sync and health check on every PR that touches config
+        files, without writing any changes. Useful for catching bad configs
+        before they merge to main.
+        """
+        return cls(
+            project_dir=project_dir,
+            config=CIPipelineConfig(
+                trigger="pr",
+                base_branch=base_branch,
+                runner=runner,
+                auto_commit=False,
+            ),
+        )
+
+    @classmethod
+    def for_matrix_trigger(
+        cls,
+        project_dir: Path | None = None,
+        branch: str = "main",
+        targets: list[str] | None = None,
+        runner: str = "ubuntu-latest",
+    ) -> "CIPipelineGenerator":
+        """Create a generator that syncs to each target in a parallel matrix.
+
+        Each harness target gets its own parallel job, so failures are isolated
+        and visible per-target in the GitHub Actions UI.
+        """
+        default_targets = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"]
+        return cls(
+            project_dir=project_dir,
+            config=CIPipelineConfig(
+                trigger="matrix",
+                branch=branch,
+                runner=runner,
+                targets=targets or default_targets,
+                auto_commit=False,
             ),
         )
 

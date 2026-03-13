@@ -832,6 +832,140 @@ def format_upgrade_suggestions(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Inline upgrade instructions (item 10)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Upgrade commands per harness
+_UPGRADE_COMMANDS: dict[str, list[str]] = {
+    "cursor": [
+        "Open Cursor → Help → Check for Updates",
+        "Or download from https://cursor.com",
+    ],
+    "codex": [
+        "npm install -g @openai/codex@latest",
+        "Or: npx @openai/codex@latest (no global install)",
+    ],
+    "gemini": [
+        "npm install -g @google/gemini-cli@latest",
+        "Or: pip install --upgrade gemini-cli  (if Python-based)",
+    ],
+    "opencode": [
+        "npm install -g opencode@latest",
+        "Or: bun upgrade opencode",
+    ],
+    "aider": [
+        "pip install --upgrade aider-chat",
+        "Or: pipx upgrade aider-chat",
+    ],
+    "windsurf": [
+        "Open Windsurf → Help → Check for Updates",
+        "Or download from https://windsurf.ai",
+    ],
+    "cline": [
+        "Open VS Code → Extensions → Cline → Update",
+    ],
+    "continue": [
+        "Open VS Code → Extensions → Continue → Update",
+    ],
+}
+
+
+@dataclass
+class UpgradeRequirement:
+    """A harness version upgrade that would unlock blocked sync features."""
+    harness: str
+    current_version: str
+    required_version: str
+    blocked_features: list[str]
+    upgrade_commands: list[str]
+
+    def format(self) -> str:
+        """Return a human-readable upgrade requirement block."""
+        lines = [
+            f"{self.harness.capitalize()} — upgrade {self.current_version} → {self.required_version}",
+            f"  Blocked features: {', '.join(self.blocked_features)}",
+            "  Upgrade instructions:",
+        ]
+        for cmd in self.upgrade_commands:
+            lines.append(f"    {cmd}")
+        return "\n".join(lines)
+
+
+def get_upgrade_requirements(
+    project_dir: Path | None = None,
+) -> list[UpgradeRequirement]:
+    """Return a list of harness upgrades needed to unblock locked features.
+
+    Compares the declared/detected harness version against the feature
+    requirements in VERSIONED_FEATURES and returns upgrade requirements for
+    any feature that is currently blocked by an older version.
+
+    Args:
+        project_dir: Project root for version config lookup.
+
+    Returns:
+        List of UpgradeRequirement objects, one per harness that needs upgrading.
+    """
+    pinned = load_pinned_versions(project_dir)
+    requirements: list[UpgradeRequirement] = []
+
+    for harness, features in VERSIONED_FEATURES.items():
+        current = pinned.get(harness) or _DEFAULT_VERSIONS.get(harness, "0.0")
+        blocked: list[tuple[str, str]] = []  # (min_version_needed, feature_description)
+
+        for _feature_name, (min_ver, description) in features.items():
+            if not _version_gte(current, min_ver):
+                blocked.append((min_ver, description))
+
+        if not blocked:
+            continue
+
+        # Find the highest required version
+        highest_required = max(blocked, key=lambda x: _parse_version(x[0]))[0]
+        upgrade_cmds = _UPGRADE_COMMANDS.get(harness, [f"Upgrade {harness} to {highest_required}+"])
+
+        requirements.append(UpgradeRequirement(
+            harness=harness,
+            current_version=current,
+            required_version=highest_required,
+            blocked_features=[desc for _, desc in blocked],
+            upgrade_commands=upgrade_cmds,
+        ))
+
+    return sorted(requirements, key=lambda r: r.harness)
+
+
+def format_upgrade_requirements(project_dir: Path | None = None) -> str:
+    """Format harness upgrade requirements as a human-readable report.
+
+    Shows which harnesses need upgrading to unlock blocked sync features,
+    with inline installation commands.
+
+    Args:
+        project_dir: Project root directory.
+
+    Returns:
+        Formatted multi-line string, or message indicating no upgrades needed.
+    """
+    reqs = get_upgrade_requirements(project_dir)
+    if not reqs:
+        return "All harnesses meet the minimum version requirements."
+
+    lines = [
+        "Harness Version Upgrade Requirements",
+        "=" * 50,
+        "",
+        "The following harnesses are below the minimum version for some",
+        "HarnessSync features. Upgrade to unlock blocked capabilities.",
+        "",
+    ]
+    for req in reqs:
+        lines.append(req.format())
+        lines.append("")
+    return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Format Change Notifier (item 7)
 #
 # Detects when HarnessSync's own feature matrix (VERSIONED_FEATURES) has been

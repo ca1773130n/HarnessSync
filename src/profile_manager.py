@@ -1042,3 +1042,122 @@ def merge_project_profile(
     if project_profile:
         result.update(project_profile)
     return result
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Built-in compliance and context presets (item 1)
+# ──────────────────────────────────────────────────────────────────────────────
+
+#: Preset profiles keyed by name. These are templates, not stored profiles.
+#: Use ProfileManager.save_profile(name, PRESET_PROFILES[name]) to persist.
+PRESET_PROFILES: dict[str, dict] = {
+    "work": {
+        "description": "Work / corporate — strict compliance rules, approved MCP servers only",
+        "scope": "all",
+        "skip_sections": ["experimental"],
+        "targets": ["codex", "gemini", "opencode"],
+        "harness_env": "corp",
+        "settings_overrides": {
+            "approval_mode": "auto-edit",
+        },
+    },
+    "personal": {
+        "description": "Personal / home — all features enabled, experimental MCPs allowed",
+        "scope": "all",
+        "skip_sections": [],
+        "targets": [],  # empty = all targets
+        "harness_env": "personal",
+        "settings_overrides": {
+            "approval_mode": "suggest",
+        },
+    },
+    "oss": {
+        "description": "Open-source project — public-safe rules, no internal MCP servers",
+        "scope": "project",
+        "skip_sections": ["mcp"],
+        "only_sections": ["rules", "skills"],
+        "targets": ["codex", "gemini"],
+        "harness_env": "oss",
+    },
+    "minimal": {
+        "description": "Minimal sync — rules only, fastest sync, widest compatibility",
+        "scope": "all",
+        "only_sections": ["rules"],
+        "targets": [],
+    },
+    "compliance": {
+        "description": "High-security compliance — skip experimental, force read-only MCP",
+        "scope": "all",
+        "skip_sections": ["experimental", "agents"],
+        "only_sections": ["rules", "settings"],
+        "targets": ["codex", "gemini"],
+        "harness_env": "compliance",
+        "settings_overrides": {
+            "approval_mode": "auto-edit",
+        },
+    },
+}
+
+
+def install_preset(
+    manager: "ProfileManager",
+    preset_name: str,
+    profile_name: str | None = None,
+    overwrite: bool = False,
+) -> str:
+    """Install a built-in preset profile into the ProfileManager.
+
+    Args:
+        manager: ProfileManager instance to save into.
+        preset_name: Name of the preset from PRESET_PROFILES (e.g. "work").
+        profile_name: Name to save under (default: same as preset_name).
+        overwrite: If False, raises ValueError if profile already exists.
+
+    Returns:
+        The name the profile was saved under.
+
+    Raises:
+        KeyError: If preset_name not in PRESET_PROFILES.
+        ValueError: If profile_name already exists and overwrite=False.
+    """
+    if preset_name not in PRESET_PROFILES:
+        available = ", ".join(sorted(PRESET_PROFILES))
+        raise KeyError(
+            f"Unknown preset '{preset_name}'. Available: {available}"
+        )
+
+    save_name = profile_name or preset_name
+    existing = manager.get_profile(save_name)
+    if existing is not None and not overwrite:
+        raise ValueError(
+            f"Profile '{save_name}' already exists. "
+            "Pass overwrite=True to replace it."
+        )
+
+    manager.save_profile(save_name, dict(PRESET_PROFILES[preset_name]))
+    return save_name
+
+
+def list_presets() -> str:
+    """Return a formatted table of available built-in preset profiles.
+
+    Returns:
+        Multi-line string listing presets and their descriptions.
+    """
+    lines = ["Built-in Profile Presets", "=" * 50, ""]
+    for name, profile in sorted(PRESET_PROFILES.items()):
+        desc = profile.get("description", "")
+        targets_raw = profile.get("targets", [])
+        targets = ", ".join(targets_raw) if targets_raw else "all targets"
+        sections_raw = profile.get("only_sections", [])
+        skip_raw = profile.get("skip_sections", [])
+        sections_note = ""
+        if sections_raw:
+            sections_note = f"  only: {', '.join(sections_raw)}"
+        elif skip_raw:
+            sections_note = f"  skip: {', '.join(skip_raw)}"
+        lines.append(f"  {name:<14} {desc}")
+        lines.append(f"               Targets: {targets}{sections_note}")
+        lines.append("")
+    lines.append("Install with:  /sync --profile-preset <name>")
+    return "\n".join(lines)

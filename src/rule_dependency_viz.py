@@ -24,7 +24,7 @@ Usage:
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Generator
+from typing import Generator  # noqa: F401
 
 
 # Heading patterns that introduce named sections/rules
@@ -384,3 +384,158 @@ class RuleDependencyViz:
 
         lines.append("```")
         return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Rule Scope & Priority Visualizer (item 19)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class ScopedRule:
+    """A rule with its scope level and source information."""
+    name: str
+    scope: str           # "global", "project", "subdirectory"
+    source_file: str
+    line_number: int
+    priority: int        # Lower number = higher priority (1 = highest)
+    content_snippet: str = ""
+    conflicts_with: list[str] = field(default_factory=list)
+
+
+def _detect_scope(source_file: str, project_dir: Path) -> str:
+    """Determine the scope of a rule based on its source file path."""
+    path = Path(source_file)
+    # Global: user's ~/.claude/
+    if "~/" in source_file or source_file.startswith(str(Path.home())):
+        return "global"
+    # Subdirectory: has a directory component other than project root
+    if path.parts and len(path.parts) > 1 and path.parts[0] not in (".", "CLAUDE.md"):
+        return "subdirectory"
+    return "project"
+
+
+def build_scope_map(
+    project_dir: Path,
+    cc_home: Path | None = None,
+) -> list[ScopedRule]:
+    """Build a list of all rules with their scope and priority.
+
+    Priority ordering (highest to lowest):
+        1. Subdirectory rules (most specific)
+        2. Project rules (CLAUDE.md in project root)
+        3. Global rules (~/.claude/CLAUDE.md)
+
+    Args:
+        project_dir: Project root directory.
+        cc_home: Claude home directory (default: ~/.claude).
+
+    Returns:
+        List of ScopedRule objects sorted by (scope_priority, source_file, line).
+    """
+    cc_home = cc_home or Path.home() / ".claude"
+    viz = RuleDependencyViz(project_dir, cc_home)
+    sources = list(viz._discover_rule_sources())
+
+    scope_priority = {"subdirectory": 1, "project": 2, "global": 3}
+    rules: list[ScopedRule] = []
+    name_to_rules: dict[str, list[ScopedRule]] = {}
+
+    for source_file, content in sources:
+        sections = viz._extract_sections(content, source_file)
+        scope = _detect_scope(source_file, project_dir)
+        prio = scope_priority[scope]
+        for rule_name, lineno, snippet in sections:
+            sr = ScopedRule(
+                name=rule_name,
+                scope=scope,
+                source_file=source_file,
+                line_number=lineno,
+                priority=prio,
+                content_snippet=snippet[:200],
+            )
+            rules.append(sr)
+            name_to_rules.setdefault(rule_name.lower(), []).append(sr)
+
+    # Detect conflicts: same rule name at different scopes
+    for rule_name_lower, scoped_list in name_to_rules.items():
+        if len(scoped_list) > 1:
+            all_names = [r.source_file for r in scoped_list]
+            for sr in scoped_list:
+                sr.conflicts_with = [
+                    other.source_file
+                    for other in scoped_list
+                    if other is not sr
+                ]
+
+    rules.sort(key=lambda r: (r.priority, r.source_file, r.line_number))
+    return rules
+
+
+def format_scope_tree(rules: list[ScopedRule]) -> str:
+    """Format a tree view of rules organized by scope.
+
+    Shows global → project → subdirectory hierarchy with conflict markers.
+    Rules that override a higher-scope rule are annotated with "(overrides ...)".
+
+    Args:
+        rules: List from build_scope_map().
+
+    Returns:
+        Multi-line formatted string.
+    """
+    if not rules:
+        return "No rules found."
+
+    lines = ["Rule Scope & Priority View", "=" * 50, ""]
+    lines.append("Priority: subdirectory (1) > project (2) > global (3)")
+    lines.append("")
+
+    scopes = ["subdirectory", "project", "global"]
+    scope_labels = {
+        "subdirectory": "Subdirectory rules (highest priority — most specific)",
+        "project": "Project rules (CLAUDE.md in project root)",
+        "global": "Global rules (~/.claude/CLAUDE.md)",
+    }
+
+    by_scope: dict[str, list[ScopedRule]] = {"subdirectory": [], "project": [], "global": []}
+    for rule in rules:
+        by_scope.setdefault(rule.scope, []).append(rule)
+
+    # Track which rule names appear at multiple scopes
+    all_names: dict[str, list[str]] = {}
+    for rule in rules:
+        all_names.setdefault(rule.name.lower(), []).append(rule.scope)
+
+    for scope in scopes:
+        scope_rules = by_scope.get(scope, [])
+        if not scope_rules:
+            continue
+        lines.append(f"[{scope.upper()}] {scope_labels[scope]}")
+        lines.append("─" * 45)
+        for rule in scope_rules:
+            conflict_marker = ""
+            if len(all_names.get(rule.name.lower(), [])) > 1:
+                other_scopes = [s for s in all_names[rule.name.lower()] if s != scope]
+                conflict_marker = f"  ⚠ overrides {', '.join(other_scopes)}"
+            lines.append(f"  • {rule.name}  ({rule.source_file}:{rule.line_number}){conflict_marker}")
+        lines.append("")
+
+    # Conflict summary
+    conflicts = [r for r in rules if r.conflicts_with]
+    if conflicts:
+        seen: set[str] = set()
+        lines.append("Scope Conflicts (same rule name at multiple levels):")
+        lines.append("─" * 45)
+        for rule in conflicts:
+            key = rule.name.lower()
+            if key not in seen:
+                seen.add(key)
+                conflicting = [r for r in rules if r.name.lower() == key]
+                parts = [f"{r.scope}:{r.source_file}" for r in conflicting]
+                lines.append(f"  ⚠ '{rule.name}' defined in: {', '.join(parts)}")
+        lines.append("")
+    else:
+        lines.append("No scope conflicts detected.")
+
+    return "\n".join(lines)
