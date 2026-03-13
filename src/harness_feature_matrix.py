@@ -1245,3 +1245,90 @@ class HarnessFeatureMatrix:
         header = ["Pre-sync capability warnings:", "─" * 50]
         footer = ["", "Run /sync-matrix for full capability details."]
         return "\n".join(header + warnings + footer)
+
+    # ── Coverage Heatmap (item 3) ────────────────────────────────────────────
+
+    def render_coverage_heatmap(
+        self,
+        features: list[str] | None = None,
+        targets: list[str] | None = None,
+        use_color: bool = False,
+    ) -> str:
+        """Render an ASCII heatmap showing feature coverage across harnesses.
+
+        Each cell contains a single glyph:
+        - ``■`` native support (best)
+        - ``◑`` partial support
+        - ``○`` adapter/emulation
+        - ``✗`` unsupported (gap)
+
+        Args:
+            features: Feature subset to show (default: ALL_FEATURES).
+            targets:  Harness subset to show (default: ALL_HARNESSES).
+            use_color: Emit ANSI color codes for terminal color output.
+
+        Returns:
+            Multi-line heatmap string.
+        """
+        feat_list = features or ALL_FEATURES
+        targ_list = targets or ALL_HARNESSES
+
+        # ANSI colors (reset at end of each cell)
+        _ANSI = {
+            "native":      "\033[32m",   # green
+            "partial":     "\033[33m",   # yellow
+            "adapter":     "\033[34m",   # blue
+            "unsupported": "\033[31m",   # red
+            "reset":       "\033[0m",
+        } if use_color else {k: "" for k in ("native", "partial", "adapter", "unsupported", "reset")}
+
+        _GLYPH: dict[str, str] = {
+            "native":      "■",
+            "partial":     "◑",
+            "adapter":     "○",
+            "unsupported": "✗",
+        }
+
+        def _cell(level: str) -> str:
+            col = _ANSI.get(level, "")
+            reset = _ANSI["reset"]
+            glyph = _GLYPH.get(level, "?")
+            return f"{col}{glyph}{reset}"
+
+        # Compute column widths
+        targ_col = max(len(t) for t in targ_list)
+        feat_col = 3  # each feature column: glyph + 2 spaces
+
+        # Header row
+        feat_header = "  ".join(f[:4].ljust(4) for f in feat_list)
+        header = f"{'harness':<{targ_col}}  {feat_header}"
+        sep = "─" * len(header)
+
+        lines = [
+            "Feature Coverage Heatmap",
+            "  ■ native  ◑ partial  ○ adapter  ✗ unsupported",
+            sep,
+            header,
+            sep,
+        ]
+
+        for target in targ_list:
+            cells = []
+            for feat in feat_list:
+                level = _FEATURE_MATRIX.get(feat, {}).get(target, "unsupported")
+                cells.append(_cell(level).ljust(4 + len(_ANSI.get("reset", ""))))
+            row = f"{target:<{targ_col}}  {'  '.join(c.strip() for c in cells)}"
+            lines.append(row)
+
+        lines.append(sep)
+
+        # Compact legend counts
+        native_count = sum(
+            1 for f in feat_list for t in targ_list
+            if _FEATURE_MATRIX.get(f, {}).get(t) == "native"
+        )
+        total_cells = len(feat_list) * len(targ_list)
+        pct = int(native_count / total_cells * 100) if total_cells else 0
+        lines.append(f"Native coverage: {native_count}/{total_cells} cells ({pct}%)")
+
+        return "\n".join(lines)

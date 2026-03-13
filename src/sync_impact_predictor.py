@@ -485,3 +485,127 @@ class SyncImpactPredictor:
         if isinstance(rules, list):
             return "\n".join(r.get("content", "") for r in rules if isinstance(r, dict))
         return rules or ""
+
+    # ── Pre-Sync Capability Preview (item 2) ────────────────────────────────
+
+    def build_capability_preview(
+        self,
+        current_source: dict,
+        previous_source: dict | None = None,
+        targets: list[str] | None = None,
+    ) -> dict[str, dict]:
+        """Build a per-target preview of exactly what will gain and lose in sync.
+
+        Before running a sync, shows each harness a concise summary:
+        - Rules lines added / removed
+        - MCP servers to be added / removed
+        - Skills to be added / removed (count)
+        - Sections with unsupported features (will be skipped)
+
+        Args:
+            current_source: Source data dict from ``SourceReader.discover_all()``.
+            previous_source: Source data from the last sync (or None for first sync).
+            targets: List of harness targets to preview (default: standard set).
+
+        Returns:
+            Dict mapping target name → preview dict with keys:
+            ``"rules_added"``, ``"rules_removed"``, ``"mcp_added"``,
+            ``"mcp_removed"``, ``"skills_added"``, ``"skills_removed"``,
+            ``"unsupported_sections"``, ``"summary"``.
+        """
+        from src.harness_feature_matrix import HarnessFeatureMatrix, ALL_FEATURES
+
+        if previous_source is None:
+            previous_source = {}
+        if targets is None:
+            targets = list(_HARNESS_PREFERENCES.keys()) + ["opencode", "windsurf", "cline", "continue"]
+
+        matrix = HarnessFeatureMatrix()
+        previews: dict[str, dict] = {}
+
+        # --- Compute source-level deltas ---
+        cur_rules_text = self._rules_text(current_source)
+        prev_rules_text = self._rules_text(previous_source)
+        cur_rules_lines = set(cur_rules_text.splitlines())
+        prev_rules_lines = set(prev_rules_text.splitlines())
+        new_rule_lines = len(cur_rules_lines - prev_rules_lines - {""})
+        removed_rule_lines = len(prev_rules_lines - cur_rules_lines - {""})
+
+        cur_mcp = set((current_source.get("mcp") or {}).keys())
+        prev_mcp = set((previous_source.get("mcp") or {}).keys())
+        mcp_added = sorted(cur_mcp - prev_mcp)
+        mcp_removed = sorted(prev_mcp - cur_mcp)
+
+        cur_skills = current_source.get("skills") or []
+        prev_skills = previous_source.get("skills") or []
+        cur_skill_names = {s.get("name", "") for s in cur_skills if isinstance(s, dict)}
+        prev_skill_names = {s.get("name", "") for s in prev_skills if isinstance(s, dict)}
+        skills_added_count = len(cur_skill_names - prev_skill_names)
+        skills_removed_count = len(prev_skill_names - cur_skill_names)
+
+        for target in targets:
+            # Determine which sections this target cannot support
+            unsupported: list[str] = []
+            for feat in ALL_FEATURES:
+                level = matrix.query_harness(target).get(feat, "unsupported")
+                if level == "unsupported":
+                    unsupported.append(feat)
+
+            # MCP is blocked on some harnesses (aider)
+            target_mcp_added = mcp_added if "mcp" not in unsupported else []
+            target_mcp_removed = mcp_removed if "mcp" not in unsupported else []
+
+            # Build human summary line
+            parts: list[str] = []
+            if new_rule_lines:
+                parts.append(f"+{new_rule_lines} rule line(s)")
+            if removed_rule_lines:
+                parts.append(f"-{removed_rule_lines} rule line(s)")
+            if target_mcp_added:
+                parts.append(f"+{len(target_mcp_added)} MCP server(s) ({', '.join(target_mcp_added[:2])}{'…' if len(target_mcp_added) > 2 else ''})")
+            if target_mcp_removed:
+                parts.append(f"-{len(target_mcp_removed)} MCP server(s)")
+            if skills_added_count:
+                parts.append(f"+{skills_added_count} skill(s)")
+            if skills_removed_count:
+                parts.append(f"-{skills_removed_count} skill(s)")
+            if unsupported:
+                parts.append(f"{len(unsupported)} section(s) skipped (unsupported)")
+
+            summary = ", ".join(parts) if parts else "no changes"
+
+            previews[target] = {
+                "rules_added":          new_rule_lines,
+                "rules_removed":        removed_rule_lines,
+                "mcp_added":            target_mcp_added,
+                "mcp_removed":          target_mcp_removed,
+                "skills_added":         skills_added_count,
+                "skills_removed":       skills_removed_count,
+                "unsupported_sections": unsupported,
+                "summary":              summary,
+            }
+
+        return previews
+
+    def format_capability_preview(
+        self,
+        previews: dict[str, dict],
+    ) -> str:
+        """Format the output of :meth:`build_capability_preview` for terminal display.
+
+        Args:
+            previews: Dict returned by :meth:`build_capability_preview`.
+
+        Returns:
+            Multi-line human-readable preview string.
+        """
+        if not previews:
+            return "No targets to preview."
+
+        lines = ["Pre-Sync Capability Preview", "=" * 55, ""]
+        for target, info in sorted(previews.items()):
+            lines.append(f"  {target:<14} {info['summary']}")
+
+        lines.append("")
+        lines.append("Run /sync to apply these changes.")
+        return "\n".join(lines)

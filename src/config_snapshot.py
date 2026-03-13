@@ -1027,3 +1027,193 @@ class TargetConfigHistory:
                 f.unlink()
             except OSError:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# Named Config Snapshots (item 22)
+# ---------------------------------------------------------------------------
+
+class NamedSnapshotStore:
+    """Save and restore named snapshots of the full HarnessSync config state.
+
+    Named snapshots are stored as JSON files under
+    ``~/.harnesssync/named-snapshots/<name>.json``.  They capture the full
+    source config (rules, MCP servers, settings, skills manifest) at a point
+    in time so users can restore a known-good state by name.
+
+    This is complementary to ``ConfigSnapshot`` (which focuses on shareable
+    bundles / GitHub Gists).  Named snapshots are private, local, and designed
+    for quick save/restore during local experiments.
+
+    Usage::
+
+        store = NamedSnapshotStore()
+        store.save("pre-migration", snapshot_dict)
+
+        names = store.list_names()
+        snap = store.load("pre-migration")
+        store.delete("pre-migration")
+
+    """
+
+    def __init__(self, store_dir: Path | None = None) -> None:
+        self._dir = store_dir or (Path.home() / ".harnesssync" / "named-snapshots")
+
+    # ── Internal helpers ────────────────────────────────────────────────────
+
+    def _path(self, name: str) -> Path:
+        return self._dir / f"{name}.json"
+
+    @staticmethod
+    def _validate_name(name: str) -> None:
+        if not name or not name.replace("-", "").replace("_", "").replace(".", "").isalnum():
+            raise ValueError(
+                f"Invalid snapshot name {name!r}. "
+                "Use alphanumeric characters, hyphens, underscores, or dots only."
+            )
+
+    # ── Public API ───────────────────────────────────────────────────────────
+
+    def save(self, name: str, snapshot: dict) -> Path:
+        """Save a snapshot under the given name.
+
+        Overwrites any existing snapshot with the same name.
+
+        Args:
+            name: Human-readable snapshot label (e.g. "pre-migration").
+            snapshot: Snapshot dict (e.g. from ``ConfigSnapshot.create()``).
+
+        Returns:
+            Path to the saved snapshot file.
+
+        Raises:
+            ValueError: If ``name`` contains invalid characters.
+            OSError: If the file cannot be written.
+        """
+        self._validate_name(name)
+        self._dir.mkdir(parents=True, exist_ok=True)
+
+        import os as _os
+        import tempfile as _tempfile
+
+        target_path = self._path(name)
+        tmp = _tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=str(self._dir),
+            suffix=".tmp",
+            delete=False,
+            encoding="utf-8",
+        )
+        try:
+            payload = {
+                "name": name,
+                "saved_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "snapshot": snapshot,
+            }
+            json.dump(payload, tmp, indent=2, ensure_ascii=False)
+            tmp.write("\n")
+            tmp.flush()
+            _os.fsync(tmp.fileno())
+            tmp.close()
+            _os.replace(tmp.name, str(target_path))
+        except Exception:
+            tmp.close()
+            try:
+                _os.unlink(tmp.name)
+            except OSError:
+                pass
+            raise
+
+        return target_path
+
+    def load(self, name: str) -> dict | None:
+        """Load a named snapshot.
+
+        Args:
+            name: Snapshot label previously passed to :meth:`save`.
+
+        Returns:
+            The snapshot dict (the ``"snapshot"`` key from the stored payload),
+            or ``None`` if not found or unreadable.
+        """
+        self._validate_name(name)
+        path = self._path(name)
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return payload.get("snapshot") if isinstance(payload, dict) else None
+        except (json.JSONDecodeError, OSError):
+            return None
+
+    def load_metadata(self, name: str) -> dict | None:
+        """Load metadata (name, saved_at) for a snapshot without the full payload.
+
+        Args:
+            name: Snapshot label.
+
+        Returns:
+            Dict with ``name`` and ``saved_at`` keys, or ``None`` if not found.
+        """
+        self._validate_name(name)
+        path = self._path(name)
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                return None
+            return {"name": payload.get("name", name), "saved_at": payload.get("saved_at", "")}
+        except (json.JSONDecodeError, OSError):
+            return None
+
+    def list_names(self) -> list[str]:
+        """Return a sorted list of saved snapshot names.
+
+        Returns:
+            List of snapshot name strings (without ``.json`` extension).
+        """
+        if not self._dir.exists():
+            return []
+        return sorted(
+            p.stem for p in self._dir.glob("*.json")
+            if p.is_file() and not p.stem.startswith(".")
+        )
+
+    def delete(self, name: str) -> bool:
+        """Delete a named snapshot.
+
+        Args:
+            name: Snapshot label to delete.
+
+        Returns:
+            ``True`` if deleted, ``False`` if not found.
+        """
+        self._validate_name(name)
+        path = self._path(name)
+        if not path.exists():
+            return False
+        try:
+            path.unlink()
+            return True
+        except OSError:
+            return False
+
+    def format_listing(self) -> str:
+        """Return a human-readable listing of all stored snapshots.
+
+        Returns:
+            Multi-line string, or a message if no snapshots exist.
+        """
+        names = self.list_names()
+        if not names:
+            return "No named snapshots saved. Use /sync-snapshot save <name> to create one."
+
+        lines = [f"Named Snapshots  ({len(names)} stored):", "─" * 45]
+        for name in names:
+            meta = self.load_metadata(name)
+            ts = (meta.get("saved_at", "")[:19].replace("T", " ") if meta else "?")
+            lines.append(f"  {name:<30} {ts}")
+        lines.append("")
+        lines.append("Restore with: /sync-snapshot restore <name>")
+        return "\n".join(lines)

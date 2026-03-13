@@ -297,3 +297,147 @@ class RuleCategorizer:
 
         parts = [preamble] + [text[s:e] for s, e in merged]
         return "".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Rule Portability Triage (item 11)
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate a rule uses Claude Code-specific syntax or features
+# that will NOT be understood by other harnesses.
+_CC_ONLY_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(allowed-tools|tool-calls|agent-tool|task-tool)\b", re.I),
+    re.compile(r"<tool_call>|</tool_call>", re.I),
+    re.compile(r"\b(EnterPlanMode|ExitPlanMode|TodoWrite|TodoRead|NotebookEdit|NotebookRead)\b"),
+    re.compile(r"\b(MultiEdit|ExitWorktree|EnterWorktree)\b"),
+    re.compile(r"\.claude/(skills|agents|commands|hooks)/"),
+    re.compile(r"\$CLAUDE_PLUGIN_ROOT|\bclaudeCode\b|\bclaude-code\b", re.I),
+    re.compile(r"\bclaude settings\.json\b", re.I),
+    re.compile(r"\b(claude code plugin|harness.sync skill)\b", re.I),
+]
+
+# Patterns that indicate the rule will need approximation / translation
+_APPROX_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(skill|skills|slash command|/[a-z][-a-z]+)\b", re.I),
+    re.compile(r"\b(mcp server|mcp tool|mcp_server)\b", re.I),
+    re.compile(r"\b(agent|sub.?agent)\b", re.I),
+    re.compile(r"\b(hook|post.?tool|pre.?tool|on.?tool)\b", re.I),
+    re.compile(r"\b(context window|token limit|max.?token)\b", re.I),
+    re.compile(r"\b(keybinding|keyboard shortcut|hotkey)\b", re.I),
+]
+
+
+@dataclass
+class RulePortability:
+    """Portability classification for a single CLAUDE.md rule section.
+
+    Attributes:
+        title:       Section heading text.
+        portability: One of ``"universal"``, ``"claude-code-only"``, ``"approximable"``.
+        reason:      Short explanation of the classification.
+        suggestion:  Recommendation to improve portability (empty if already universal).
+        line_start:  1-based line number of the section heading.
+    """
+
+    title: str
+    portability: str       # "universal" | "claude-code-only" | "approximable"
+    reason: str
+    suggestion: str
+    line_start: int = 0
+
+
+def triage_by_portability(text: str) -> list[RulePortability]:
+    """Classify each rule section in *text* by its portability across harnesses.
+
+    Portability levels:
+    - ``"universal"``        — works the same in all harnesses.
+    - ``"approximable"``     — contains features that other harnesses can emulate
+                               with translation (e.g., skills become context files).
+    - ``"claude-code-only"`` — contains CC-specific syntax that will silently fail
+                               or be ignored in other harnesses.
+
+    Args:
+        text: Full CLAUDE.md content (or any rules document).
+
+    Returns:
+        List of :class:`RulePortability` entries, one per H2/H3 section.
+    """
+    sections = _split_into_sections(text)
+    results: list[RulePortability] = []
+
+    for line_start, _level, title, section_text in sections:
+        # Check for CC-only patterns first (stronger signal)
+        cc_matches = [p.pattern for p in _CC_ONLY_PATTERNS if p.search(section_text)]
+        if cc_matches:
+            results.append(RulePortability(
+                title=title,
+                portability="claude-code-only",
+                reason=f"Uses Claude Code-specific feature(s): {cc_matches[0]}",
+                suggestion=(
+                    "Rewrite using portable language (e.g., 'use a reusable workflow' "
+                    "instead of 'invoke a skill'). Remove CC tool names and XML blocks."
+                ),
+                line_start=line_start,
+            ))
+            continue
+
+        # Check for approximable patterns
+        approx_matches = [p.pattern for p in _APPROX_PATTERNS if p.search(section_text)]
+        if approx_matches:
+            results.append(RulePortability(
+                title=title,
+                portability="approximable",
+                reason=f"References feature that requires translation: {approx_matches[0]}",
+                suggestion=(
+                    "Consider providing a portable fallback description so harnesses "
+                    "without this feature can still apply the intent of the rule."
+                ),
+                line_start=line_start,
+            ))
+            continue
+
+        results.append(RulePortability(
+            title=title,
+            portability="universal",
+            reason="No harness-specific syntax detected.",
+            suggestion="",
+            line_start=line_start,
+        ))
+
+    return results
+
+
+def format_portability_triage(entries: list[RulePortability]) -> str:
+    """Return a terminal-friendly summary of portability triage results.
+
+    Args:
+        entries: Output of :func:`triage_by_portability`.
+
+    Returns:
+        Formatted multi-line string.
+    """
+    if not entries:
+        return "No rule sections found to triage."
+
+    counts = {"universal": 0, "approximable": 0, "claude-code-only": 0}
+    for e in entries:
+        counts[e.portability] = counts.get(e.portability, 0) + 1
+
+    lines = [
+        f"Rule Portability Triage  ({len(entries)} sections)",
+        "=" * 55,
+        f"  Universal      : {counts['universal']:>3}",
+        f"  Approximable   : {counts['approximable']:>3}",
+        f"  Claude Code Only: {counts['claude-code-only']:>3}",
+        "",
+    ]
+    for e in entries:
+        badge = {
+            "universal":        "[UNIVERSAL  ]",
+            "approximable":     "[APPROXIMABLE]",
+            "claude-code-only": "[CC ONLY     ]",
+        }.get(e.portability, "[?]")
+        lines.append(f"  {badge} L{e.line_start:<4} {e.title}")
+        if e.suggestion:
+            lines.append(f"             → {e.suggestion[:80]}")
+    return "\n".join(lines)

@@ -1341,4 +1341,130 @@ class ConflictResolutionWizard:
         if not dry_run:
             claude_md_path.write_text(new_content, encoding="utf-8")
 
+
+# ---------------------------------------------------------------------------
+# Sync Conflict Resolution Wizard (item 1)
+# ---------------------------------------------------------------------------
+
+class SyncConflictWizard:
+    """Non-interactive strategy-based conflict resolver for automated pipelines.
+
+    Unlike ``ConflictDetector.resolve_interactive()``, this wizard resolves
+    conflicts programmatically using a named strategy — suitable for CI/CD
+    and ``--dry-run`` preview modes where no TTY is available.
+
+    Strategies
+    ----------
+    ``"ours"``
+        Accept the HarnessSync version unconditionally (overwrite target).
+    ``"theirs"``
+        Keep the manually edited target file (skip sync for this file).
+    ``"union"``
+        Concatenate unique lines from both versions, deduplicated.
+        Source (HarnessSync) lines come first, then novel target-only lines.
+    ``"newer"``
+        Alias for ``"ours"`` — HarnessSync source is always considered newer.
+
+    Usage::
+
+        wizard = SyncConflictWizard(strategy="union")
+        resolved = wizard.auto_resolve(three_way)
+        # resolved is the string content to write, or None to skip
+
+    """
+
+    VALID_STRATEGIES = frozenset({"ours", "theirs", "union", "newer"})
+
+    def __init__(self, strategy: str = "ours") -> None:
+        if strategy not in self.VALID_STRATEGIES:
+            raise ValueError(
+                f"Unknown strategy '{strategy}'. "
+                f"Valid: {', '.join(sorted(self.VALID_STRATEGIES))}"
+            )
+        self.strategy = strategy
+
+    def auto_resolve(self, three_way: dict) -> tuple[str, str]:
+        """Resolve a conflict dict without user interaction.
+
+        Args:
+            three_way: Dict from ``ConflictDetector.three_way_diff()``.
+                       Must include ``source_lines`` and ``current_lines``.
+
+        Returns:
+            ``(resolution_label, content)`` where:
+            - ``resolution_label`` is one of ``"synced"``, ``"keep"``, ``"merged"``
+            - ``content`` is the resolved file content as a string
+
+        Raises:
+            KeyError: If ``three_way`` is missing required keys.
+        """
+        source_lines: list[str] = three_way["source_lines"]
+        current_lines: list[str] = three_way["current_lines"]
+
+        source_text = "".join(source_lines)
+        current_text = "".join(current_lines)
+
+        effective = self.strategy if self.strategy != "newer" else "ours"
+
+        if effective == "ours":
+            return "synced", source_text
+
+        if effective == "theirs":
+            return "keep", current_text
+
+        # union: source lines first, then novel lines only in current
+        source_set = set(l.rstrip("\n") for l in source_lines)
+        novel_lines = [
+            l for l in current_lines
+            if l.rstrip("\n") not in source_set and l.strip()
+        ]
+        merged = source_text.rstrip()
+        if novel_lines:
+            merged += "\n\n" + "".join(novel_lines)
+        return "merged", merged
+
+    def resolve_many(
+        self,
+        three_ways: list[dict],
+    ) -> list[tuple[str, str, str]]:
+        """Resolve a list of three-way diff dicts.
+
+        Args:
+            three_ways: List of dicts from ``ConflictDetector.three_way_diff()``.
+
+        Returns:
+            List of ``(file_path, resolution_label, content)`` triples.
+        """
+        results = []
+        for tw in three_ways:
+            label, content = self.auto_resolve(tw)
+            results.append((tw.get("file_path", ""), label, content))
+        return results
+
+    def build_resolution_summary(self, three_ways: list[dict]) -> str:
+        """Return a human-readable summary of what ``resolve_many`` would do.
+
+        Args:
+            three_ways: List of dicts from ``ConflictDetector.three_way_diff()``.
+
+        Returns:
+            Multi-line summary string.
+        """
+        lines = [
+            f"Conflict Resolution Preview  (strategy: {self.strategy})",
+            "=" * 55,
+        ]
+        for tw in three_ways:
+            label, _ = self.auto_resolve(tw)
+            fp = tw.get("file_path", "(unknown)")
+            action = {
+                "synced": "→ overwrite with HarnessSync version",
+                "keep":   "→ keep manual edits, skip sync",
+                "merged": "→ merge (source first, novel target lines appended)",
+            }.get(label, f"→ {label}")
+            lines.append(f"  {fp}  {action}")
+        lines.append("")
+        lines.append(f"Total: {len(three_ways)} file(s) to resolve.")
+        return "\n".join(lines)
+
         return new_content

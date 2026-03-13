@@ -932,3 +932,113 @@ class ProfileManager:
         profiles["__cwd_rules__"] = new_rules
         self._save(profiles)
         return True
+
+
+# ---------------------------------------------------------------------------
+# Per-project sync profiles (item 4)
+# ---------------------------------------------------------------------------
+
+_PROJECT_PROFILE_FILE = ".harnesssync.json"
+
+
+def load_project_profile(project_dir: "Path") -> dict | None:
+    """Load a per-project sync profile from ``<project_dir>/.harnesssync.json``.
+
+    Teams can commit a ``.harnesssync.json`` at the repo root to enforce
+    org-wide sync settings (e.g., skip MCP servers, restrict to certain
+    targets) for everyone who clones the repo.
+
+    The file supports the same keys as a named profile::
+
+        {
+            "description": "Work repo — no experimental MCPs",
+            "skip_sections": ["mcp"],
+            "targets": ["codex", "gemini"],
+            "extends": "base"
+        }
+
+    Args:
+        project_dir: Root directory of the project (where ``.harnesssync.json``
+                     lives).
+
+    Returns:
+        Profile dict, or ``None`` if the file does not exist or is invalid JSON.
+    """
+    from pathlib import Path as _Path
+
+    profile_path = _Path(project_dir) / _PROJECT_PROFILE_FILE
+    if not profile_path.exists():
+        return None
+    try:
+        data = json.loads(profile_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def save_project_profile(project_dir: "Path", profile: dict) -> None:
+    """Write a per-project sync profile to ``<project_dir>/.harnesssync.json``.
+
+    Overwrites any existing ``.harnesssync.json`` in the project directory.
+
+    Args:
+        project_dir: Root directory of the project.
+        profile: Profile dict (same schema as named profiles in ``ProfileManager``).
+
+    Raises:
+        OSError: If the file cannot be written.
+        ValueError: If ``profile`` is not a dict.
+    """
+    import os as _os
+    import tempfile as _tempfile
+    from pathlib import Path as _Path
+
+    if not isinstance(profile, dict):
+        raise ValueError("profile must be a dict")
+
+    profile_path = _Path(project_dir) / _PROJECT_PROFILE_FILE
+    tmp_fd = _tempfile.NamedTemporaryFile(
+        mode="w",
+        dir=str(profile_path.parent),
+        suffix=".tmp",
+        delete=False,
+        encoding="utf-8",
+    )
+    try:
+        json.dump(profile, tmp_fd, indent=2, ensure_ascii=False)
+        tmp_fd.write("\n")
+        tmp_fd.flush()
+        _os.fsync(tmp_fd.fileno())
+        tmp_fd.close()
+        _os.replace(tmp_fd.name, str(profile_path))
+    except Exception:
+        tmp_fd.close()
+        try:
+            _os.unlink(tmp_fd.name)
+        except OSError:
+            pass
+        raise
+
+
+def merge_project_profile(
+    named_profile: dict | None,
+    project_profile: dict | None,
+) -> dict:
+    """Merge a named profile with a per-project profile override.
+
+    Project profile keys take precedence over named profile keys.
+    Both may be ``None``; an empty dict is returned when both are absent.
+
+    Args:
+        named_profile: Profile from ``ProfileManager.get_profile()`` (or None).
+        project_profile: Profile from ``load_project_profile()`` (or None).
+
+    Returns:
+        Merged profile dict.
+    """
+    result: dict = {}
+    if named_profile:
+        result.update(named_profile)
+    if project_profile:
+        result.update(project_profile)
+    return result
