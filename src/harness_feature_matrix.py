@@ -1120,3 +1120,128 @@ class HarnessFeatureMatrix:
             _Path(output_path).write_text(html_content, encoding="utf-8")
 
         return html_content
+
+    # ── Pre-sync capability check (item 1 — Live Capability Matrix Dashboard) ──
+
+    def check_before_sync(
+        self,
+        target: str,
+        features: list[str] | None = None,
+    ) -> dict[str, object]:
+        """Answer 'will this work in <target>?' before running sync.
+
+        Returns a structured result showing which features will work natively,
+        which will be adapted, and which will be silently dropped.  Call this
+        from the orchestrator or /sync command to surface capability warnings
+        at sync time rather than after.
+
+        Args:
+            target:   Harness name (e.g. "codex", "aider").
+            features: Feature names to check. Defaults to ALL_FEATURES.
+
+        Returns:
+            Dict with keys:
+              - "target":    harness name
+              - "ready":     features with "native" support
+              - "degraded":  features with "partial" or "adapter" support
+              - "blocked":   features with "unsupported" support
+              - "score":     coverage score (0-100)
+              - "verdict":   "ok" | "warnings" | "blocked"
+              - "summary":   one-line human-readable verdict string
+        """
+        check_features = features or ALL_FEATURES
+        ready: list[str] = []
+        degraded: list[str] = []
+        blocked: list[str] = []
+
+        for feat in check_features:
+            level = _FEATURE_MATRIX.get(feat, {}).get(target, "unsupported")
+            if level == "native":
+                ready.append(feat)
+            elif level in ("partial", "adapter"):
+                degraded.append(feat)
+            else:
+                blocked.append(feat)
+
+        score = self.coverage_score(target)
+
+        if blocked:
+            verdict = "blocked"
+            summary = (
+                f"{target}: {len(blocked)} feature(s) unsupported — "
+                f"{', '.join(blocked[:3])}{'…' if len(blocked) > 3 else ''}"
+            )
+        elif degraded:
+            verdict = "warnings"
+            summary = (
+                f"{target}: {len(degraded)} feature(s) with degraded support — "
+                f"{', '.join(degraded[:3])}{'…' if len(degraded) > 3 else ''}"
+            )
+        else:
+            verdict = "ok"
+            summary = f"{target}: all features supported natively (score={score})"
+
+        return {
+            "target": target,
+            "ready": ready,
+            "degraded": degraded,
+            "blocked": blocked,
+            "score": score,
+            "verdict": verdict,
+            "summary": summary,
+        }
+
+    def check_all_targets_before_sync(
+        self,
+        features: list[str] | None = None,
+        targets: list[str] | None = None,
+    ) -> list[dict[str, object]]:
+        """Run :meth:`check_before_sync` for all (or specified) targets.
+
+        Returns results sorted by score descending (best-supported harnesses first),
+        making it easy to spot which targets will have the most sync degradation.
+
+        Args:
+            features: Features to check (default: ALL_FEATURES).
+            targets:  Targets to check (default: ALL_HARNESSES).
+
+        Returns:
+            List of check result dicts, sorted best-first.
+        """
+        target_list = targets or ALL_HARNESSES
+        results = [self.check_before_sync(t, features) for t in target_list]
+        return sorted(results, key=lambda r: r["score"], reverse=True)  # type: ignore[return-value]
+
+    def format_pre_sync_warnings(
+        self,
+        features: list[str] | None = None,
+        targets: list[str] | None = None,
+    ) -> str:
+        """Return a concise pre-sync warning block for terminal display.
+
+        Shows only targets with degraded or blocked features, with one-line
+        summaries.  Targets where everything works natively are omitted to
+        reduce noise.
+
+        Args:
+            features: Features to check (default: ALL_FEATURES).
+            targets:  Targets to check (default: ALL_HARNESSES).
+
+        Returns:
+            Warning block string, or empty string if no warnings.
+        """
+        results = self.check_all_targets_before_sync(features, targets)
+        warnings: list[str] = []
+
+        for r in results:
+            if r["verdict"] == "blocked":
+                warnings.append(f"  [BLOCKED]  {r['summary']}")
+            elif r["verdict"] == "warnings":
+                warnings.append(f"  [ADVISORY] {r['summary']}")
+
+        if not warnings:
+            return ""
+
+        header = ["Pre-sync capability warnings:", "─" * 50]
+        footer = ["", "Run /sync-matrix for full capability details."]
+        return "\n".join(header + warnings + footer)

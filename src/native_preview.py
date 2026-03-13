@@ -513,3 +513,159 @@ def confirm_sync(
             print("Sync cancelled.")
             return False
         print("Enter 'y' to proceed or 'n' to cancel.")
+
+
+# ── Dry-Run Diff Preview (item 4 — Terraform-plan-style sync preview) ─────────
+
+def build_text_diff_preview(
+    preview_all: "dict[str, dict[str, str]]",
+    project_dir: "Path | None" = None,
+    context_lines: int = 3,
+) -> list[dict]:
+    """Build file-level unified diffs for all files that would change on sync.
+
+    Unlike :func:`build_sync_preview` (which only shows status/size), this
+    function generates actual text diffs — showing exactly which lines would
+    be added, removed, or changed in each target harness file.  This is the
+    'terraform plan' experience for sync: users see the precise delta before
+    committing.
+
+    Args:
+        preview_all:   Output of :func:`get_all_native_previews` or equivalent.
+                       Maps harness name → {rel_path → new_content}.
+        project_dir:   Project root for resolving existing files on disk.
+                       If None, all files are treated as new (full insertion diff).
+        context_lines: Number of context lines in unified diff output.
+
+    Returns:
+        List of diff dicts, one per file that would change, each with:
+          - harness: str
+          - file_path: str
+          - status: "created" | "modified" | "deleted" | "unchanged"
+          - unified_diff: str  (empty for unchanged/created-identical)
+          - old_lines: int
+          - new_lines: int
+          - additions: int
+          - deletions: int
+    """
+    import difflib as _difflib
+    from pathlib import Path as _Path
+
+    diffs: list[dict] = []
+
+    for harness in sorted(preview_all):
+        for rel_path, new_content in sorted(preview_all[harness].items()):
+            if not new_content:
+                continue
+
+            old_content = ""
+            status = "created"
+
+            if project_dir is not None:
+                disk_path = _Path(project_dir) / rel_path
+                if disk_path.is_file():
+                    try:
+                        old_content = disk_path.read_text(encoding="utf-8", errors="replace")
+                        status = "unchanged" if old_content == new_content else "modified"
+                    except OSError:
+                        status = "modified"
+
+            old_lines_list = old_content.splitlines(keepends=True)
+            new_lines_list = new_content.splitlines(keepends=True)
+
+            unified = ""
+            additions = 0
+            deletions = 0
+
+            if status != "unchanged":
+                diff_iter = _difflib.unified_diff(
+                    old_lines_list,
+                    new_lines_list,
+                    fromfile=f"a/{rel_path}",
+                    tofile=f"b/{rel_path}",
+                    n=context_lines,
+                )
+                unified = "".join(diff_iter)
+                additions = sum(1 for l in unified.splitlines() if l.startswith("+") and not l.startswith("+++"))
+                deletions = sum(1 for l in unified.splitlines() if l.startswith("-") and not l.startswith("---"))
+
+            diffs.append({
+                "harness": harness,
+                "file_path": rel_path,
+                "status": status,
+                "unified_diff": unified,
+                "old_lines": len(old_lines_list),
+                "new_lines": len(new_lines_list),
+                "additions": additions,
+                "deletions": deletions,
+            })
+
+    return diffs
+
+
+def format_text_diff_preview(diffs: list[dict], show_unchanged: bool = False) -> str:
+    """Format text diffs as a human-readable terminal string.
+
+    Produces output similar to 'git diff' or 'terraform plan':
+    - Summary header counting creates/modifies/unchanged
+    - Per-file diff blocks with +/- lines
+    - Unchanged files suppressed by default (show_unchanged=True to include)
+
+    Args:
+        diffs:           Output of :func:`build_text_diff_preview`.
+        show_unchanged:  Include unchanged files in output (default: False).
+
+    Returns:
+        Formatted diff string suitable for terminal display.
+    """
+    if not diffs:
+        return "Nothing to sync — all target harness files are up to date."
+
+    actionable = [d for d in diffs if d["status"] != "unchanged"]
+    unchanged = [d for d in diffs if d["status"] == "unchanged"]
+
+    created = [d for d in actionable if d["status"] == "created"]
+    modified = [d for d in actionable if d["status"] == "modified"]
+
+    lines: list[str] = [
+        "Sync Dry-Run Preview",
+        "=" * 60,
+        "",
+        f"  + {len(created)} to create   ~ {len(modified)} to modify   = {len(unchanged)} unchanged",
+        "",
+    ]
+
+    if not actionable and not show_unchanged:
+        lines.append("All target harness files are already up to date.")
+        return "\n".join(lines)
+
+    show_diffs = actionable + (unchanged if show_unchanged else [])
+    current_harness = None
+
+    for d in show_diffs:
+        if d["harness"] != current_harness:
+            current_harness = d["harness"]
+            lines.append(f"── {current_harness.upper()} " + "─" * (50 - len(current_harness)))
+
+        sym = {"created": "+", "modified": "~", "unchanged": "="}.get(d["status"], "?")
+        lines.append(
+            f"  {sym} {d['file_path']}"
+            f"  (+{d['additions']} -{d['deletions']})"
+            f"  [{d['status']}]"
+        )
+
+        if d["unified_diff"]:
+            # Indent diff lines and cap at 40 lines for readability
+            diff_lines = d["unified_diff"].splitlines()
+            shown = diff_lines[:40]
+            for dl in shown:
+                lines.append(f"      {dl}")
+            if len(diff_lines) > 40:
+                lines.append(f"      … {len(diff_lines) - 40} more diff lines (truncated)")
+            lines.append("")
+
+    lines.append("=" * 60)
+    lines.append(
+        "Run /sync --apply to write these changes, or /sync-diff for current drift."
+    )
+    return "\n".join(lines)

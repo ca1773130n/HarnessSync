@@ -616,3 +616,179 @@ def record_with_diff(
                 fh.write(diff_text)
         except OSError:
             pass
+
+
+# ── Config Changelog with Diff History (item 12) ─────────────────────────────
+
+import re as _re
+
+
+def get_diff_history(
+    manager: "ChangelogManager",
+    limit: int = 20,
+    target_filter: str | None = None,
+) -> list[dict]:
+    """Parse the changelog and return structured diff history entries.
+
+    Each entry contains the timestamp, targets synced, and any embedded
+    rule-level diffs from :func:`record_with_diff`.  Gives users an audit
+    trail without requiring them to read raw git history.
+
+    Args:
+        manager:       ChangelogManager instance.
+        limit:         Maximum number of entries to return (newest first).
+        target_filter: If set, only return entries that mention this target.
+
+    Returns:
+        List of dicts (newest first), each with:
+          - "timestamp": str (ISO 8601 or "unknown")
+          - "scope":     str
+          - "targets":   list[str]
+          - "synced":    int
+          - "skipped":   int
+          - "failed":    int
+          - "diffs":     dict[target -> list[str]]  (rule-level diff lines)
+    """
+    content = manager.read()
+    if not content:
+        return []
+
+    entries: list[dict] = []
+
+    # Split on section headers (## lines)
+    sections = _re.split(r"\n(?=## )", content)
+
+    for section in reversed(sections):  # newest last in file → reverse for newest-first
+        if not section.strip() or not section.startswith("##"):
+            continue
+
+        entry: dict = {
+            "timestamp": "unknown",
+            "scope": "all",
+            "targets": [],
+            "synced": 0,
+            "skipped": 0,
+            "failed": 0,
+            "diffs": {},
+        }
+
+        # Extract timestamp
+        ts_m = _re.search(
+            r"(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})?)",
+            section,
+        )
+        if ts_m:
+            entry["timestamp"] = ts_m.group(1)
+
+        # Extract scope
+        scope_m = _re.search(r"scope[=: ]+([a-z]+)", section, _re.IGNORECASE)
+        if scope_m:
+            entry["scope"] = scope_m.group(1).lower()
+
+        # Extract targets mentioned
+        target_m = _re.findall(
+            r"\b(codex|gemini|opencode|cursor|aider|windsurf|cline|continue|zed|neovim)\b",
+            section,
+            _re.IGNORECASE,
+        )
+        entry["targets"] = list(dict.fromkeys(t.lower() for t in target_m))
+
+        # Extract aggregate counts
+        for key in ("synced", "skipped", "failed"):
+            count_m = _re.search(rf"{key}[=: ]+(\d+)", section, _re.IGNORECASE)
+            if count_m:
+                entry[key] = int(count_m.group(1))
+
+        # Extract embedded rule-level diffs (written by record_with_diff)
+        diff_block_m = _re.search(
+            r"<!--\s*rule-level diff:(.*?)-->",
+            section,
+            _re.DOTALL,
+        )
+        if diff_block_m:
+            diff_text_inner = diff_block_m.group(1)
+            current_target = None
+            diff_lines_inner: list[str] = []
+            for line in diff_text_inner.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                # Target header line: "  codex:"
+                target_hdr = _re.match(r"([a-z0-9_-]+):$", stripped)
+                if target_hdr and not stripped.startswith(("+", "-", " ")):
+                    if current_target and diff_lines_inner:
+                        entry["diffs"][current_target] = diff_lines_inner
+                    current_target = target_hdr.group(1)
+                    diff_lines_inner = []
+                elif current_target:
+                    diff_lines_inner.append(stripped)
+            if current_target and diff_lines_inner:
+                entry["diffs"][current_target] = diff_lines_inner
+
+        # Apply target filter
+        if target_filter and target_filter.lower() not in entry["targets"]:
+            continue
+
+        entries.append(entry)
+
+        if len(entries) >= limit:
+            break
+
+    return entries
+
+
+def format_diff_history(
+    manager: "ChangelogManager",
+    limit: int = 10,
+    target_filter: str | None = None,
+) -> str:
+    """Return a formatted, human-readable diff history for terminal display.
+
+    Args:
+        manager:       ChangelogManager instance.
+        limit:         Number of recent entries to show.
+        target_filter: If set, filter to entries mentioning this target.
+
+    Returns:
+        Multi-line string showing the config change audit trail.
+    """
+    history = get_diff_history(manager, limit=limit, target_filter=target_filter)
+
+    if not history:
+        return "No sync history found. Config change history appears here after the first sync."
+
+    filter_note = f" (filtered to: {target_filter})" if target_filter else ""
+    lines = [
+        f"Config Change History{filter_note}",
+        "=" * 50,
+        "",
+    ]
+
+    for i, entry in enumerate(history, 1):
+        ts = entry["timestamp"]
+        targets_str = ", ".join(entry["targets"]) if entry["targets"] else "unknown"
+        lines.append(
+            f"  {i:>2}. {ts}  scope={entry['scope']}  targets=[{targets_str}]"
+        )
+        counts = (
+            f"      synced={entry['synced']} skipped={entry['skipped']} "
+            f"failed={entry['failed']}"
+        )
+        lines.append(counts)
+
+        if entry["diffs"]:
+            lines.append("      Rule changes:")
+            for tgt, dlines in sorted(entry["diffs"].items()):
+                lines.append(f"        [{tgt}]")
+                for dl in dlines[:5]:
+                    lines.append(f"          {dl}")
+                if len(dlines) > 5:
+                    lines.append(f"          … {len(dlines) - 5} more")
+
+        lines.append("")
+
+    lines.append(
+        f"Showing {len(history)} of available entries. "
+        "Use /sync-log --full for complete history."
+    )
+    return "\n".join(lines)

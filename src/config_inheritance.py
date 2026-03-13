@@ -369,3 +369,202 @@ def _strip_suppress_directives(rules: str) -> str:
     """Remove !override directives from rules (they're meta-instructions, not content)."""
     lines = [l for l in rules.splitlines() if not l.strip().startswith(_SUPPRESS_PREFIX)]
     return "\n".join(lines)
+
+
+# ── Scope Inheritance Visualizer (item 28) ────────────────────────────────────
+#
+# Renders a visual ASCII tree showing how project-level, user-level, and global
+# configs layer and override each other, with cross-harness scope annotations.
+
+def format_visual_tree(
+    inheritance: "ConfigInheritance",
+    harnesses: list[str] | None = None,
+    show_rule_counts: bool = True,
+) -> str:
+    """Render a visual tree of the config scope hierarchy.
+
+    Shows project-level, user-level, and global layers with their effective
+    rule counts and which harnesses they apply to.  Override relationships
+    are shown with arrows (child → parent).
+
+    Args:
+        inheritance:      ConfigInheritance instance to inspect.
+        harnesses:        Harnesses to annotate in the tree (default: all core targets).
+        show_rule_counts: Whether to count rules per layer.
+
+    Returns:
+        Multi-line ASCII tree string suitable for terminal output.
+    """
+    from src.utils.constants import CORE_TARGETS
+
+    if harnesses is None:
+        harnesses = list(CORE_TARGETS)
+
+    chain = inheritance.resolve_chain()
+    project_dir = inheritance.project_dir
+
+    # Resolve all scopes: global user → team/company layers → project → working copy
+    scopes: list[dict] = []
+
+    # Global user scope (~/.claude/CLAUDE.md)
+    user_claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    scopes.append({
+        "label": "~/.claude/CLAUDE.md",
+        "scope": "user-global",
+        "path": user_claude_md,
+        "exists": user_claude_md.exists(),
+        "editable": True,
+    })
+
+    # Inheritance chain layers (company/team)
+    for layer in chain:
+        scopes.append({
+            "label": f"{layer.name}: {layer.path}",
+            "scope": "inherited",
+            "path": layer.path,
+            "exists": layer.path.exists(),
+            "editable": False,
+        })
+
+    # Project scope (CLAUDE.md / .claude/CLAUDE.md)
+    project_claude = project_dir / "CLAUDE.md"
+    project_dot = project_dir / ".claude" / "CLAUDE.md"
+    for p in (project_claude, project_dot):
+        if p.exists():
+            scopes.append({
+                "label": str(p.relative_to(project_dir)),
+                "scope": "project",
+                "path": p,
+                "exists": True,
+                "editable": True,
+            })
+
+    # Build tree lines
+    lines: list[str] = [
+        "Config Scope Inheritance Tree",
+        "=" * 50,
+        "",
+        "Resolution order: bottom wins (project overrides global)",
+        "",
+    ]
+
+    total = len(scopes)
+    for i, scope in enumerate(scopes):
+        is_last = i == total - 1
+        connector = "└─" if is_last else "├─"
+        indent = "  " if is_last else "│ "
+
+        # Indicator
+        status = "✓" if scope["exists"] else "✗ (missing)"
+        rule_info = ""
+        if show_rule_counts and scope["exists"] and scope["path"].is_file():
+            try:
+                content = scope["path"].read_text(encoding="utf-8", errors="replace")
+                rule_lines = [l for l in content.splitlines() if l.strip().startswith("-")]
+                if rule_lines:
+                    rule_info = f"  [{len(rule_lines)} rules]"
+            except OSError:
+                pass
+
+        scope_tag = {
+            "user-global": "USER",
+            "inherited":   "BASE",
+            "project":     "PROJECT",
+        }.get(scope["scope"], scope["scope"].upper())
+
+        lines.append(f"  {connector} [{scope_tag}] {scope['label']} {status}{rule_info}")
+
+        # Show harness applicability for project-scoped configs
+        if scope["scope"] == "project" and scope["exists"] and harnesses:
+            harness_line = "  " + indent + "  Applies to: " + ", ".join(harnesses)
+            lines.append(harness_line)
+
+        # Show which harnesses inherited layers are NOT applied to
+        if scope["scope"] == "inherited" and scope["exists"]:
+            lines.append(f"  {indent}  Inherited by all harnesses via chain composition")
+
+    lines.append("")
+    lines.append("Legend:")
+    lines.append("  [USER]    — ~/.claude/ global config (applies to all projects)")
+    lines.append("  [BASE]    — inherited from chain (company/team layer)")
+    lines.append("  [PROJECT] — project-specific config (highest priority)")
+    lines.append("")
+
+    # Show effective merge summary
+    if scopes:
+        active = [s for s in scopes if s["exists"]]
+        if len(active) > 1:
+            lines.append(
+                f"Effective config: {len(active)} layer(s) merged "
+                f"(project wins on conflict)"
+            )
+        elif len(active) == 1:
+            lines.append(f"Effective config: single layer — {active[0]['label']}")
+        else:
+            lines.append("Effective config: no CLAUDE.md files found")
+
+    # Per-harness scope override summary
+    if harnesses and scopes:
+        lines.append("")
+        lines.append("Per-harness scope annotations (from sync_filter):")
+        lines.append("  Use <!-- harness:only=codex --> blocks in any layer to")
+        lines.append("  restrict content to specific harnesses.")
+        lines.append("  Use !override <pattern> in project layer to suppress inherited rules.")
+
+    return "\n".join(lines)
+
+
+def format_scope_overview(
+    project_dir: Path | None = None,
+    cc_home: Path | None = None,
+) -> str:
+    """Return a concise multi-scope overview showing all active config files.
+
+    Unlike format_visual_tree(), this function does not require a
+    ConfigInheritance instance — it auto-discovers config files from standard
+    paths and shows their effective hierarchy.
+
+    Args:
+        project_dir: Project root (default: cwd).
+        cc_home:     Claude Code home (default: ~/.claude).
+
+    Returns:
+        Human-readable scope overview string.
+    """
+    project_dir = project_dir or Path.cwd()
+    cc_home = cc_home or Path.home() / ".claude"
+
+    # All candidate config file locations, in resolution order (low to high priority)
+    candidates: list[tuple[str, Path, str]] = [
+        ("Global user", cc_home / "CLAUDE.md", "applies to all projects"),
+        ("Project root", project_dir / "CLAUDE.md", "project-specific rules"),
+        ("Project .claude", project_dir / ".claude" / "CLAUDE.md", "hidden project dir"),
+    ]
+
+    lines = ["Config Scope Overview", "─" * 40]
+    found_any = False
+
+    for label, path, desc in candidates:
+        if path.exists():
+            found_any = True
+            try:
+                size = path.stat().st_size
+                content = path.read_text(encoding="utf-8", errors="replace")
+                rule_count = sum(
+                    1 for l in content.splitlines() if l.strip().startswith("-")
+                )
+                lines.append(
+                    f"  ✓ {label:<16} {path}  "
+                    f"({size}B, ~{rule_count} rules)  — {desc}"
+                )
+            except OSError:
+                lines.append(f"  ✓ {label:<16} {path}  — {desc}")
+        else:
+            lines.append(f"  ✗ {label:<16} {path}  [not found]")
+
+    if not found_any:
+        lines.append("  No CLAUDE.md files found. Run Claude Code to create ~/.claude/CLAUDE.md.")
+
+    lines.append("")
+    lines.append("Higher entries are overridden by lower entries (project wins).")
+    return "\n".join(lines)

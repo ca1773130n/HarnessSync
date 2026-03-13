@@ -3951,3 +3951,79 @@ _2026-03-13T11:22:27.021Z_
 - backup_manager.py had `import json` at the top level but also had a redundant `import json` inside the conditional metadata block — cleaned up by making the write unconditional and removing the inner import
 
 ---
+## Iteration 60
+_2026-03-13T11:37:26.930Z_
+
+### Items Attempted
+
+- **Per-Harness Override Layers** — pass
+- **Dry-Run Diff Preview** — pass
+- **Git Branch-Aware Sync Profiles** — pass
+- **Migrate-From Wizard** — pass
+- **Team Config Sync via Git** — pass
+- **Installed Harness Auto-Discovery** — pass
+- **Selective Sync Filters** — pass
+- **MCP Server Compatibility Report** — pass
+- **Config Health Score Dashboard** — pass
+- **Community Adapter Builder** — pass
+- **Harness Version Compatibility Warnings** — pass
+- **Portable Config Bundle Export** — pass
+- **Auto-Generated Sync Changelog** — pass
+- **Cross-Harness Permission Audit** — pass
+- **Cursor / Windsurf / Aider Adapters** — pass
+- **Cross-Harness Skill Smoke Tests** — pass
+- **Universal Config Search** — pass
+- **Drift Detection Alerts** — pass
+- **Interactive First-Run Onboarding** — pass
+- **MCP Server Discovery & Install** — pass
+- **Git Commit Hook Integration** — pass
+- **Capability Gap Advisor** — pass
+- **Config Annotations & Comments** — pass
+- **Scheduled Background Sync** — pass
+- **Multi-Project Workspace Manager** — pass
+- **Rule Source Attribution Tracking** — pass
+- **Incremental Sync Engine** — pass
+- **Secret & Env Var Leak Scanner** — pass
+- **Rollback with Before/After Preview** — pass
+- **Starter Config Template Library** — pass
+- **Interactive Conflict Resolution** — pass
+- **VS Code AI Extension Config Sync** — pass
+- **PR Sync Summary Comment** — pass
+- **Always-On File Watcher Daemon** — pass
+- **Named Sync Profiles** — pass
+- **Live Harness Feature Matrix** — pass
+- **Skills Marketplace Integration** — pass
+- **Config Size & Token Optimizer** — pass
+
+### Decisions Made
+
+- Created rule_source_attribution.py as a standalone module with RuleAttributor class rather than bolting attribution logic onto existing modules — keeps concerns separate and makes the index independently queryable
+- Used SHA1 fingerprinting of normalized content (first 80 chars, lowercased) for rule lookup keys rather than exact-match — tolerates minor whitespace differences while being fast and deterministic
+- WorkspaceManager stores registry in ~/.harnesssync/workspaces.json to be consistent with the existing pattern of per-user global config files in that directory
+- Added drift detection in WorkspaceStatus by comparing CLAUDE.md mtime to last-sync timestamp — simple heuristic that works without requiring a full hash scan at status-display time
+- Used a 60-second grace period in drift detection to avoid false positives from filesystem timestamp imprecision during sync
+- Integrated rule attribution recording into orchestrator.py as a best-effort pre-sync step rather than in adapters — ensures all rules from all sources are indexed in one place regardless of which adapter runs
+- Added format_installed_version_warnings() and get_installed_vs_required_table() to harness_version_compat.py rather than a new file — the existing VERSIONED_FEATURES dict and _detect_installed_version() already had the data needed
+- Cap version warnings at 3 in startup_check.full_startup_check() to avoid flooding session start with low-signal noise
+- Added format_dashboard_with_details() and lowest_scoring_harness() to SyncHealthTracker rather than as standalone functions — they depend on the compute_score() result type and benefit from co-location
+- Per-dimension breakdown in format_dashboard_with_details() shows dimensions sorted ascending (worst first) so users see the most actionable issues immediately
+
+### Patterns Discovered
+
+- The codebase consistently uses best-effort try/except blocks around non-critical features in the orchestrator — all new integrations follow this pattern
+- New commands follow the consistent pattern: PLUGIN_ROOT path injection, argparse with shlex.split for single-string args, and a main() entry point
+- All persistent state files go in ~/.harnesssync/ (global) or .harness-sync/ (project-local) — the workspace registry correctly uses the global path
+- RuleAttributor follows the same load/save/lookup pattern as StateManager and other persistence classes in the project
+- Attribution fingerprinting avoids storing full content in the index to keep index files small — only content_preview (80 chars) plus metadata
+- WorkspaceManager.auto_discover() uses a conservative max_depth=3 to avoid scanning entire home directories — appropriate default for typical developer machine layouts
+
+### Takeaways
+
+- Most of the 30 product ideas already have skeleton implementations in the codebase — the gap is between existing modules and their integration into the main sync flow and commands
+- The orchestrator.py is the right integration point for cross-cutting concerns (attribution, linting, version checks) since it runs before every sync
+- The config_health.py SyncHealthTracker is underutilized — it has a rich scoring model but the format_dashboard() output could be more actionable; format_dashboard_with_details() addresses this
+- harness_version_compat.py already had _detect_installed_version() but it was not wired into startup warnings — a small integration gap that format_installed_version_warnings() closes
+- The workspace manager fills a real gap: sync_all_projects.py iterates Claude Code's known projects, but users need to maintain their own named registry of project workspaces across different tools
+- Rule source attribution solves a genuine debugging pain point — when a target harness behaves unexpectedly, users can now trace back to the exact source line rather than scanning all CLAUDE.md files manually
+
+---
