@@ -327,6 +327,7 @@ class SyncOrchestrator:
 
         # --- MODEL ROUTING HINTS: parse Claude Code settings for model preferences ---
         _model_routing_hints = None
+        _model_routing_summary: list[str] = []  # Per-target model sync annotations
         try:
             from src.model_routing import ModelRoutingAdapter, extract_routing_hints_from_settings_file
             _mr_adapter = ModelRoutingAdapter()
@@ -648,6 +649,10 @@ class SyncOrchestrator:
                                 # Only inject if no model already configured
                                 if 'model' not in _settings:
                                     _settings['model'] = _translated.default_model
+                                    # Track for post-sync summary (item 27)
+                                    _model_routing_summary.append(
+                                        f"  {target}: model → {_translated.default_model}"
+                                    )
                 except Exception:
                     pass  # Model routing merge is best-effort
 
@@ -659,6 +664,39 @@ class SyncOrchestrator:
                         target_data['skills'] = _fst(_skills_raw, target)
                 except Exception:
                     pass  # Skill tag filtering is best-effort, never blocks
+
+                # Step 5: inject skill/agent translation hints (item 9)
+                # Prepend inline comments to agent files explaining what Claude Code
+                # features are not available in the target harness, so users know
+                # what to expect when a skill behaves differently.
+                try:
+                    from src.skill_translator import inject_agent_translation_hints
+                    import tempfile as _tempfile
+                    _agents_raw = target_data.get('agents')
+                    if isinstance(_agents_raw, dict) and _agents_raw:
+                        _annotated_agents: dict = {}
+                        _tmp_dir = Path(_tempfile.mkdtemp(prefix="harnesssync_hints_"))
+                        for _aname, _apath in _agents_raw.items():
+                            try:
+                                _apath_obj = Path(_apath)
+                                if not _apath_obj.exists():
+                                    _annotated_agents[_aname] = _apath
+                                    continue
+                                _orig_content = _apath_obj.read_text(encoding="utf-8")
+                                _hinted_content = inject_agent_translation_hints(
+                                    _orig_content, _aname, target
+                                )
+                                if _hinted_content != _orig_content:
+                                    _tmp_path = _tmp_dir / f"{_aname}.md"
+                                    _tmp_path.write_text(_hinted_content, encoding="utf-8")
+                                    _annotated_agents[_aname] = _tmp_path
+                                else:
+                                    _annotated_agents[_aname] = _apath
+                            except Exception:
+                                _annotated_agents[_aname] = _apath
+                        target_data['agents'] = _annotated_agents
+                except Exception:
+                    pass  # Translation hints are best-effort, never blocks
 
                 # Apply --only / --skip section filtering (global + per-target)
                 target_data = self._apply_section_filter(target_data, target=target)
@@ -725,6 +763,13 @@ class SyncOrchestrator:
                     results['_fidelity_report'] = fidelity_str
         except ImportError as e:
             self.logger.warn(f"CompatibilityReporter unavailable: {e}")
+
+        # --- POST-SYNC: MODEL ROUTING SUMMARY (item 27) ---
+        # Surface which model preferences were synced to which targets.
+        if _model_routing_summary:
+            results['_model_routing_summary'] = (
+                "Model Preference Sync:\n" + "\n".join(_model_routing_summary)
+            )
 
         # --- POST-SYNC: STATE UPDATE ---
         if not self.dry_run:

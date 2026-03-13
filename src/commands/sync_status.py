@@ -527,6 +527,41 @@ def _show_default_status():
     except Exception:
         pass  # Non-critical; health scores are informational only
 
+    # Item 8 — Harness parity scores (0-100 per target, inline with status)
+    try:
+        from src.commands.sync_parity import _SUPPORT_MATRIX, _score as _parity_score
+        _parity_lines = ["", "Harness Parity Scores:", "-" * 40]
+        for _target_name in registered:
+            _support = _SUPPORT_MATRIX.get(_target_name, {})
+            if _support:
+                _ps = _parity_score(_support)
+                _bar_filled = int(_ps / 5)
+                _bar = "█" * _bar_filled + "░" * (20 - _bar_filled)
+                _parity_lines.append(f"  {_target_name:<12} {_bar} {_ps:>5.1f}%")
+        if len(_parity_lines) > 3:
+            print("\n".join(_parity_lines))
+            print("  Run /sync-parity for full feature breakdown.")
+    except Exception:
+        pass  # Non-critical; parity scores are informational only
+
+    # Item 15 — Harness usage insights (last used, stale detection)
+    try:
+        from src.harness_adoption import HarnessAdoptionAnalyzer
+        _adoption_analyzer = HarnessAdoptionAnalyzer(state_manager=StateManager())
+        _adoption_reports = _adoption_analyzer.analyze(targets=registered)
+        _stale_reports = [r for r in _adoption_reports if r.stale]
+        if _stale_reports:
+            print()
+            print("Usage Insights — Stale Harnesses:")
+            print("-" * 40)
+            for _r in _stale_reports:
+                _days = f"{_r.days_since_sync:.0f}d ago" if _r.days_since_sync is not None else "never"
+                print(f"  ⚠ {_r.target:<12} last synced {_days}")
+                print(f"    → {_r.recommendation}")
+            print("  Run /sync-parity or remove stale targets with /sync-setup.")
+    except Exception:
+        pass  # Non-critical; adoption insights are informational only
+
 
 if __name__ == "__main__":
     main()

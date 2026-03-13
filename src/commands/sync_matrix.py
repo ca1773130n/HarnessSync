@@ -159,21 +159,27 @@ def _level_symbol(level: str) -> str:
     return LEVEL_DISPLAY.get(level, ("?", "?"))[0]
 
 
-def format_matrix(show_notes: bool = False) -> str:
+def format_matrix(show_notes: bool = False, gaps_only: bool = False) -> str:
     """Format the capability matrix as a text table.
 
     Args:
         show_notes: If True, print per-cell notes below the table
+        gaps_only: If True, show only rows where at least one target drops the feature
 
     Returns:
         Formatted table string
     """
     lines: list[str] = []
 
-    lines.append("HarnessSync Capability Matrix")
+    title = "HarnessSync Capability Matrix"
+    if gaps_only:
+        title += " — Gaps Only"
+    lines.append(title)
     lines.append("=" * 72)
     lines.append("")
     lines.append("Legend:  ✓ native  ~ adapted  ? partial  ✗ dropped")
+    if gaps_only:
+        lines.append("Showing only sections with at least one unsupported harness.")
     lines.append("")
 
     # Header row
@@ -187,6 +193,16 @@ def format_matrix(show_notes: bool = False) -> str:
 
     # Data rows
     for row in CAPABILITY_MATRIX:
+        if gaps_only:
+            # Skip rows where every supported target has native or adapted support
+            has_gap = any(
+                row.get(t, (NATIVE, ""))[0] == DROPPED
+                for t in TARGETS
+                if row.get(t)
+            )
+            if not has_gap:
+                continue
+
         section = row["section"]
         line = f"{section:<{section_w}}"
         for t in TARGETS:
@@ -206,6 +222,14 @@ def format_matrix(show_notes: bool = False) -> str:
         lines.append("Notes:")
         lines.append("-" * 72)
         for row in CAPABILITY_MATRIX:
+            if gaps_only:
+                has_gap = any(
+                    row.get(t, (NATIVE, ""))[0] == DROPPED
+                    for t in TARGETS
+                    if row.get(t)
+                )
+                if not has_gap:
+                    continue
             section = row["section"]
             desc = row.get("description", "")
             lines.append(f"\n{section}  ({desc})")
@@ -225,6 +249,7 @@ def main() -> None:
 
     Flags:
         --notes / -n        Show per-cell detail notes under the section table
+        --gaps-only         Show only sections with at least one dropped target
         --mcp-tools         Show MCP tool compatibility matrix (transports,
                             capability types, config features) instead of the
                             default config-section matrix
@@ -233,6 +258,7 @@ def main() -> None:
     """
     show_notes = "--notes" in sys.argv or "-n" in sys.argv
     show_mcp_tools = "--mcp-tools" in sys.argv
+    gaps_only = "--gaps-only" in sys.argv
 
     if show_mcp_tools:
         # Determine which MCP sub-section to show
@@ -243,7 +269,7 @@ def main() -> None:
                 mcp_section = sys.argv[idx + 1]
         print(format_mcp_tool_matrix(section=mcp_section))
     else:
-        print(format_matrix(show_notes=show_notes))
+        print(format_matrix(show_notes=show_notes, gaps_only=gaps_only))
 
 
 if __name__ == "__main__":

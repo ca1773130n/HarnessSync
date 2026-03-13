@@ -499,11 +499,38 @@ def main():
                                 if keep_files:
                                     os.environ["HARNESSSYNC_KEEP_FILES"] = ",".join(keep_files)
                             else:
-                                resolutions = cd.resolve_interactive(conflicts)
-                                if resolutions:
-                                    os.environ["HARNESSSYNC_KEEP_FILES"] = ",".join(
-                                        fp for fp, action in resolutions.items() if action == "keep"
+                                # Use ConflictResolutionWizard for plain-English
+                                # explanations and guided per-file resolution (item 1).
+                                try:
+                                    from src.conflict_detector import ConflictResolutionWizard
+                                    wizard = ConflictResolutionWizard(cd)
+                                    # Build source_contents keyed by file_path so
+                                    # the wizard can show plain-English explanations.
+                                    _wizard_src: dict[str, str] = {}
+                                    for _tgt, _clist in conflicts.items():
+                                        for _c in _clist:
+                                            _fp = _c.get("file_path", "")
+                                            if _fp and _fp not in _wizard_src:
+                                                # Use CLAUDE.md rules as a proxy for
+                                                # what the adapter would write.
+                                                _wizard_src[_fp] = source_content
+                                    wizard_resolutions = wizard.run_interactive(
+                                        conflicts,
+                                        source_contents=_wizard_src,
                                     )
+                                    keep_files_wizard = [
+                                        fp for (_, fp), action in wizard_resolutions.items()
+                                        if action == ConflictResolutionWizard.RESOLUTION_KEEP_TARGET
+                                    ]
+                                    if keep_files_wizard:
+                                        os.environ["HARNESSSYNC_KEEP_FILES"] = ",".join(keep_files_wizard)
+                                except Exception:
+                                    # Fall back to basic interactive resolution if wizard fails
+                                    resolutions = cd.resolve_interactive(conflicts)
+                                    if resolutions:
+                                        os.environ["HARNESSSYNC_KEEP_FILES"] = ",".join(
+                                            fp for fp, action in resolutions.items() if action == "keep"
+                                        )
                     except Exception:
                         pass  # Conflict resolution failure should not block sync
 
@@ -727,6 +754,11 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
         if '_upgrade_notices' in results:
             print()
             print(results['_upgrade_notices'])
+
+        # Display model preference sync summary (item 27)
+        if '_model_routing_summary' in results:
+            print()
+            print(results['_model_routing_summary'])
 
         # Note: Changelog recording is handled by the orchestrator (see orchestrator.py).
         # Do NOT call ChangelogManager.record() here to avoid duplicate writes.

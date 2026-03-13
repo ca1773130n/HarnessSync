@@ -3617,3 +3617,73 @@ _2026-03-13T09:55:27.743Z_
 - Python 3.9 compatibility is important — the syntax restriction on backslashes in f-string expressions (relaxed in 3.12) caught a bug in the agent-generated AdapterWizard code
 
 ---
+## Iteration 55
+_2026-03-13T10:15:06.956Z_
+
+### Items Attempted
+
+- **Interactive Conflict Resolution Wizard** — pass
+- **Capability Gap Report Card** — pass
+- **Per-Project Sync Profiles** — pass
+- **Team Config Broadcast** — pass
+- **Git Pre-Commit Sync Enforcement** — pass
+- **Rule Translation Confidence Scores** — pass
+- **Skill Compatibility Matrix** — pass
+- **Auto-Generated Sync Changelog** — pass
+- **MCP Server Config Passthrough** — pass
+- **New Harness Onboarding Wizard** — pass
+- **Config Health Score** — pass
+- **Selective Skill Sync with Tag Filtering** — pass
+- **Harness Version Compatibility Checking** — pass
+- **Two-Way Rule Import from Other Harnesses** — pass
+- **Scheduled Background Sync** — pass
+- **Environment Variable Cross-Harness Mapping** — pass
+- **CI/CD Sync Validation Action** — pass
+- **Community Plugin Sync Registry** — pass
+- **Context-Aware Rule Compression** — pass
+- **Versioned Sync Rollback** — pass
+- **Rule Attribution and Origin Tracking** — pass
+- **Cross-Harness Behavior Smoke Tests** — pass
+- **Daily Sync Drift Digest** — pass
+- **Cross-Harness Shared Memory Sync** — pass
+- **Feature Parity Upgrade Alerts** — pass
+- **Agent Capability Downgrade Warnings** — pass
+- **Model Preference Cross-Mapping** — pass
+- **Sync Impact Estimator** — pass
+- **Workspace-Aware Multi-Root Sync** — pass
+- **Portable Config Export Bundle** — pass
+- **Rule Effectiveness Feedback Loop** — pass
+- **Pre-Sync Secret Scrubber** — pass
+- **Harness Cold-Start Performance Benchmark** — pass
+- **Interactive Rule Priority Ranker** — pass
+- **Sync-on-PR Branch Config Isolation** — pass
+- **Natural Language Rule Authoring Assistant** — pass
+
+### Decisions Made
+
+- Item 6 (Translation Confidence Scores): Added `confidence` ('High'/'Medium'/'Low') and `lost_capabilities: list[str]` fields to TranslationResult dataclass, plus `score_translation_confidence()` function that pattern-matches unpreservable and partially-preservable capabilities. Used `__post_init__` to handle default mutable list. Confidence flows through all three code paths in `translate()` and `_translate_with_llm()`.
+- Item 21 (Rule Attribution): Added per-rule line-level attribution via HTML comments (`<!-- hs:rule src=... line=... modified=... -->`). Used regex matching on bullet-list lines only, leaving non-rule content unannotated. Functions are idempotent: re-syncing strips old attribution before re-adding to prevent accumulation.
+- Item 24 (Cross-Harness Memory Sync): Created new module `cross_harness_memory_sync.py` with `CrossHarnessMemorySync` class and `/sync-memory` command. Chose managed-block injection for single-file targets (gemini, codex) and per-file strategy for directory-based targets (windsurf, cline). Dry-run support throughout. Capped at 50 files / 32KB per file to prevent unbounded context growth.
+- Item 1 (Conflict Resolution Wizard): Added `ConflictResolutionWizard` class with `explain_conflict_in_plain_english()` function that translates raw diffs into user-readable language distinguishing between 'you added', 'you deleted', and 'you modified' cases. Uses SequenceMatcher semantics: `added` = in current but not source (user additions); `removed` = in source but not current (sync would restore).
+- Item 2 (Capability Gap Report Card): Added `format_report_card()` to `HarnessFeatureMatrix` that renders letter grades (A-F) and coverage scores per harness, listing unsupported and degraded features. Reused existing `coverage_score()` and `get_support_gaps()` methods.
+- Item 11 (Config Health Score in /sync-status): Integrated `SyncHealthTracker.compute_score()` at the end of `sync_status.py` main(). Wrapped in try/except to prevent health score failures from breaking the status output.
+- Item 25 (Feature Parity Upgrade Alerts): Added upgrade alert block to `/sync-parity` command using existing `suggest_capability_upgrades()` from `harness_version_compat.py`. The function already had the logic; just needed exposure in the parity command.
+- Item 26 (Agent Capability Downgrade Warnings): Added `warn_agent_capability_loss()` and `format_agent_downgrade_report()` to `graceful_degradation.py`. Scans agent content for tool names and MCP references, cross-references with per-harness unavailable tool sets. Differentiates `critical` (Agent tool, Bash, Edit/Write) vs `warning` severity.
+
+### Patterns Discovered
+
+- The codebase consistently uses try/except around optional display features in command entry points so that secondary features (health scores, upgrade hints) never break primary output. This is a good defensive pattern worth maintaining.
+- Several modules (harness_version_compat.py, config_health.py) already had the core logic for features but were not wired into commands. The iteration pattern here is: find existing logic, expose it through the command layer.
+- The `__post_init__` pattern is necessary when using mutable defaults (lists) in dataclasses — avoiding the `field(default_factory=list)` approach keeps the dataclass definition more readable when there are many optional fields.
+- The existing `SequenceMatcher`-based diffing infrastructure in `conflict_detector.py` is solid and was reused for the plain-English conflict explanation without duplication.
+- The codebase uses HTML comments (`<!-- hs:... -->`) extensively for machine-readable metadata in Markdown files. This is a consistent convention that allows metadata to survive round-trips through human editors without visual pollution.
+
+### Takeaways
+
+- Most of the 30 items had pre-existing module skeletons — the project uses a scaffold-then-fill pattern where module files are created with docstrings and stub types before logic is added. This means evolve iterations frequently need to fill in logic rather than create from scratch.
+- The `graceful_degradation.py` module was the right place for agent capability warnings rather than a new file, because it already had the per-feature/per-target profile concept. Co-locating related logic avoids fragmentation.
+- Memory sync (Item 24) is genuinely novel since no `shared_memory` or `cross_harness_memory` module existed. The challenge is balancing thoroughness (all 10 harnesses) with simplicity (each writer is a small closure). The closure-based `_target_writers()` dict approach keeps all target logic in one place.
+- Items 3 (Per-Project Sync Profiles), 4 (Team Config Broadcast), 5 (Git Pre-Commit Hook), 8 (Auto-Generated Changelog), 9 (MCP Passthrough), 12 (Skill Sync Tags), 13 (Version Compat), 14 (Two-Way Import), 15 (Scheduled Sync), 16 (Env Var Mapping), 17 (CI/CD), 19 (Rule Compression), 20 (Versioned Rollback), 22 (Smoke Tests), 23 (Drift Digest), 27 (Model Mapping), 28 (Impact Estimator), 29 (Monorepo), 30 (Config Bundle) already had complete implementations.
+- Translation confidence scoring is a cross-cutting concern that benefits from being co-located with the TranslationResult type rather than in a separate module — callers get confidence for free with every translation.
+
+---
