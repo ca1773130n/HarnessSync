@@ -1062,3 +1062,189 @@ def format_agent_gap_summary(reports: list[AgentCapabilityGapReport]) -> str:
         lines.append(f"  {report.target:<20} {report.coverage_score:>3}/100")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Item 21 — Skill Coverage Report (per-target percentage)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SkillCoverageEntry:
+    """Coverage data for one (skill, target) pair."""
+
+    skill_name: str
+    target: str
+    present: bool           # True if skill file exists in target location
+    translation_score: int  # 0–100 (from score_skill_file, 0 if not present)
+
+
+@dataclass
+class SkillCoverageReport:
+    """Coverage percentages for all skills across all active targets.
+
+    Args:
+        entries: All (skill, target) coverage pairs.
+        source_skills: List of skill names from Claude Code.
+        targets: Active sync targets checked.
+    """
+
+    entries: list[SkillCoverageEntry]
+    source_skills: list[str]
+    targets: list[str]
+
+    def coverage_pct(self, target: str) -> float:
+        """Return the percentage of skills present in *target* (0.0–100.0)."""
+        target_entries = [e for e in self.entries if e.target == target]
+        if not target_entries:
+            return 0.0
+        present = sum(1 for e in target_entries if e.present)
+        return (present / len(target_entries)) * 100.0
+
+    def avg_translation_score(self, target: str) -> float:
+        """Return average translation quality score for *target* (0.0–100.0)."""
+        target_entries = [e for e in self.entries if e.target == target and e.present]
+        if not target_entries:
+            return 0.0
+        return sum(e.translation_score for e in target_entries) / len(target_entries)
+
+    def format(self) -> str:
+        """Return a formatted coverage report table."""
+        if not self.source_skills or not self.targets:
+            return "No skills or targets to report."
+
+        col_skill = max(14, max(len(s) for s in self.source_skills) + 2)
+        col_target = 14
+        header = f"  {'Skill':<{col_skill}}" + "".join(f"{t:^{col_target}}" for t in self.targets)
+        sep = "  " + "-" * (col_skill + col_target * len(self.targets))
+
+        lines = [
+            "Skill Coverage Report",
+            "=" * (col_skill + col_target * len(self.targets) + 4),
+            "",
+            "Coverage = skill file present in target location",
+            "Score    = translation quality (0–100, higher = more faithful)",
+            "",
+            header,
+            sep,
+        ]
+
+        for skill in self.source_skills:
+            row = f"  {skill:<{col_skill}}"
+            for target in self.targets:
+                matching = [e for e in self.entries if e.skill_name == skill and e.target == target]
+                if not matching:
+                    row += f"{'—':^{col_target}}"
+                    continue
+                entry = matching[0]
+                if entry.present:
+                    row += f"{'✓ ' + str(entry.translation_score):^{col_target}}"
+                else:
+                    row += f"{'✗':^{col_target}}"
+            lines.append(row)
+
+        lines.append(sep)
+
+        # Summary row with coverage percentages
+        pct_row = f"  {'Coverage %':<{col_skill}}"
+        for target in self.targets:
+            pct = self.coverage_pct(target)
+            cell = f"{pct:.0f}%"
+            pct_row += f"{cell:^{col_target}}"
+        lines.append(pct_row)
+
+        avg_row = f"  {'Avg score':<{col_skill}}"
+        for target in self.targets:
+            avg = self.avg_translation_score(target)
+            cell = f"{avg:.0f}"
+            avg_row += f"{cell:^{col_target}}"
+        lines.append(avg_row)
+
+        lines.append("")
+        lines.append("  ✓ = present, ✗ = missing/not synced, number = translation score")
+        return "\n".join(lines)
+
+
+def build_skill_coverage_report(
+    skills_dir: Path,
+    project_dir: Path,
+    targets: list[str] | None = None,
+) -> SkillCoverageReport:
+    """Build a skill coverage report for all skills across active targets.
+
+    Args:
+        skills_dir: Claude Code skills directory (e.g. ~/.claude/skills/).
+        project_dir: Project root for detecting active target configs.
+        targets: Targets to check. Auto-detects if None.
+
+    Returns:
+        SkillCoverageReport with per-skill, per-target coverage data.
+    """
+    from src.skill_translator import score_skill_file
+
+    # Discover source skills
+    source_skills: dict[str, Path] = {}
+    if skills_dir.is_dir():
+        for item in sorted(skills_dir.iterdir()):
+            if item.is_file() and item.suffix == ".md":
+                source_skills[item.stem] = item
+            elif item.is_dir():
+                candidate = item / "SKILL.md"
+                if candidate.is_file():
+                    source_skills[item.name] = candidate
+
+    # Determine targets
+    if targets is None:
+        analyzer = SkillGapAnalyzer(project_dir)
+        targets = analyzer._detect_active_targets()
+
+    entries: list[SkillCoverageEntry] = []
+    for skill_name, skill_path in source_skills.items():
+        for target in targets:
+            # Check if a translated version exists in the target location
+            present = _check_skill_in_target(skill_name, target, project_dir)
+            score = 0
+            if present:
+                try:
+                    result = score_skill_file(skill_path, target)
+                    score = result.get("score", 0)
+                except Exception:
+                    score = 50  # default when scoring fails
+
+            entries.append(SkillCoverageEntry(
+                skill_name=skill_name,
+                target=target,
+                present=present,
+                translation_score=score,
+            ))
+
+    return SkillCoverageReport(
+        entries=entries,
+        source_skills=list(source_skills.keys()),
+        targets=targets,
+    )
+
+
+def _check_skill_in_target(skill_name: str, target: str, project_dir: Path) -> bool:
+    """Check if a skill has been synced to the target harness location.
+
+    Args:
+        skill_name: Name of the skill.
+        target: Target harness name.
+        project_dir: Project root.
+
+    Returns:
+        True if the skill file exists in the target's expected location.
+    """
+    target_paths: dict[str, list[Path]] = {
+        "codex":    [project_dir / ".agents" / "skills" / skill_name / "SKILL.md"],
+        "gemini":   [project_dir / ".gemini" / "skills" / skill_name / "SKILL.md"],
+        "opencode": [project_dir / ".opencode" / "skills" / skill_name / "SKILL.md"],
+        "cursor":   [project_dir / ".cursor" / "rules" / "skills" / f"{skill_name}.mdc"],
+        "aider":    [],  # Aider embeds skills in CONVENTIONS.md — not a discrete file
+        "windsurf": [project_dir / ".windsurf" / "memories" / f"{skill_name}.md"],
+        "cline":    [project_dir / ".roo" / "rules" / "skills" / f"{skill_name}.md"],
+        "continue": [project_dir / ".continue" / "rules" / "skills" / f"{skill_name}.md"],
+    }
+    candidates = target_paths.get(target, [])
+    return any(p.exists() for p in candidates)

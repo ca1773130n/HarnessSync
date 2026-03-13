@@ -4374,3 +4374,69 @@ _2026-03-13T12:56:45.487Z_
 - Per-harness undo stacks store full file content which could become large for projects with many rules — consider storing diffs instead of full snapshots in a future iteration for efficiency
 
 ---
+## Iteration 66
+_2026-03-13T13:13:09.674Z_
+
+### Items Attempted
+
+- **Inline Sync Annotations** — pass
+- **Import From Target Harnesses** — pass
+- **Named Sync Profiles** — pass
+- **Conflict Resolution Wizard** — pass
+- **Per-Harness Override Layer** — pass
+- **GitHub Actions Sync on PR Merge** — pass
+- **Cross-Machine Sync via Git** — pass
+- **Secret & Sensitive Path Detector** — pass
+- **Live Capability Compatibility Matrix** — pass
+- **First-Run Setup Wizard** — pass
+- **Harness Tone/Style Translation** — pass
+- **Skill Gap Report** — pass
+- **Cursor & Windsurf Adapters** — pass
+- **Aider Config Adapter** — pass
+- **Automatic Versioned Backups** — pass
+- **CLAUDE.md Portability Score** — pass
+- **Team Baseline Templates** — pass
+- **Auto-Sync on Git Pull** — pass
+- **Drift Monitoring & Alerts** — pass
+- **MCP Server Availability Validator** — pass
+- **Natural Language Sync Rules** — pass
+- **VS Code Status Bar Extension** — pass
+- **Sync Changelog Generator** — pass
+- **Per-Project Sync Config** — pass
+- **Harness Task Performance Comparison** — pass
+- **Sync Event Webhooks** — pass
+- **Sync Complexity Analyzer** — pass
+- **Task-to-Harness Recommender** — pass
+- **README Sync Status Badge** — pass
+- **Primary Harness Migration Guide** — pass
+- **Claude Code Plugin Compatibility Registry** — pass
+- **Sandbox Sync Simulator** — pass
+- **Environment Variable Portability Advisor** — pass
+- **Harness Version Compatibility Checker** — pass
+- **Cherry-Pick Partial Sync** — pass
+- **Cross-Harness Config Formatter/Linter** — pass
+
+### Decisions Made
+
+- ClaudeMdPortabilityScorer added to config_health.py: scans content line-by-line for Claude-specific patterns (MCP tool refs, slash commands, .claude/ paths, product name) and deduplicates issues per file to avoid noise from repeated patterns in long configs
+- Risky section analyzer placed in config_complexity.py alongside existing content quality analysis: reuses the same module's pattern-based approach for consistency, avoids creating a new file for a closely related concern
+- format_portable_design_guide() placed in skill_gap_analyzer.py alongside SkillGapReport so callers can get both the gap analysis and the design guide from one import — the guide personalizes itself when a report is available
+- rank_harnesses_for_task() added before the late-file subprocess imports in harness_comparison.py to keep it near the other static-analysis functions; used top-level dataclass import to avoid the _dc alias that only exists after line 640
+- pre_sync_validate() in mcp_reachability.py wraps the existing McpReachabilityChecker and filter_unreachable_servers logic with a structured PreSyncValidationResult that exposes ok/warn/block status — reuses existing checker rather than duplicating socket logic
+- restore_by_date() enriches list_snapshots() output with metadata-JSON timestamps before filtering because list_snapshots() derives timestamps from the backup dir name which can be mangled when the original filename contains underscores (e.g. CLAUDE.md_20260310_120000)
+
+### Patterns Discovered
+
+- The codebase consistently uses dataclass for structured results and avoids raising exceptions in public APIs — functions return result objects with ok/error fields instead
+- Large modules collect related features in clearly marked sections with banner comments (# ──...──) which makes it easy to add new functionality without disrupting existing structure
+- Late-file imports (import subprocess, import re as _re) are a recurring pattern — adding new dataclass-based code above these sections requires using the top-level dataclass import rather than the aliased one
+- list_snapshots() timestamp extraction from directory name is fragile when original filenames contain underscores — metadata JSON is the authoritative source and should be preferred
+
+### Takeaways
+
+- Items 1 (inline annotations), 2 (reverse sync), 3 (named profiles), 4 (conflict wizard), and 5 (override layer) had very comprehensive implementations already — new features in this iteration targeted less-covered items
+- The portability scorer pattern (scan content for anti-patterns, deduplicate, score 0-100 with bonus for explicit annotations) is a useful template that could be applied to other config dimensions like security posture or size optimization
+- Pre-sync validation was partially covered by filter_unreachable_servers() but lacked the structured status/ok/warn/block result shape that UI code needs — wrapping with PreSyncValidationResult is the right pattern for this project
+- restore_by_date() reveals a latent bug in list_snapshots() timestamp parsing that only affects files whose names contain underscores — worth fixing in a future iteration to make list_snapshots() always return clean YYYYMMDD_HHMMSS timestamps
+
+---

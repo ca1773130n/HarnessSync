@@ -1217,3 +1217,168 @@ class NamedSnapshotStore:
         lines.append("")
         lines.append("Restore with: /sync-snapshot restore <name>")
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Item 8 — Config Version Pinning
+# ---------------------------------------------------------------------------
+#
+# Pinning a target freezes it at the current config snapshot. Subsequent
+# syncs skip pinned targets entirely until explicitly unpinned. Useful for
+# keeping Gemini on a stable skill set while experimenting in Claude Code.
+
+_PINS_FILE = Path.home() / ".harnesssync" / "pinned_targets.json"
+
+
+class PinnedTargetManager:
+    """Manage which sync targets are pinned to a frozen config snapshot.
+
+    A pinned target is skipped during all /sync operations until unpinned.
+    The pin records the snapshot tag (from CheckpointManager) and the time
+    the pin was set.
+
+    Storage: ``~/.harnesssync/pinned_targets.json``
+
+    Usage::
+
+        mgr = PinnedTargetManager()
+        mgr.pin("gemini", checkpoint_tag="stable-2026-03")
+        mgr.is_pinned("gemini")   # True
+        mgr.unpin("gemini")
+        mgr.is_pinned("gemini")   # False
+    """
+
+    def __init__(self, pins_file: Path | None = None) -> None:
+        self._pins_file = pins_file or _PINS_FILE
+
+    def _load(self) -> dict:
+        if not self._pins_file.exists():
+            return {}
+        try:
+            data = json.loads(self._pins_file.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _save(self, data: dict) -> None:
+        self._pins_file.parent.mkdir(parents=True, exist_ok=True)
+        self._pins_file.write_text(
+            json.dumps(data, indent=2, sort_keys=True), encoding="utf-8"
+        )
+
+    def pin(self, target: str, checkpoint_tag: str = "", reason: str = "") -> dict:
+        """Pin *target* at the current config snapshot.
+
+        Args:
+            target: Harness name to pin (e.g. "gemini").
+            checkpoint_tag: Optional tag of the CheckpointManager snapshot
+                            this pin is associated with.
+            reason: Human-readable reason for pinning (e.g. "stable release").
+
+        Returns:
+            The pin entry dict that was saved.
+        """
+        from datetime import datetime, timezone
+        data = self._load()
+        entry = {
+            "target": target,
+            "checkpoint_tag": checkpoint_tag,
+            "reason": reason,
+            "pinned_at": datetime.now(tz=timezone.utc).isoformat(),
+        }
+        data[target] = entry
+        self._save(data)
+        return entry
+
+    def unpin(self, target: str) -> bool:
+        """Unpin *target*, allowing future syncs to update it.
+
+        Args:
+            target: Harness name to unpin.
+
+        Returns:
+            True if the target was pinned (and is now unpinned), False if
+            it was not pinned.
+        """
+        data = self._load()
+        if target not in data:
+            return False
+        del data[target]
+        self._save(data)
+        return True
+
+    def is_pinned(self, target: str) -> bool:
+        """Return True if *target* is currently pinned.
+
+        Args:
+            target: Harness name to check.
+
+        Returns:
+            True if pinned, False otherwise.
+        """
+        return target in self._load()
+
+    def get_pin(self, target: str) -> dict | None:
+        """Return the pin entry for *target*, or None if not pinned.
+
+        Args:
+            target: Harness name.
+
+        Returns:
+            Pin entry dict with keys: ``target``, ``checkpoint_tag``,
+            ``reason``, ``pinned_at``. None if not pinned.
+        """
+        return self._load().get(target)
+
+    def list_pins(self) -> list[dict]:
+        """Return all pinned targets sorted by target name.
+
+        Returns:
+            List of pin entry dicts.
+        """
+        data = self._load()
+        return sorted(data.values(), key=lambda e: e.get("target", ""))
+
+    def filter_unpinned(self, targets: list[str]) -> list[str]:
+        """Return only the targets that are NOT pinned.
+
+        Convenience method for the sync orchestrator to skip pinned targets.
+
+        Args:
+            targets: List of all candidate target names.
+
+        Returns:
+            Subset of *targets* excluding any pinned targets.
+        """
+        data = self._load()
+        return [t for t in targets if t not in data]
+
+    def format_status(self) -> str:
+        """Return a human-readable status of all pinned targets.
+
+        Returns:
+            Multi-line string listing pinned targets and their details.
+        """
+        pins = self.list_pins()
+        if not pins:
+            return "No targets are pinned. All targets receive sync updates."
+
+        lines = [
+            f"Pinned Targets ({len(pins)} total — these will NOT receive sync updates):",
+            "=" * 60,
+            "",
+        ]
+        for pin in pins:
+            ts = pin.get("pinned_at", "")[:19].replace("T", " ")
+            tag = pin.get("checkpoint_tag", "")
+            reason = pin.get("reason", "")
+            lines.append(f"  {pin['target']}")
+            lines.append(f"    Pinned at:   {ts}")
+            if tag:
+                lines.append(f"    Snapshot:    {tag}")
+            if reason:
+                lines.append(f"    Reason:      {reason}")
+            lines.append("")
+
+        lines.append("Unpin with: /sync-pin unpin <target>")
+        return "\n".join(lines)

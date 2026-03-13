@@ -14,6 +14,7 @@ import shutil
 import socket
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -601,3 +602,189 @@ def filter_unreachable_servers(
             skipped.append(result)
 
     return reachable, skipped
+
+
+# ---------------------------------------------------------------------------
+# Item 5 — Local-Only MCP Server Detection
+# ---------------------------------------------------------------------------
+#
+# MCP servers that bind to localhost sockets or use Unix domain sockets will
+# silently fail when configs are synced to cloud-based or remote coding
+# environments (e.g. GitHub Codespaces, remote SSH sessions, cloud IDEs).
+# Detecting these early lets users know before sync — not after a confusing
+# 'tool unavailable' error.
+
+
+def _is_local_only_url(url: str) -> bool:
+    """Return True if the URL refers to a local-only address.
+
+    Args:
+        url: URL string to check.
+
+    Returns:
+        True if the URL binds to localhost/127.x.x.x/::1 or a unix socket.
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname or ""
+        # Unix domain sockets (unix:// scheme or file paths)
+        if parsed.scheme in ("unix", "file"):
+            return True
+        # Loopback addresses
+        if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+            return True
+        # 127.x.x.x range
+        if hostname.startswith("127."):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _is_stdio_command_local_only(command: str, args: list) -> bool:
+    """Return True if a stdio-based MCP command is likely local-only.
+
+    Stdio servers launched via npx/uvx are considered local-only because
+    they require the package manager and runtime to be installed on the
+    local machine. Remote/cloud environments won't have these.
+
+    Args:
+        command: The executable name (e.g. "npx", "uvx", "python3").
+        args: Command arguments.
+
+    Returns:
+        True if the command requires local installation.
+    """
+    local_only_launchers = {"npx", "uvx", "uv", "deno", "bun", "node", "python3", "python"}
+    return command in local_only_launchers
+
+
+@dataclass
+class LocalOnlyServerResult:
+    """Result of local-only server detection for one MCP server."""
+
+    name: str
+    reason: str                  # Human-readable explanation
+    transport: str               # "stdio", "sse", "http", "unknown"
+    cloud_risk: str              # "high", "medium", "low"
+    workaround: str = ""         # Suggestion for cloud environments
+
+
+def detect_local_only_servers(mcp_servers: dict[str, dict]) -> list[LocalOnlyServerResult]:
+    """Identify MCP servers that will fail in cloud/remote environments.
+
+    Scans the MCP server config dict and flags servers that rely on
+    local-only mechanisms: localhost URLs, Unix sockets, or stdio commands
+    requiring local package managers.
+
+    Args:
+        mcp_servers: Dict mapping server_name -> server_config.
+
+    Returns:
+        List of LocalOnlyServerResult for each server flagged as local-only.
+        Servers that appear safe for cloud use are omitted.
+    """
+    results: list[LocalOnlyServerResult] = []
+
+    for name, cfg in mcp_servers.items():
+        if not isinstance(cfg, dict):
+            continue
+
+        transport = cfg.get("transport", "").lower()
+        command = cfg.get("command", "")
+        args = cfg.get("args", [])
+        url = cfg.get("url", "") or cfg.get("baseUrl", "") or cfg.get("endpoint", "")
+
+        # Check SSE/HTTP transport with local URL
+        if url and _is_local_only_url(url):
+            results.append(LocalOnlyServerResult(
+                name=name,
+                reason=f"Binds to local address: {url!r}",
+                transport="sse" if "sse" in transport else "http",
+                cloud_risk="high",
+                workaround=(
+                    "Deploy the MCP server to a public endpoint or cloud function. "
+                    "Use environment variables to switch between local and cloud URLs."
+                ),
+            ))
+            continue
+
+        # Check Unix socket path in url
+        if url and (url.startswith("/") or url.startswith("unix:")):
+            results.append(LocalOnlyServerResult(
+                name=name,
+                reason=f"Uses Unix domain socket: {url!r}",
+                transport="unix",
+                cloud_risk="high",
+                workaround=(
+                    "Unix sockets are unavailable in cloud environments. "
+                    "Switch to an HTTP/SSE transport with a network-accessible endpoint."
+                ),
+            ))
+            continue
+
+        # Check stdio commands that require local package managers
+        if command and _is_stdio_command_local_only(command, args):
+            pkg_hint = ""
+            if args and isinstance(args[0], str):
+                pkg_hint = f" ({args[0]})"
+            results.append(LocalOnlyServerResult(
+                name=name,
+                reason=(
+                    f"Stdio server via '{command}'{pkg_hint} requires local installation"
+                ),
+                transport="stdio",
+                cloud_risk="medium",
+                workaround=(
+                    f"Ensure '{command}' and its dependencies are installed in the cloud "
+                    "environment, or use a pre-built Docker image that includes them. "
+                    "Consider hosting a persistent MCP server instead."
+                ),
+            ))
+
+    return results
+
+
+def format_local_only_report(results: list[LocalOnlyServerResult]) -> str:
+    """Format local-only server detection results for terminal display.
+
+    Args:
+        results: Output from detect_local_only_servers().
+
+    Returns:
+        Human-readable report string.
+    """
+    if not results:
+        return "All MCP servers appear safe for cloud/remote environments."
+
+    high = [r for r in results if r.cloud_risk == "high"]
+    medium = [r for r in results if r.cloud_risk == "medium"]
+
+    lines = [
+        f"Local-Only MCP Server Report ({len(results)} server(s) flagged)",
+        "=" * 60,
+        "",
+    ]
+
+    if high:
+        lines.append(f"HIGH RISK — will definitely fail in cloud ({len(high)} server(s)):")
+        for r in high:
+            lines.append(f"  {r.name}")
+            lines.append(f"    Reason:     {r.reason}")
+            lines.append(f"    Transport:  {r.transport}")
+            lines.append(f"    Workaround: {r.workaround}")
+            lines.append("")
+
+    if medium:
+        lines.append(f"MEDIUM RISK — may fail if package manager unavailable ({len(medium)} server(s)):")
+        for r in medium:
+            lines.append(f"  {r.name}")
+            lines.append(f"    Reason:     {r.reason}")
+            lines.append(f"    Workaround: {r.workaround}")
+            lines.append("")
+
+    lines.append(
+        "Tip: Use <!-- sync:exclude --> around MCP server configs that are "
+        "only for local development to prevent them from syncing to cloud harnesses."
+    )
+    return "\n".join(lines)

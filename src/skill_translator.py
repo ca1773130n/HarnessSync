@@ -941,6 +941,150 @@ def format_skill_translation_report(
 
 
 # ---------------------------------------------------------------------------
+# Item 4 — Skill Translation Quality Improvement Hints
+# ---------------------------------------------------------------------------
+#
+# After translation, annotate the output with inline comments explaining
+# what was approximated and HOW to manually improve it. Unlike the basic
+# annotation which just documents what changed, improvement hints give
+# actionable rewrite suggestions.
+
+# Target-specific skill idioms: what the harness natively supports
+_TARGET_NATIVE_IDIOMS: dict[str, list[str]] = {
+    "gemini": [
+        "Use tool_code blocks for shell commands (Gemini natively executes these)",
+        "Replace 'use the Bash tool' with direct shell command examples",
+        "Gemini supports structured output — prefer JSON response schemas over prose",
+    ],
+    "codex": [
+        "Use markdown code fences with language hints (Codex parses these for diffs)",
+        "Replace skill invocations with plain instructions (no slash commands in Codex)",
+        "Add explicit 'do not ask for confirmation' instructions if needed",
+    ],
+    "cursor": [
+        "Cursor .mdc rules use alwaysApply + globs — add file pattern metadata if applicable",
+        "Replace tool references with plain prose (Cursor reads these as editor context)",
+        "Use imperative voice ('Create', 'Update') — Cursor responds well to directives",
+    ],
+    "aider": [
+        "Aider reads CONVENTIONS.md sequentially — put most important rules first",
+        "Add explicit commit message format instructions (Aider auto-commits)",
+        "Replace skill invocations with inline instructions (Aider has no slash commands)",
+    ],
+    "windsurf": [
+        "Windsurf memory files are limited in size — keep skill content concise (<500 words)",
+        "Use declarative style ('Files should...') over imperative ('You must...')",
+        "Windsurf has no tool system — replace all tool references with behavior descriptions",
+    ],
+}
+
+
+def generate_improvement_hints(
+    original: str,
+    translated: str,
+    skill_name: str,
+    target_name: str,
+) -> list[str]:
+    """Generate actionable improvement hints for a translated skill file.
+
+    Analyzes the gap between original and translated content and returns
+    concrete suggestions for how to manually improve the translation for
+    the specific target harness.
+
+    Args:
+        original: Raw source skill content (from Claude Code).
+        translated: Content after translate_skill_content().
+        skill_name: Name of the skill (for context).
+        target_name: Target harness name.
+
+    Returns:
+        List of hint strings (may be empty if no improvements suggested).
+    """
+    hints: list[str] = []
+
+    # Check for remaining tool references in translated content
+    remaining_tools = _INLINE_TOOL_RE.findall(translated)
+    if remaining_tools:
+        tool_names = list(dict.fromkeys(m[1] for m in remaining_tools))
+        hints.append(
+            f"Replace remaining tool references ({', '.join(tool_names[:3])}) "
+            f"with {target_name}-native equivalents or plain prose descriptions"
+        )
+
+    # Check for MCP references that won't work
+    mcp_refs = re.findall(r"mcp__(\w+)__(\w+)", translated)
+    if mcp_refs:
+        server_names = list(dict.fromkeys(s for s, _ in mcp_refs))
+        hints.append(
+            f"MCP tool calls ({', '.join(server_names)}) may not work in {target_name} "
+            "— replace with equivalent instructions or verify MCP config is synced"
+        )
+
+    # Check for skill invocations (slash command references)
+    skill_invoke_re = re.compile(r"/[a-z][\w-]+\b")
+    slash_refs = skill_invoke_re.findall(translated)
+    if slash_refs:
+        unique_refs = list(dict.fromkeys(slash_refs[:3]))
+        hints.append(
+            f"Slash command references ({', '.join(unique_refs)}) are Claude Code-specific "
+            f"— expand their logic inline or remove from {target_name} variant"
+        )
+
+    # Add target-native idiom suggestions when content is non-trivial
+    if len(original) > 200:
+        native_idioms = _TARGET_NATIVE_IDIOMS.get(target_name, [])
+        hints.extend(native_idioms[:2])  # Add up to 2 idiom hints
+
+    # Check for XML tool-call blocks that may have been awkwardly removed
+    if _TOOL_CALL_BLOCK_RE.search(original) and not _TOOL_CALL_BLOCK_RE.search(translated):
+        hints.append(
+            "XML tool-call blocks were removed — verify surrounding prose still makes "
+            "sense without the structured tool invocation context"
+        )
+
+    return hints
+
+
+def annotate_with_improvement_hints(
+    original: str,
+    translated: str,
+    skill_name: str,
+    target_name: str,
+) -> str:
+    """Return translated content with improvement hints appended as a comment block.
+
+    Unlike annotate_translated_content() which documents what changed,
+    this function adds forward-looking improvement hints explaining how
+    to manually make the translation better.
+
+    Args:
+        original: Raw source content.
+        translated: Content after translation.
+        skill_name: Skill/agent name.
+        target_name: Target harness name.
+
+    Returns:
+        Translated content with improvement hints comment appended, or
+        the original translated content if no hints are generated.
+    """
+    hints = generate_improvement_hints(original, translated, skill_name, target_name)
+    if not hints:
+        return translated
+
+    hint_lines = [
+        "",
+        f"<!-- HarnessSync: Manual improvement hints for {target_name}",
+        f"     Skill: {skill_name}",
+        "     The following changes would improve this translation:",
+    ]
+    for i, hint in enumerate(hints, 1):
+        hint_lines.append(f"     {i}. {hint}")
+    hint_lines.append("-->")
+
+    return translated + "\n".join(hint_lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
 # Item 10 — Harness-Specific Skill Variants (fallback versions)
 # ---------------------------------------------------------------------------
 #

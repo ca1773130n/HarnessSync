@@ -377,6 +377,85 @@ def format_priority_preview(blocks: list[RuleBlock], targets: list[str] | None =
     return "\n".join(lines)
 
 
+def format_rule_win_map(
+    blocks: list[RuleBlock],
+    targets: list[str] | None = None,
+) -> str:
+    """Format a cross-harness 'win map' showing which rule wins on conflict.
+
+    When two rules address the same concern but with contradictory guidance,
+    which one wins depends on harness order semantics. This map makes that
+    explicit: for each pair of adjacent rules, show which one takes effect
+    in each target harness.
+
+    Args:
+        blocks: Rule blocks in current document order.
+        targets: Targets to include. Defaults to all known targets.
+
+    Returns:
+        Human-readable win-map string showing per-harness effective priority.
+    """
+    if targets is None:
+        targets = _ALL_TARGETS
+
+    content_blocks = [b for b in blocks if b.heading not in ("(preamble)",)]
+    if not content_blocks:
+        return "No rule blocks found — add ## headings to CLAUDE.md to enable rule ordering."
+
+    lines = [
+        "Rule Win Map — which rule takes precedence in each harness",
+        "=" * 66,
+        "",
+        "Harness order semantics:",
+    ]
+    for t in targets:
+        sem = HARNESS_ORDER_SEMANTICS.get(t, "unordered")
+        label = {
+            "top_wins": "top rule wins (first-match)",
+            "last_wins": "last rule wins (override-style)",
+            "unordered": "rules applied as a set (no precedence)",
+        }.get(sem, sem)
+        lines.append(f"  {t:<14} {label}")
+
+    lines.append("")
+
+    # For each adjacent pair of rule blocks, show which wins per harness
+    for i in range(len(content_blocks) - 1):
+        rule_a = content_blocks[i]
+        rule_b = content_blocks[i + 1]
+        lines.append(f"  {rule_a.heading!r}  vs  {rule_b.heading!r}")
+
+        for t in targets:
+            sem = HARNESS_ORDER_SEMANTICS.get(t, "unordered")
+            if sem == "top_wins":
+                winner = rule_a.heading
+                reason = "(appears first)"
+            elif sem == "last_wins":
+                winner = rule_b.heading
+                reason = "(appears last)"
+            else:
+                winner = "tie"
+                reason = "(unordered)"
+
+            if winner == "tie":
+                lines.append(f"    {t:<14} = (both apply equally)")
+            else:
+                lines.append(f"    {t:<14} → {winner!r} {reason}")
+        lines.append("")
+
+    # Highlight any dependency violations
+    violations = validate_rule_order(content_blocks)
+    if violations:
+        lines.append("  Dependency violations detected:")
+        for dep, prereq, explanation in violations:
+            lines.append(f"    ✗ {dep!r} should appear before {prereq!r}")
+            lines.append(f"      {explanation}")
+        lines.append("")
+
+    lines.append("  To reorder rules, edit CLAUDE.md directly or use /sync --sort-rules")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Interactive sorter
 # ---------------------------------------------------------------------------

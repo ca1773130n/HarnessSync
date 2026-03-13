@@ -2,6 +2,19 @@ from __future__ import annotations
 
 """Feature Gap Issue Creator — auto-draft GitHub issues for harness feature gaps.
 
+Also includes GapUpvoteTracker (item 29): a local store that lets users
+"upvote" capability gaps they care about. The tracker periodically checks
+whether a target harness has added support for previously-tracked gaps.
+
+Usage::
+
+    tracker = GapUpvoteTracker()
+    tracker.upvote("codex", "skills")        # Express interest in this gap
+    tracker.upvote("codex", "skills")        # Subsequent upvote increments count
+    open_gaps = tracker.list_gaps()          # List all tracked gaps with vote counts
+    resolved = tracker.check_resolved()      # Returns gaps that may be resolved
+
+
 When HarnessSync detects a Claude Code feature with no equivalent in a target
 harness, this module drafts a GitHub issue in that harness's upstream repo
 requesting the feature. Turns passive gap detection into upstream pressure
@@ -428,3 +441,163 @@ def _default_description(feature: str, harness: str) -> str:
         feature,
         f"Claude Code's '{feature}' feature has no equivalent in {harness} and is lost during sync.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Item 29 — Capability Gap Upvote Tracker
+# ---------------------------------------------------------------------------
+
+_UPVOTE_STORE_PATH = (
+    __import__("pathlib").Path.home() / ".harnesssync" / "gap_upvotes.json"
+)
+
+# Known support levels per (harness, feature) pair.
+# Updated when new harness versions add features.
+# "supported" means the gap may now be resolved; None = unknown.
+_KNOWN_SUPPORT: dict[tuple[str, str], bool] = {
+    ("gemini", "skills"):   True,   # Gemini CLI added native skill support
+    ("gemini", "commands"): True,   # Gemini CLI added native command support
+    ("codex", "mcp"):       True,   # Codex added MCP support
+    ("cursor", "skills"):   False,  # No native skill concept yet
+    ("aider", "skills"):    False,  # No native skill concept in Aider
+    ("aider", "agents"):    False,  # No agent concept in Aider
+    ("windsurf", "agents"): False,  # No agent concept in Windsurf
+}
+
+
+class GapUpvoteTracker:
+    """Track user upvotes for capability gaps and detect when gaps are resolved.
+
+    Stores upvote counts in ``~/.harnesssync/gap_upvotes.json``. Each gap
+    is keyed by ``<harness>:<feature>``. Upvotes express user interest and
+    help prioritize which gaps matter most.
+
+    ``check_resolved()`` compares tracked gaps against a known-support
+    database and returns gaps that appear to now be supported in the
+    target harness.
+
+    Args:
+        store_path: Override the default JSON store path (useful for testing).
+    """
+
+    def __init__(self, store_path: __import__("pathlib").Path | None = None) -> None:
+        from pathlib import Path
+        self._store_path: Path = store_path or _UPVOTE_STORE_PATH
+
+    # ── Storage helpers ───────────────────────────────────────────────────────
+
+    def _load(self) -> dict:
+        if not self._store_path.exists():
+            return {}
+        try:
+            import json
+            data = json.loads(self._store_path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _save(self, data: dict) -> None:
+        self._store_path.parent.mkdir(parents=True, exist_ok=True)
+        import json
+        self._store_path.write_text(
+            json.dumps(data, indent=2, sort_keys=True), encoding="utf-8"
+        )
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def upvote(self, harness: str, feature: str) -> int:
+        """Register one upvote for a (harness, feature) capability gap.
+
+        Args:
+            harness: Target harness name (e.g. "codex").
+            feature: Feature name (e.g. "skills").
+
+        Returns:
+            New total upvote count for this gap.
+        """
+        from datetime import datetime, timezone
+        key = f"{harness}:{feature}"
+        data = self._load()
+        entry = data.get(key, {"harness": harness, "feature": feature, "votes": 0, "first_upvoted": "", "last_upvoted": ""})
+        entry["votes"] = entry.get("votes", 0) + 1
+        now = datetime.now(tz=timezone.utc).isoformat()
+        if not entry.get("first_upvoted"):
+            entry["first_upvoted"] = now
+        entry["last_upvoted"] = now
+        data[key] = entry
+        self._save(data)
+        return entry["votes"]
+
+    def list_gaps(self, min_votes: int = 0) -> list[dict]:
+        """Return all tracked gaps sorted by vote count descending.
+
+        Args:
+            min_votes: Filter to gaps with at least this many votes.
+
+        Returns:
+            List of dicts with keys: ``harness``, ``feature``, ``votes``,
+            ``first_upvoted``, ``last_upvoted``, ``resolved``.
+        """
+        data = self._load()
+        entries = []
+        for key, entry in data.items():
+            if entry.get("votes", 0) < min_votes:
+                continue
+            h, f = entry.get("harness", ""), entry.get("feature", "")
+            resolved = _KNOWN_SUPPORT.get((h, f), None)
+            entries.append({
+                "harness": h,
+                "feature": f,
+                "votes": entry.get("votes", 0),
+                "first_upvoted": entry.get("first_upvoted", ""),
+                "last_upvoted": entry.get("last_upvoted", ""),
+                "resolved": resolved,
+            })
+        entries.sort(key=lambda e: e["votes"], reverse=True)
+        return entries
+
+    def check_resolved(self) -> list[dict]:
+        """Return gaps that are now supported in the target harness.
+
+        Compares tracked gaps against the known-support database and
+        returns entries where support has been confirmed.
+
+        Returns:
+            List of gap dicts (same format as list_gaps()) where
+            ``resolved`` is True.
+        """
+        return [g for g in self.list_gaps() if g["resolved"] is True]
+
+    def format_report(self) -> str:
+        """Return a human-readable report of all tracked gaps.
+
+        Returns:
+            Multi-line formatted string.
+        """
+        gaps = self.list_gaps()
+        if not gaps:
+            return "No capability gaps tracked. Use /sync-gaps to find and upvote gaps."
+
+        lines = [
+            "Capability Gap Upvote Tracker",
+            "=" * 50,
+            "",
+            f"  {'Harness':<12} {'Feature':<14} {'Votes':>5}  Status",
+            "  " + "-" * 46,
+        ]
+        for g in gaps:
+            resolved = g["resolved"]
+            status = "✓ now supported!" if resolved else ("✗ still open" if resolved is False else "? unknown")
+            lines.append(
+                f"  {g['harness']:<12} {g['feature']:<14} {g['votes']:>5}  {status}"
+            )
+
+        resolved_gaps = self.check_resolved()
+        if resolved_gaps:
+            lines.append("")
+            lines.append(
+                f"  {len(resolved_gaps)} gap(s) appear resolved — "
+                "re-sync to take advantage of new harness support."
+            )
+
+        return "\n".join(lines)

@@ -30,6 +30,7 @@ The redo stack is discarded whenever a new sync entry is pushed
 (matching standard undo/redo semantics).
 """
 
+import difflib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -340,6 +341,81 @@ class HarnessUndoStack:
             }
             for e in self._load(self._stack_file)
         ]
+
+    def diff_preview(self) -> str:
+        """Return a unified diff showing what undo() would restore.
+
+        Compares the saved snapshot (what would be restored) against the
+        current on-disk file content. Lets users see what will change
+        BEFORE committing to an undo.
+
+        Returns:
+            Unified diff string, or a message if nothing to undo / no changes.
+        """
+        stack = self._load(self._stack_file)
+        if not stack:
+            return f"[{self.harness}] Undo stack is empty — nothing to preview."
+
+        entry = stack[0]  # Top of stack (would be popped by undo())
+        diff_chunks: list[str] = []
+
+        for rel_path, saved_content in entry.get("files", {}).items():
+            abs_path = self.project_dir / rel_path
+            if abs_path.exists():
+                try:
+                    current = abs_path.read_text(encoding="utf-8")
+                except OSError:
+                    current = ""
+            else:
+                current = ""
+
+            saved_lines = saved_content.splitlines(keepends=True)
+            current_lines = current.splitlines(keepends=True)
+
+            if saved_lines == current_lines:
+                continue  # No difference for this file
+
+            chunk = list(difflib.unified_diff(
+                current_lines,
+                saved_lines,
+                fromfile=f"current/{rel_path}",
+                tofile=f"restored/{rel_path}",
+                lineterm="",
+            ))
+            if chunk:
+                diff_chunks.append("\n".join(chunk))
+
+        if not diff_chunks:
+            label = entry.get("label", "?")
+            return (
+                f"[{self.harness}] No differences — current files match the "
+                f"snapshot '{label}'. Undo would be a no-op."
+            )
+
+        label = entry.get("label", "?")
+        header = (
+            f"[{self.harness}] Undo preview — would restore snapshot: '{label}'\n"
+            + "=" * 60
+        )
+        return header + "\n\n" + "\n\n".join(diff_chunks)
+
+    def undo_with_diff(self, show_diff: bool = True) -> tuple[str, UndoResult]:
+        """Show a diff preview then perform the undo operation.
+
+        Convenience method that combines diff_preview() and undo() so callers
+        can present the diff to the user before the restore happens.
+
+        Args:
+            show_diff: If True, generate the diff preview. Set to False to
+                       skip the diff and just undo (equivalent to undo()).
+
+        Returns:
+            Tuple of (diff_string, UndoResult). diff_string is empty if
+            show_diff is False or the undo stack is empty.
+        """
+        diff = self.diff_preview() if show_diff else ""
+        result = self.undo()
+        return diff, result
 
     def format_status(self) -> str:
         """Format a human-readable status of the undo/redo stacks."""
