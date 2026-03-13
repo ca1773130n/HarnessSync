@@ -34,6 +34,17 @@ Allows users to annotate CLAUDE.md sections with sync control tags:
   These are semantic aliases for the harness:only= / harness:skip= forms but
   use a more CSS-like @harness: prefix that some users find more readable.
 
+  Python/shell comment-style annotations (item 1 — per-harness override layer):
+    <content>  # @codex: skip                 — skip THIS LINE for codex
+    <content>  # @gemini,aider: skip          — skip THIS LINE for gemini and aider
+    <content>  # @gemini: replace with <text> — replace THIS LINE with <text> for gemini
+    <content>  # @codex,cursor: replace with <text> — replace for codex and cursor
+
+  These use native Python/shell `#` comments instead of HTML comments, making
+  them natural inside YAML configs, shell scripts, or code blocks embedded in
+  rules files.  For non-matching targets the annotation is stripped and the
+  original line content is emitted unchanged.
+
   Environment-specific overrides (item 18):
     @env:production                — section only included when --env=production
     @env:dev                       — section only included when --env=dev
@@ -176,6 +187,26 @@ _ENV_OPEN_AT_RE = re.compile(r"^\s*@env:([a-z0-9_-]+)\s*$", re.IGNORECASE)
 _ENV_OPEN_COMMENT_RE = re.compile(r"<!--\s*env:([a-z0-9_-]+)\s*-->", re.IGNORECASE)
 _ENV_CLOSE_COMMENT_RE = re.compile(r"<!--\s*/env:([a-z0-9_-]+)\s*-->", re.IGNORECASE)
 
+# Python/shell comment-style inline harness annotations (item 1 — per-harness override layer):
+#
+#   <content>  # @codex: skip
+#   <content>  # @gemini,aider: skip
+#   <content>  # @gemini: replace with <replacement text>
+#   <content>  # @codex,cursor: replace with <replacement text>
+#
+# The annotation must appear at the END of the line (after the content).
+# For non-matching targets the annotation is stripped and the original content
+# is emitted.  Both patterns are anchored to end-of-line so they don't
+# accidentally match inside content.
+_PY_HARNESS_SKIP_RE = re.compile(
+    r"\s+#\s*@([a-z0-9][a-z0-9,\s_-]*):\s*skip\s*$",
+    re.IGNORECASE,
+)
+_PY_HARNESS_REPLACE_RE = re.compile(
+    r"\s+#\s*@([a-z0-9][a-z0-9,\s_-]*):\s*replace\s+with\s+(.*?)\s*$",
+    re.IGNORECASE,
+)
+
 
 def _parse_target_list(targets_str: str) -> set[str]:
     """Parse a comma-separated target list string into a normalised set."""
@@ -309,6 +340,8 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
     6. Inline <!-- harness:only=X,Y --> — keeps THIS line only for listed targets
     7. Inline <!-- @harness:skip-X,Y --> — @harness shorthand skip (item 28)
     8. Inline <!-- @harness:X-only --> or <!-- @harness:X,Y --> — @harness only (item 28)
+    9. Python/shell # @targets: skip — drops THIS line for listed targets
+   10. Python/shell # @targets: replace with <text> — replaces THIS line for listed targets
 
     Args:
         content: Raw rules text (e.g. CLAUDE.md contents).
@@ -470,6 +503,39 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
                 if cleaned.strip():
                     output.append(cleaned + ("\n" if line.endswith("\n") else ""))
             continue  # Always consumed — other targets don't see this line
+
+        # --- Python/shell comment-style: # @targets: skip ---
+        # Example: "- Use /debug skill  # @aider: skip"
+        # For matching targets: drop the line entirely.
+        # For non-matching targets: emit the content without the annotation.
+        py_skip_m = _PY_HARNESS_SKIP_RE.search(line)
+        if py_skip_m:
+            skip_targets = _parse_target_list(py_skip_m.group(1))
+            if target_lower in skip_targets:
+                continue  # Drop for listed targets
+            # Strip annotation, preserve leading whitespace + content
+            cleaned = line[: py_skip_m.start()].rstrip()
+            if cleaned.strip():
+                output.append(cleaned + ("\n" if line.endswith("\n") else ""))
+            continue
+
+        # --- Python/shell comment-style: # @targets: replace with <text> ---
+        # Example: "- Use /debug skill  # @aider: replace with See debug-task.md"
+        # For matching targets: emit the replacement text (preserving leading indent).
+        # For non-matching targets: emit original content without the annotation.
+        py_replace_m = _PY_HARNESS_REPLACE_RE.search(line)
+        if py_replace_m:
+            replace_targets = _parse_target_list(py_replace_m.group(1))
+            replacement = py_replace_m.group(2).strip()
+            leading = line[: len(line) - len(line.lstrip())]
+            if target_lower in replace_targets:
+                if replacement:
+                    output.append(leading + replacement + ("\n" if line.endswith("\n") else ""))
+            else:
+                cleaned = line[: py_replace_m.start()].rstrip()
+                if cleaned.strip():
+                    output.append(cleaned + ("\n" if line.endswith("\n") else ""))
+            continue
 
         # --- Emit based on active_tag ---
         if active_tag is None:

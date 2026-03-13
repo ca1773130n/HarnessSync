@@ -2802,3 +2802,69 @@ _2026-03-13T06:38:18.959Z_
 - The project has no package.json — 'npm test' fails by design; the actual test runner is pytest. Future evolve prompts should check for pyproject.toml or setup.py first.
 
 ---
+## Iteration 43
+_2026-03-13T06:52:43.851Z_
+
+### Items Attempted
+
+- **Cross-Harness Prompt Benchmarking** — pass
+- **Portable Config Bundle Export/Import** — pass
+- **Team Config Sharing via GitHub** — pass
+- **Capability Gap Map** — pass
+- **Migrate From Any Harness Wizard** — pass
+- **Harness-Specific Rule Overrides** — pass
+- **Auto-Detect Installed Harnesses** — pass
+- **Config Drift Alerts with Root Cause** — pass
+- **Conditional Sync by Project Type** — pass
+- **Cursor / Windsurf / Aider / Continue Adapters** — pass
+- **Skill Compatibility Dry-Run** — pass
+- **Config Templates Library** — pass
+- **Auto-Generated Sync Changelog** — pass
+- **Smart MCP Server Config Sync** — pass
+- **Cloud Config Backup (GitHub Gist / S3)** — pass
+- **Per-Project Harness Target Selection** — pass
+- **Interactive Sync Conflict Resolver** — pass
+- **CI/CD Config Validation Action** — pass
+- **Natural Language Rule Authoring Assistant** — pass
+- **Config Complexity & Health Score** — pass
+- **Live Harness Feature Support Matrix** — pass
+- **Interactive Onboarding Wizard** — pass
+- **Rule Rationale Annotations** — pass
+- **Environment Variable Translation Layer** — pass
+- **Slack / Discord Sync Failure Notifications** — pass
+- **Config Inheritance: Global → Project → Local** — pass
+- **Task-Aware Harness Recommendation** — pass
+- **Rollback with Per-Target Impact Preview** — pass
+- **Config Search & Cross-Harness Query** — pass
+- **Git Commit Hook Auto-Sync Trigger** — pass
+- **Multi-Machine Config Orchestration** — pass
+- **Permission Model Translation Explainer** — pass
+- **Harness Update Compatibility Check** — pass
+- **Sync Operation Cost Estimator** — pass
+
+### Decisions Made
+
+- Implemented prompt_benchmark.py using static analysis (no LLM calls) — scores harnesses by scanning their synced rule files, MCP configs, and skill directories for task-relevant content; avoids subprocess overhead while still being meaningful
+- Built harness_feature_matrix.py as a versioned static matrix rather than a dynamic scanner — static data is more reliable and queryable offline, while VERSION_REQUIREMENTS captures when features were introduced so callers can gate on installed version
+- Designed config_search.py to search both project-level and user-level (~) harness config files, returning SearchMatch objects with surrounding context lines for readable output similar to grep -C
+- Enhanced drift_watcher.py additively (no existing code removed) — DriftRootCause and analyze_drift_root_cause() sit alongside existing DriftAlert; heuristics classify cause from diff content and map to specific /sync-* suggested actions
+- Used <!-- why: ... --> HTML comment syntax for rule_rationale.py to keep annotations CLAUDE.md-native and renderable in any Markdown viewer; RationalePreserver translates to # Why: for TOML/YAML targets and strips for harnesses that don't render HTML comments
+- team_github_sync.py uses the system git binary (no PyGitHub dep) and caches clones in ~/.harnesssync/team-repos/ keyed by URL hash — matches the project's stdlib-only constraint and mirrors the ssh-based remote_sync.py design
+
+### Patterns Discovered
+
+- The codebase heavily uses @dataclass with field() for structured output objects — every feature returns a typed result dataclass with a format() or format_*() method for terminal rendering
+- Task classification is duplicated across task_router.py and prompt_benchmark.py — a shared _classify_task() utility in utils/ would reduce duplication in future iterations
+- Feature capability data (_TARGET_NATIVE_FRACTIONS, TARGET_LIMITATIONS, VERSIONED_FEATURES) is scattered across config_health.py, skill_compatibility.py, and harness_version_compat.py — harness_feature_matrix.py consolidates this but the source files still have their own copies
+- Most source files follow: module docstring → constants/patterns → dataclasses → module-level functions → class → format helpers; new files followed this convention
+- The project avoids external dependencies strictly (stdlib only) — even difflib, subprocess, and tempfile are used directly rather than higher-level libs
+
+### Takeaways
+
+- The codebase is very mature with 60+ source files — most feature ideas from the product-ideation list already have corresponding implementation files; the remaining gaps are in cross-harness comparison tools (benchmarking, matrix, search) rather than sync mechanics
+- drift_watcher.py lacked difflib-based root cause analysis despite having all the infrastructure (hash comparison, file paths) — small addition, high diagnostic value for users debugging why their configs diverged
+- The team collaboration features (GitHub sync, bundle sharing, subscription) are the least developed area of the codebase — team_github_sync.py fills the most visible gap (GitHub-based vs SSH-only)
+- config_search.py enables a use case that grows in importance as config size grows — users with 30+ rules across 6 harnesses have no way to find where a specific rule lives without manually catting each file
+- harness_feature_matrix.py should eventually be driven by a YAML/JSON data file rather than hardcoded Python dicts — would allow community contributions to keep the matrix current without code changes
+
+---
