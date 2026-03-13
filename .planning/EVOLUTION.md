@@ -4241,3 +4241,68 @@ _2026-03-13T12:26:07.313Z_
 - The `AdapterWizard.generate_pr_files` creates a full PR directory tree in one call — this pattern (scaffold-everything-at-once) is more useful for developer onboarding than piecemeal file creation.
 
 ---
+## Iteration 64
+_2026-03-13T12:40:08.490Z_
+
+### Items Attempted
+
+- **Sync Conflict Resolution Wizard** — pass
+- **Pre-Sync Capability Preview** — pass
+- **Rules Coverage Heatmap** — pass
+- **Per-Project Sync Profiles** — pass
+- **Reverse Sync — Import from Harness** — pass
+- **Sync Changelog Feed** — pass
+- **Team Config Broadcast** — pass
+- **MCP Server Compatibility Advisor** — pass
+- **Skill Translation Quality Score** — pass
+- **Auto-Sync on Git Commit** — pass
+- **Rule Triage by Harness Support** — pass
+- **Sync Dry Run Mode** — pass
+- **Cursor Rules Adapter (.cursorrules)** — pass
+- **Aider CONVENTIONS.md Adapter** — pass
+- **Windsurf Cascade Adapter** — pass
+- **VS Code Extension Config Sync** — pass
+- **Sync Health Badge for README** — pass
+- **Rule Deduplication Detector** — pass
+- **Pre-Sync Secret Scanner** — pass
+- **Scheduled Sync Cron** — pass
+- **Target Harness Version Pinning** — pass
+- **Named Config Snapshots** — pass
+- **New Harness Onboarding Wizard** — pass
+- **Cross-Harness Rule Smoke Test** — pass
+- **Claude Code Plugin Ecosystem Sync** — pass
+- **Slack/Teams Sync Notifications** — pass
+- **Rule Effectiveness Feedback Loop** — pass
+- **Universal Rule Syntax Linter** — pass
+- **Multi-Workspace Sync Orchestrator** — pass
+- **PR Config Diff Comment** — pass
+- **Cross-Harness Response Benchmark** — pass
+- **Offline Sync Queue** — pass
+- **Sync Impact Estimator** — pass
+
+### Decisions Made
+
+- Added SyncConflictWizard to conflict_detector.py with four strategies (ours/theirs/union/newer) rather than a single approach, because different automation contexts need different merge semantics — CI wants 'ours', cautious users want 'union'
+- Implemented per-project profiles as module-level functions (load_project_profile/save_project_profile) rather than adding methods to ProfileManager, because .harnesssync.json is project-owned state not tied to the user's profile store
+- Added NamedSnapshotStore as a standalone class in config_snapshot.py (not mixed into ConfigSnapshot) because named snapshots are a separate persistence concern from shareable bundles/gists
+- Rule portability triage uses explicit regex pattern lists (_CC_ONLY_PATTERNS, _APPROX_PATTERNS) rather than LLM inference to keep it fast, offline, and deterministic — same philosophy as the existing SemanticConflictDetector
+- render_coverage_heatmap uses glyphs (■◑○✗) rather than text labels to pack a 10-harness × 9-feature matrix into readable terminal width; with optional ANSI colors as an opt-in to avoid breaking non-color terminals
+- build_capability_preview delegates to HarnessFeatureMatrix for unsupported section detection rather than duplicating the capability data, ensuring the preview stays consistent with the matrix
+- SyncScheduler uses dry_run=True in tests to avoid touching actual crontab; the real crontab path uses subprocess crontab -l/-write which is the standard portable approach on Unix
+- Created sync_scheduler.py as a new file (not adding to git_hook_installer.py) because cron scheduling is conceptually different from git hooks — different lifecycle, different dependencies
+
+### Patterns Discovered
+
+- The codebase follows a consistent pattern: new functionality is added by appending to existing files rather than creating new ones, keeping the module count manageable
+- All multi-strategy resolvers in this codebase use frozenset for valid values and raise ValueError on invalid input — consistent with existing adapters
+- Tests use tmp_path fixtures heavily for file-based features, avoiding any actual ~/.harnesssync state pollution during test runs
+- The codebase prefers @dataclass for result types with to_dict/from_dict for JSON serialization rather than using Pydantic or attrs
+
+### Takeaways
+
+- The harness_feature_matrix.py already had extensive query infrastructure but no visual summary — the heatmap fills a real gap for human-readable capability overview
+- sync_impact_predictor.py had impact scoring but no per-target breakdown — build_capability_preview adds the 'what exactly will codex gain/lose?' answer users need before syncing
+- The portability triage feature complements the existing rule_categorizer (which categorizes by domain) with a second orthogonal classification (by harness portability) — useful for users authoring rules for multi-harness environments
+- SyncConflictWizard.union strategy (deduplicated merge) is the most valuable for CI because it preserves both sync improvements and manual additions without requiring human input
+
+---

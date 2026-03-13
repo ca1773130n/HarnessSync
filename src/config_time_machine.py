@@ -534,3 +534,82 @@ class ConfigTimeMachine:
         """Return all auto-* snapshots ordered newest first."""
         all_snaps = self.list_snapshots()
         return [s for s in all_snaps if s.name.startswith("auto-")]
+
+    def format_visual_timeline(
+        self,
+        commits: list[ConfigCommit],
+        max_width: int = 80,
+        show_files: bool = False,
+    ) -> str:
+        """Render a visual ASCII timeline of config history.
+
+        Produces a branch-style ASCII art timeline showing the chronological
+        sequence of commits that touched CLAUDE.md.  Newest commits are at
+        the top (most recent first) so the user can see the latest changes
+        immediately.
+
+        Example output::
+
+            Config Timeline — CLAUDE.md
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            ◉  abc1234  2026-03-13  Add TypeScript rules
+            │
+            ◉  def5678  2026-03-10  Update MCP server config
+            │
+            ◉  ghi9012  2026-03-07  Initial CLAUDE.md
+            ╵
+            3 commit(s) shown
+
+        Args:
+            commits:    List from ``timeline()``, newest first.
+            max_width:  Maximum terminal width for wrapping subject lines.
+            show_files: If True, show changed files below each commit node.
+
+        Returns:
+            Formatted ASCII timeline string.
+        """
+        if not commits:
+            return (
+                "Config Timeline\n"
+                "═══════════════\n\n"
+                "  No config-related commits found.\n"
+                "  Make sure CLAUDE.md is tracked by git.\n"
+            )
+
+        title = "Config Timeline — CLAUDE.md"
+        lines: list[str] = [title, "═" * len(title), ""]
+
+        max_subject = max(20, max_width - 35)
+
+        for i, commit in enumerate(commits):
+            is_last = i == len(commits) - 1
+            node = "◉"
+            subject = commit.subject
+            if len(subject) > max_subject:
+                subject = subject[: max_subject - 1] + "…"
+
+            # Commit node line
+            lines.append(f"{node}  {commit.sha}  {commit.date}  {subject}")
+
+            # Optional author
+            lines.append(f"│      by {commit.author}")
+
+            # Optional changed files
+            if show_files and commit.files_changed:
+                for fname in commit.files_changed[:3]:
+                    lines.append(f"│      ├─ {fname}")
+                if len(commit.files_changed) > 3:
+                    lines.append(f"│      └─ … ({len(commit.files_changed) - 3} more)")
+
+            # Connector to next commit (or bottom cap)
+            if is_last:
+                lines.append("╵")
+            else:
+                lines.append("│")
+
+        lines.append("")
+        noun = "commit" if len(commits) == 1 else "commits"
+        lines.append(f"{len(commits)} {noun} shown")
+        lines.append("")
+        lines.append("Tip: /sync-restore --from-commit <SHA> to roll back a harness.")
+        return "\n".join(lines)

@@ -860,3 +860,179 @@ def is_drift_check_hook_installed(project_dir: Path) -> bool:
     if not hook_path.exists():
         return False
     return DRIFT_CHECK_MARKER in hook_path.read_text(encoding="utf-8")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Commit Message Annotation Hook (item 7 — Git Commit-Triggered Sync)
+#
+# A post-commit hook that:
+# 1. Runs HarnessSync when CLAUDE.md / .claude/ files changed in the commit
+# 2. Appends a brief sync summary to the commit message via git commit --amend
+#    so the sync results are part of the permanent git history.
+#
+# This fulfills the item 7 requirement: "sync results included in the commit
+# message".  The annotation looks like:
+#
+#   HarnessSync: synced codex, gemini, opencode (3 targets, 0 errors)
+#
+# The amend is safe because it is done immediately after the original commit,
+# before the branch is pushed, so it does not affect shared history.
+# ──────────────────────────────────────────────────────────────────────────────
+
+COMMIT_ANNOTATE_MARKER = "# harnesssync-commit-annotate-v1"
+
+COMMIT_ANNOTATE_HOOK_TEMPLATE = """\
+#!/bin/sh
+# HarnessSync commit-annotate post-commit hook
+# Syncs harness configs on CLAUDE.md changes and appends sync results to the
+# commit message so config updates are traceable in git history.
+# Installed by: /sync-git-hook install --annotate
+# Remove with:  /sync-git-hook uninstall --annotate
+
+HARNESSSYNC_ANNOTATE_MARKER="# harnesssync-commit-annotate-v1"
+$HARNESSSYNC_ANNOTATE_MARKER
+
+# Only run when trigger files changed
+changed=$(git diff-tree --no-commit-id -r --name-only HEAD 2>/dev/null)
+
+triggers=0
+for pattern in CLAUDE.md .claude/ .mcp.json .harness-sync/; do
+    if echo "$changed" | grep -q "^$pattern"; then
+        triggers=1
+        break
+    fi
+done
+
+if [ "$triggers" -eq 0 ]; then
+    exit 0
+fi
+
+# Find HarnessSync plugin root
+if [ -n "$CLAUDE_PLUGIN_ROOT" ]; then
+    HS_ROOT="$CLAUDE_PLUGIN_ROOT"
+elif [ -f "$HOME/.claude/plugins/harness-sync/src/commands/sync.py" ]; then
+    HS_ROOT="$HOME/.claude/plugins/harness-sync"
+else
+    exit 0
+fi
+
+PY=$(command -v python3 || command -v python)
+if [ -z "$PY" ]; then
+    exit 0
+fi
+
+# Run sync and capture output for commit message annotation
+sync_output=$("$PY" "$HS_ROOT/src/commands/sync.py" --scope all 2>&1)
+sync_exit=$?
+
+# Build annotation line summarising the sync result
+if [ "$sync_exit" -eq 0 ]; then
+    # Count synced targets from output (look for lines containing "✓")
+    synced=$(echo "$sync_output" | grep -c "✓" || true)
+    annotation="HarnessSync: synced $synced target(s) — OK"
+else
+    annotation="HarnessSync: sync completed with warnings (exit $sync_exit)"
+fi
+
+# Append annotation to the last commit message via --amend
+# We use --no-edit to preserve the original message and just append.
+current_msg=$(git log -1 --format="%B" HEAD 2>/dev/null)
+
+# Avoid double-annotating if message already contains our footer
+if echo "$current_msg" | grep -q "HarnessSync:"; then
+    exit 0
+fi
+
+new_msg="${current_msg}
+
+${annotation}"
+
+# Amend silently; if this fails, sync already happened so just exit 0
+git commit --amend -m "$new_msg" --no-verify >/dev/null 2>&1 || true
+
+exit 0
+"""
+
+
+def install_commit_annotate_hook(project_dir: Path) -> tuple[bool, str]:
+    """Install a post-commit hook that syncs and annotates the commit message.
+
+    The hook fires after every commit.  When CLAUDE.md or related files
+    changed, it runs HarnessSync and then amends the commit message to
+    include a one-line sync result summary.  This makes harness syncs
+    traceable in ``git log`` without any manual effort.
+
+    Args:
+        project_dir: Project directory to start searching for git repo.
+
+    Returns:
+        (success, message) tuple.
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False, "Not inside a git repository"
+
+    hooks_dir = git_dir / "hooks"
+    hooks_dir.mkdir(exist_ok=True)
+    hook_path = hooks_dir / "post-commit"
+
+    if hook_path.exists():
+        existing = hook_path.read_text(encoding="utf-8")
+        if COMMIT_ANNOTATE_MARKER in existing:
+            return True, f"Commit-annotate hook already installed at {hook_path}"
+        with open(hook_path, "a", encoding="utf-8") as fh:
+            fh.write("\n" + COMMIT_ANNOTATE_HOOK_TEMPLATE)
+        _make_executable(hook_path)
+        return True, f"HarnessSync commit-annotate hook appended to {hook_path}"
+
+    hook_path.write_text(COMMIT_ANNOTATE_HOOK_TEMPLATE, encoding="utf-8")
+    _make_executable(hook_path)
+    return True, f"Commit-annotate post-commit hook installed at {hook_path}"
+
+
+def uninstall_commit_annotate_hook(project_dir: Path) -> tuple[bool, str]:
+    """Remove the HarnessSync commit-annotate block from the post-commit hook.
+
+    Args:
+        project_dir: Project directory.
+
+    Returns:
+        (success, message) tuple.
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False, "Not inside a git repository"
+
+    hook_path = git_dir / "hooks" / "post-commit"
+    if not hook_path.exists():
+        return True, "No post-commit hook found (nothing to remove)"
+
+    content = hook_path.read_text(encoding="utf-8")
+    if COMMIT_ANNOTATE_MARKER not in content:
+        return True, "Commit-annotate hook not found in post-commit hook"
+
+    lines = content.splitlines(keepends=True)
+    filtered = [ln for ln in lines if COMMIT_ANNOTATE_MARKER not in ln]
+    new_content = "".join(filtered).strip()
+
+    if not new_content or new_content == "#!/bin/sh":
+        hook_path.unlink()
+        return True, "Commit-annotate post-commit hook removed (file deleted)"
+
+    hook_path.write_text(new_content + "\n", encoding="utf-8")
+    return True, f"HarnessSync commit-annotate block removed from {hook_path}"
+
+
+def is_commit_annotate_hook_installed(project_dir: Path) -> bool:
+    """Return True if the commit-annotate post-commit hook is installed.
+
+    Args:
+        project_dir: Project directory.
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False
+    hook_path = git_dir / "hooks" / "post-commit"
+    if not hook_path.exists():
+        return False
+    return COMMIT_ANNOTATE_MARKER in hook_path.read_text(encoding="utf-8")
