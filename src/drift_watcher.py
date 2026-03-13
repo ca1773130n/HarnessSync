@@ -973,3 +973,166 @@ def drift_summary(project_dir: Path, state_manager: StateManager | None = None) 
         }
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Zero-Drift Guarantee Mode (item 21)
+# ---------------------------------------------------------------------------
+
+class ZeroDriftGuarantee:
+    """Strict mode that detects and reverts external edits to synced config files.
+
+    When enabled, HarnessSync watches synced output files and immediately
+    reverts any change made by a tool other than HarnessSync itself.  The
+    revert is performed by re-writing the last-synced content stored in the
+    state snapshot.
+
+    This gives power users an iron guarantee: secondary harness configs are
+    always byte-for-byte identical to the last sync output.
+
+    Usage::
+
+        guarantee = ZeroDriftGuarantee(project_dir=Path("."))
+        guarantee.enable()   # begins watching in a background thread
+        guarantee.disable()  # stops the watcher
+
+        # Check status without starting a thread:
+        violations = guarantee.scan_once()
+    """
+
+    _POLL_INTERVAL: float = 2.0
+    _REVERT_LOG_MAX: int = 100
+
+    def __init__(
+        self,
+        project_dir: Path | None = None,
+        state_manager: StateManager | None = None,
+        logger: Logger | None = None,
+    ) -> None:
+        self._project_dir = project_dir or Path.cwd()
+        self._sm = state_manager or StateManager()
+        self._logger = logger or Logger()
+        self._thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+        self._revert_log: list[dict] = []
+
+    def enable(self) -> None:
+        """Start the background file watcher that reverts external edits."""
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._watch_loop,
+            name="ZeroDriftGuarantee",
+            daemon=True,
+        )
+        self._thread.start()
+        self._logger.info("ZeroDriftGuarantee enabled — external edits will be reverted.")
+
+    def disable(self) -> None:
+        """Stop the background file watcher."""
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=5.0)
+            self._thread = None
+        self._logger.info("ZeroDriftGuarantee disabled.")
+
+    @property
+    def active(self) -> bool:
+        """True if the background watcher is currently running."""
+        return bool(self._thread and self._thread.is_alive())
+
+    def scan_once(self) -> list[dict]:
+        """Perform a single drift scan without reverting.
+
+        Returns:
+            List of violation dicts with keys:
+              ``file_path``, ``expected_hash``, ``actual_hash``, ``reverted``.
+        """
+        return self._check_files(revert=False)
+
+    def revert_violations(self) -> list[dict]:
+        """Detect and revert all external edits to synced files.
+
+        Returns:
+            List of reverted violation dicts.
+        """
+        return self._check_files(revert=True)
+
+    @property
+    def revert_log(self) -> list[dict]:
+        """Return the in-memory revert log (most recent first)."""
+        return list(reversed(self._revert_log))
+
+    def format_status(self) -> str:
+        """Return a human-readable status string."""
+        status = "active" if self.active else "inactive"
+        reverts = len(self._revert_log)
+        lines = [
+            f"Zero-Drift Guarantee Mode: {status.upper()}",
+            f"  Reverts applied this session: {reverts}",
+        ]
+        if self._revert_log:
+            last = self._revert_log[-1]
+            lines.append(f"  Last revert: {last.get('file_path', '?')} at {last.get('timestamp', '?')}")
+        lines.append("")
+        lines.append(
+            "All synced config files are protected. External edits are reverted automatically."
+            if self.active
+            else "Run /sync with --zero-drift to enable protection."
+        )
+        return "\n".join(lines)
+
+    def _watch_loop(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                self._check_files(revert=True)
+            except Exception as exc:
+                self._logger.warning(f"ZeroDriftGuarantee scan error: {exc}")
+            self._stop_event.wait(self._POLL_INTERVAL)
+
+    def _check_files(self, revert: bool) -> list[dict]:
+        """Check all tracked files for drift and optionally revert them."""
+        state = self._sm.load_state()
+        violations: list[dict] = []
+
+        for target_name, target_data in state.get("targets", {}).items():
+            snapshots: dict[str, str] = target_data.get("file_content_snapshots", {})
+            file_hashes: dict[str, str] = target_data.get("file_hashes", {})
+
+            for file_path_str, stored_hash in file_hashes.items():
+                file_path = Path(file_path_str)
+                if not file_path.exists():
+                    continue
+
+                current_hash = hash_file_sha256(file_path) or ""
+                if current_hash == stored_hash:
+                    continue
+
+                violation: dict = {
+                    "target": target_name,
+                    "file_path": file_path_str,
+                    "expected_hash": stored_hash,
+                    "actual_hash": current_hash,
+                    "reverted": False,
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                }
+
+                if revert and file_path_str in snapshots:
+                    try:
+                        file_path.write_text(snapshots[file_path_str], encoding="utf-8")
+                        violation["reverted"] = True
+                        self._logger.warning(
+                            f"ZeroDriftGuarantee: reverted external edit to {file_path_str}"
+                        )
+                    except OSError as exc:
+                        self._logger.error(
+                            f"ZeroDriftGuarantee: failed to revert {file_path_str}: {exc}"
+                        )
+
+                violations.append(violation)
+                self._revert_log.append(violation)
+                if len(self._revert_log) > self._REVERT_LOG_MAX:
+                    self._revert_log = self._revert_log[-self._REVERT_LOG_MAX :]
+
+        return violations

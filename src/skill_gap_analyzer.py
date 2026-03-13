@@ -669,3 +669,294 @@ class CapabilityGapNotifier:
             "or /sync-status to see current drift."
         )
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Agent Capability Gap Report (item 20)
+# ---------------------------------------------------------------------------
+
+# Agent capabilities tracked across harnesses
+_AGENT_CAPABILITIES: list[str] = [
+    "tool_access",       # Can the agent call tools/functions?
+    "memory",            # Does the agent have persistent memory?
+    "context_window",    # How much context does the agent have?
+    "multi_turn",        # Can the agent maintain multi-turn conversation?
+    "sub_agents",        # Can the agent spawn sub-agents?
+    "file_access",       # Can the agent read/write files?
+    "web_search",        # Can the agent search the web?
+    "code_execution",    # Can the agent execute code?
+    "mcp_tools",         # Can the agent call MCP-served tools?
+    "streaming",         # Does the harness support streaming responses?
+]
+
+# Per-harness capability support: True/False/None (unknown)
+_HARNESS_AGENT_CAPABILITIES: dict[str, dict[str, bool | None]] = {
+    "codex": {
+        "tool_access": True,
+        "memory": False,
+        "context_window": True,
+        "multi_turn": True,
+        "sub_agents": True,
+        "file_access": True,
+        "web_search": False,
+        "code_execution": True,
+        "mcp_tools": True,
+        "streaming": True,
+    },
+    "gemini": {
+        "tool_access": True,
+        "memory": False,
+        "context_window": True,
+        "multi_turn": True,
+        "sub_agents": False,
+        "file_access": True,
+        "web_search": True,
+        "code_execution": False,
+        "mcp_tools": True,
+        "streaming": True,
+    },
+    "opencode": {
+        "tool_access": True,
+        "memory": False,
+        "context_window": True,
+        "multi_turn": True,
+        "sub_agents": False,
+        "file_access": True,
+        "web_search": False,
+        "code_execution": False,
+        "mcp_tools": True,
+        "streaming": True,
+    },
+    "cursor": {
+        "tool_access": True,
+        "memory": False,
+        "context_window": True,
+        "multi_turn": True,
+        "sub_agents": False,
+        "file_access": True,
+        "web_search": True,
+        "code_execution": True,
+        "mcp_tools": True,
+        "streaming": True,
+    },
+    "aider": {
+        "tool_access": False,
+        "memory": False,
+        "context_window": True,
+        "multi_turn": True,
+        "sub_agents": False,
+        "file_access": True,
+        "web_search": False,
+        "code_execution": False,
+        "mcp_tools": False,
+        "streaming": True,
+    },
+    "windsurf": {
+        "tool_access": True,
+        "memory": True,
+        "context_window": True,
+        "multi_turn": True,
+        "sub_agents": False,
+        "file_access": True,
+        "web_search": True,
+        "code_execution": True,
+        "mcp_tools": True,
+        "streaming": True,
+    },
+    "cline": {
+        "tool_access": True,
+        "memory": False,
+        "context_window": True,
+        "multi_turn": True,
+        "sub_agents": False,
+        "file_access": True,
+        "web_search": True,
+        "code_execution": True,
+        "mcp_tools": True,
+        "streaming": True,
+    },
+    "continue": {
+        "tool_access": True,
+        "memory": False,
+        "context_window": True,
+        "multi_turn": True,
+        "sub_agents": False,
+        "file_access": True,
+        "web_search": False,
+        "code_execution": False,
+        "mcp_tools": True,
+        "streaming": True,
+    },
+    "zed": {
+        "tool_access": True,
+        "memory": False,
+        "context_window": True,
+        "multi_turn": True,
+        "sub_agents": False,
+        "file_access": True,
+        "web_search": False,
+        "code_execution": False,
+        "mcp_tools": True,
+        "streaming": True,
+    },
+    "neovim": {
+        "tool_access": True,
+        "memory": False,
+        "context_window": True,
+        "multi_turn": True,
+        "sub_agents": False,
+        "file_access": True,
+        "web_search": False,
+        "code_execution": False,
+        "mcp_tools": True,
+        "streaming": True,
+    },
+}
+
+# Claude Code (source harness) capabilities — the gold standard
+_CLAUDE_CODE_CAPABILITIES: dict[str, bool] = {
+    "tool_access": True,
+    "memory": True,
+    "context_window": True,
+    "multi_turn": True,
+    "sub_agents": True,
+    "file_access": True,
+    "web_search": True,
+    "code_execution": True,
+    "mcp_tools": True,
+    "streaming": True,
+}
+
+# Workaround suggestions for capabilities not available in a harness
+_WORKAROUNDS: dict[str, str] = {
+    "memory": "Use CLAUDE.md/AGENTS.md to embed persistent context as static rules.",
+    "sub_agents": "Break multi-agent workflows into sequential prompts or use a script.",
+    "web_search": "Pre-fetch search results and pass as context in your initial prompt.",
+    "code_execution": "Use the harness's built-in terminal integration if available.",
+    "mcp_tools": "Replace MCP tool calls with equivalent inline instructions.",
+    "tool_access": "Describe required tool behavior in rules as manual instructions.",
+}
+
+
+@dataclass
+class AgentCapabilityGap:
+    """A single capability that is lost when syncing agents to a target harness."""
+    capability: str
+    available_in_source: bool
+    available_in_target: bool | None
+    workaround: str
+
+
+@dataclass
+class AgentCapabilityGapReport:
+    """Report showing which agent capabilities are lost per target harness.
+
+    Attributes:
+        target: Target harness name.
+        gaps: List of capability gaps (capabilities present in Claude Code but
+              absent or unknown in the target).
+        coverage_score: Percentage of Claude Code capabilities available (0–100).
+    """
+    target: str
+    gaps: list[AgentCapabilityGap]
+    coverage_score: int
+
+    def format(self) -> str:
+        """Format the gap report for terminal display."""
+        lines = [
+            f"Agent Capability Gap Report — {self.target}",
+            "=" * 50,
+            f"Coverage score: {self.coverage_score}/100",
+            "",
+        ]
+        if not self.gaps:
+            lines.append("All Claude Code agent capabilities are available in this harness.")
+            return "\n".join(lines)
+
+        lines.append("Missing capabilities:")
+        for gap in self.gaps:
+            avail_str = "unavailable" if gap.available_in_target is False else "unknown"
+            lines.append(f"  ✗ {gap.capability:<22} ({avail_str})")
+            if gap.workaround:
+                lines.append(f"    Workaround: {gap.workaround}")
+        return "\n".join(lines)
+
+
+def build_agent_gap_report(target: str) -> AgentCapabilityGapReport:
+    """Build an agent capability gap report for a single target harness.
+
+    Args:
+        target: Target harness name (e.g. "codex", "gemini").
+
+    Returns:
+        AgentCapabilityGapReport for the given target.
+    """
+    target_caps = _HARNESS_AGENT_CAPABILITIES.get(target, {})
+    gaps: list[AgentCapabilityGap] = []
+
+    for cap in _AGENT_CAPABILITIES:
+        source_has = _CLAUDE_CODE_CAPABILITIES.get(cap, False)
+        target_has = target_caps.get(cap)
+        if source_has and not target_has:
+            gaps.append(AgentCapabilityGap(
+                capability=cap,
+                available_in_source=source_has,
+                available_in_target=target_has,
+                workaround=_WORKAROUNDS.get(cap, ""),
+            ))
+
+    total = len(_AGENT_CAPABILITIES)
+    missing = len(gaps)
+    score = int(((total - missing) / total) * 100) if total else 100
+
+    return AgentCapabilityGapReport(target=target, gaps=gaps, coverage_score=score)
+
+
+def build_all_agent_gap_reports(
+    targets: list[str] | None = None,
+) -> list[AgentCapabilityGapReport]:
+    """Build agent capability gap reports for all (or specified) target harnesses.
+
+    Args:
+        targets: Harness names to report. Defaults to all known harnesses.
+
+    Returns:
+        List of AgentCapabilityGapReport sorted by coverage_score descending.
+    """
+    target_list = targets or list(_HARNESS_AGENT_CAPABILITIES.keys())
+    reports = [build_agent_gap_report(t) for t in target_list]
+    return sorted(reports, key=lambda r: r.coverage_score, reverse=True)
+
+
+def format_agent_gap_summary(reports: list[AgentCapabilityGapReport]) -> str:
+    """Format all agent gap reports as a compact summary table.
+
+    Args:
+        reports: List of AgentCapabilityGapReport from build_all_agent_gap_reports().
+
+    Returns:
+        Multi-line table string.
+    """
+    if not reports:
+        return "No agent capability gap data available."
+
+    col_w = 10
+    cap_w = 24
+    header = f"{'Capability':<{cap_w}}" + "".join(f"  {t[:col_w - 1]:<{col_w - 1}}" for t in [r.target for r in reports])
+    sep = "-" * len(header)
+
+    lines = ["Agent Capability Gap Summary", "=" * max(len(sep), 40), "", header, sep]
+
+    for cap in _AGENT_CAPABILITIES:
+        row = f"{cap:<{cap_w}}"
+        for report in reports:
+            target_has = _HARNESS_AGENT_CAPABILITIES.get(report.target, {}).get(cap)
+            cell = "✓" if target_has else ("✗" if target_has is False else "?")
+            row += f"  {cell:>{col_w - 1}}"
+        lines.append(row)
+
+    lines += [sep, "", "Coverage scores:"]
+    for report in reports:
+        lines.append(f"  {report.target:<20} {report.coverage_score:>3}/100")
+
+    return "\n".join(lines)

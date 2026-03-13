@@ -1064,3 +1064,157 @@ class NLConfigGenerator:
             "'enforce async I/O and rate limiting rules'."
         )
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Natural Language Sync Filter (item 24)
+# ---------------------------------------------------------------------------
+
+class NaturalLanguageSyncFilter:
+    """Translate plain-English sync inclusion/exclusion rules to filter predicates.
+
+    Users write human-readable descriptions of what they want to sync or
+    exclude, and this class compiles them into structured filter rules that
+    ``SyncFilter`` can apply.
+
+    Examples::
+
+        nlf = NaturalLanguageSyncFilter()
+        filters = nlf.parse("sync all rules except anything mentioning passwords")
+        # -> [FilterRule(mode="exclude", pattern=re.compile(r"password|passwd|secret", re.I))]
+
+        filters = nlf.parse("only include mcp and rules, skip agents and commands")
+        # -> [FilterRule(mode="include", section="rules"),
+        #     FilterRule(mode="include", section="mcp"),
+        #     FilterRule(mode="exclude", section="agents"),
+        #     FilterRule(mode="exclude", section="commands")]
+    """
+
+    # Canonical section aliases understood in NL input
+    _SECTION_ALIASES: dict[str, str] = {
+        "rule": "rules", "rules": "rules",
+        "skill": "skills", "skills": "skills",
+        "agent": "agents", "agents": "agents",
+        "command": "commands", "commands": "commands",
+        "mcp": "mcp", "mcp server": "mcp", "mcp servers": "mcp",
+        "setting": "settings", "settings": "settings",
+        "hook": "hooks", "hooks": "hooks",
+        "env": "env_vars", "env var": "env_vars", "env vars": "env_vars",
+        "environment variable": "env_vars", "environment variables": "env_vars",
+        "plugin": "plugins", "plugins": "plugins",
+    }
+
+    # Sensitive-content keyword patterns for "except anything mentioning X" clauses
+    _SENSITIVE_KEYWORDS: dict[str, re.Pattern] = {
+        "password": re.compile(r"password|passwd|credentials?|secret", re.I),
+        "token": re.compile(r"\btoken\b|\bapi.?key\b|\bauth\b", re.I),
+        "personal": re.compile(r"\bpersonal\b|\bprivate\b|\bmy\b|\buser\b", re.I),
+        "debug": re.compile(r"\bdebug\b|\bverbose\b|\blog\b", re.I),
+        "experimental": re.compile(r"\bexperimental\b|\bwip\b|\bprototype\b|\bdraft\b", re.I),
+    }
+
+    @dataclass
+    class FilterRule:
+        """A single resolved filter rule."""
+        mode: str               # "include" | "exclude"
+        section: str | None     # HarnessSync section name, or None for content match
+        content_pattern: re.Pattern | None  # Regex applied to rule text content
+        description: str        # Human-readable description of this filter
+
+        def matches_section(self, section: str) -> bool:
+            return self.section is None or self.section == section
+
+        def matches_content(self, content: str) -> bool:
+            if self.content_pattern is None:
+                return True
+            return bool(self.content_pattern.search(content))
+
+    def parse(self, description: str) -> list["NaturalLanguageSyncFilter.FilterRule"]:
+        """Parse a plain-English filter description into FilterRule objects.
+
+        Handles common patterns:
+          - "sync all rules except anything mentioning passwords"
+          - "only mcp and rules"
+          - "skip agents and commands"
+          - "exclude anything with token or secret"
+          - "include only personal skills"
+
+        Args:
+            description: Plain-English filter description.
+
+        Returns:
+            List of FilterRule objects (empty if description is unrecognizable).
+        """
+        rules: list[NaturalLanguageSyncFilter.FilterRule] = []
+        text = description.lower().strip()
+
+        # Split on "except" / "but not" / "excluding" to get include/exclude parts
+        exclude_part = ""
+        include_part = text
+        for splitter in (" except ", " but not ", " excluding ", " without "):
+            if splitter in text:
+                parts = text.split(splitter, 1)
+                include_part = parts[0]
+                exclude_part = parts[1]
+                break
+
+        # Parse include-side sections
+        include_mode = "include"
+        if re.search(r"\b(only|just|solely)\b", include_part):
+            include_mode = "include"
+        elif re.search(r"\b(all|everything|sync all)\b", include_part):
+            include_mode = "include"
+        elif re.search(r"\b(skip|exclude|no|not|ignore)\b", include_part):
+            include_mode = "exclude"
+
+        for alias, section in self._SECTION_ALIASES.items():
+            if re.search(r"\b" + re.escape(alias) + r"\b", include_part):
+                rules.append(self.FilterRule(
+                    mode=include_mode,
+                    section=section,
+                    content_pattern=None,
+                    description=f"{include_mode} section '{section}'",
+                ))
+
+        # Parse content exclusion patterns ("except anything mentioning passwords")
+        if exclude_part:
+            # Check for section exclusions in the except clause
+            for alias, section in self._SECTION_ALIASES.items():
+                if re.search(r"\b" + re.escape(alias) + r"\b", exclude_part):
+                    rules.append(self.FilterRule(
+                        mode="exclude",
+                        section=section,
+                        content_pattern=None,
+                        description=f"exclude section '{section}'",
+                    ))
+
+            # Check for content-based exclusions ("mentioning passwords")
+            for keyword, pattern in self._SENSITIVE_KEYWORDS.items():
+                # Match the keyword with optional trailing 's' (plural) and word boundary
+                if re.search(r"\b" + keyword + r"s?\b", exclude_part):
+                    rules.append(self.FilterRule(
+                        mode="exclude",
+                        section=None,
+                        content_pattern=pattern,
+                        description=f"exclude content matching '{keyword}' pattern",
+                    ))
+
+        return rules
+
+    def format_rules(self, rules: list["NaturalLanguageSyncFilter.FilterRule"]) -> str:
+        """Format parsed filter rules for display.
+
+        Args:
+            rules: Parsed filter rules from :meth:`parse`.
+
+        Returns:
+            Human-readable summary string.
+        """
+        if not rules:
+            return "No filter rules parsed — description not recognized."
+        lines = ["Parsed sync filter rules:"]
+        for r in rules:
+            section_str = f"section={r.section!r}" if r.section else "all sections"
+            content_str = f" matching /{r.content_pattern.pattern}/" if r.content_pattern else ""
+            lines.append(f"  [{r.mode.upper()}] {section_str}{content_str}  — {r.description}")
+        return "\n".join(lines)

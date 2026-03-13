@@ -4027,3 +4027,70 @@ _2026-03-13T11:37:26.930Z_
 - Rule source attribution solves a genuine debugging pain point — when a target harness behaves unexpectedly, users can now trace back to the exact source line rather than scanning all CLAUDE.md files manually
 
 ---
+## Iteration 61
+_2026-03-13T11:53:19.834Z_
+
+### Items Attempted
+
+- **Live Capability Matrix Dashboard** — pass
+- **Sync Conflict Resolution Wizard** — pass
+- **Reverse Sync: Import from Target Harnesses** — pass
+- **Dry-Run Preview Before Sync** — pass
+- **Per-Harness Rule Overrides** — pass
+- **Team Sync Server: Shared Config Hub** — pass
+- **MCP Server Registry Integration** — pass
+- **Proactive Drift Alerts** — pass
+- **Skill Compatibility Linter** — pass
+- **Sync Profiles (Work/Personal/Project)** — pass
+- **Cross-Harness Benchmark Runner** — pass
+- **Config Changelog with Diff History** — pass
+- **Secrets & Env Var Vault Integration** — pass
+- **Cursor & Windsurf Adapters** — pass
+- **Aider Adapter** — pass
+- **VS Code Extension: HarnessSync Panel** — pass
+- **Git Commit Hook: Sync on Commit** — pass
+- **New Harness Onboarding Wizard** — pass
+- **Rule Tagging & Filtering System** — pass
+- **Sync Analytics Dashboard** — pass
+- **Cross-Harness Cost & Token Tracker** — pass
+- **Rule Effectiveness Scoring** — pass
+- **Universal Config Importer** — pass
+- **GitHub Actions Sync Workflow** — pass
+- **Plugin Marketplace Sync** — pass
+- **Cross-Harness Context Window Optimizer** — pass
+- **Harness Config Regression Tests** — pass
+- **Scope Inheritance Visualizer** — pass
+- **One-Click Config Sharing via Gist/Snippet** — pass
+- **Harness Migration Assistant** — pass
+- **Transactional Sync with Rollback** — pass
+- **AI-Powered Rule Suggester** — pass
+- **Sync Webhook Outbound Notifications** — pass
+
+### Decisions Made
+
+- Implemented ReverseSync as a dedicated module (reverse_sync.py) rather than extending MigrationAssistant — migration_assistant.py handles format translation for first-time setup, while reverse_sync.py specifically handles the ongoing 'pull back config that drifted in a target harness' use case with merge strategies
+- Chose 4 merge strategies (append/prepend/replace/new_file) for ReverseSync to match common user needs: append is safe default, new_file is zero-risk for first-time users nervous about overwriting, replace enables idempotent re-imports
+- Added check_before_sync() / check_all_targets_before_sync() / format_pre_sync_warnings() to HarnessFeatureMatrix rather than creating a new module — the matrix already has all the data needed and the methods belong there logically
+- Added format_visual_tree() and format_scope_overview() as module-level functions in config_inheritance.py rather than methods on ConfigInheritance — format_scope_overview() needs no ConfigInheritance instance and is useful standalone
+- Added build_text_diff_preview() / format_text_diff_preview() to native_preview.py — these are natural extensions of build_sync_preview() (which already exists) to produce actual text diffs rather than just status/size
+- Added get_diff_history() / format_diff_history() as module-level functions in changelog_manager.py following the existing record_with_diff() pattern — this avoids breaking ChangelogManager's class interface while adding retrieval capability
+- Stripped HarnessSync-managed blocks from all reverse-sync importers — content we wrote should never be imported back, preventing content duplication on re-import
+
+### Patterns Discovered
+
+- The project consistently uses module-level functions alongside classes for stateless operations — good pattern to continue rather than forcing everything into class methods
+- All persistent config goes to ~/.harnesssync/ (global) or .harness-sync/ (project-local) — the ChangelogManager uses .harness-sync/changelog.md not .harnesssync/, a subtle distinction to watch
+- The sync_filter.py already has comprehensive inline annotation support (@harness:only=, @harness:skip=, Python-style # @codex: skip, etc.) — items asking for per-harness rule annotations are already fully implemented via this module
+- Commands in src/commands/ follow a consistent pattern: PLUGIN_ROOT injection, shlex.split for single-string args, argparse, then delegation to src/ modules
+- Most of the 30 product-ideation items in this iteration already had substantial implementations — the gap is discovering and adding integration points, not writing from scratch
+
+### Takeaways
+
+- ReverseSync fills a genuine gap: migration_assistant.py handles translating foreign formats into Claude Code, but reverse_sync.py specifically handles 'pull back non-managed content from target harnesses' — a meaningfully different workflow
+- The format_visual_tree() addition to config_inheritance.py finally surfaces the multi-layer inheritance model visually — the existing format_chain_summary() was text-only and didn't show scope annotations or harness applicability
+- HarnessFeatureMatrix.check_before_sync() enables proactive warnings at sync time rather than post-hoc — this should be integrated into the orchestrator's pre-sync phase as a best-effort check
+- build_text_diff_preview() generates actual unified diffs vs build_sync_preview()'s file-level status — the distinction matters for users who want 'terraform plan' confidence before syncing
+- The changelog parsing via section-split regex is fragile if changelog format changes — the existing record() method should write more structured markers to make history parsing robust
+- Cursor import correctly skips harnesssync.mdc (files we wrote) by checking for 'harnesssync' in filename — this prevents content loops where we import our own output
+
+---

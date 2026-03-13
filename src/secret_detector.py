@@ -741,3 +741,124 @@ class SecretDetector:
             scrubbed_rules.append(rule_copy)
 
         return scrubbed_rules, all_descriptions
+
+
+# ---------------------------------------------------------------------------
+# Pre-Sync Blocking Secret Scan (item 12)
+# ---------------------------------------------------------------------------
+
+class PreSyncSecretScanResult:
+    """Result of a pre-sync secret scan across all config files about to be synced.
+
+    Attributes:
+        blocked: True if secrets were found that must be resolved before sync.
+        detections: List of detection description strings.
+        files_scanned: Number of files checked.
+        redacted_content: Dict mapping file path string → redacted file content
+                          (only populated when ``redact=True``).
+    """
+
+    def __init__(
+        self,
+        blocked: bool,
+        detections: list[str],
+        files_scanned: int,
+        redacted_content: dict[str, str] | None = None,
+    ) -> None:
+        self.blocked = blocked
+        self.detections = detections
+        self.files_scanned = files_scanned
+        self.redacted_content = redacted_content or {}
+
+    def format(self) -> str:
+        """Format for terminal display."""
+        lines: list[str] = [
+            "Pre-Sync Secret Scan",
+            "=" * 50,
+            f"Files scanned:  {self.files_scanned}",
+            f"Secrets found:  {len(self.detections)}",
+            f"Status:         {'BLOCKED — resolve secrets before syncing' if self.blocked else 'CLEAN — no secrets detected'}",
+        ]
+        if self.detections:
+            lines.append("")
+            lines.append("Detected secrets:")
+            for d in self.detections[:20]:
+                lines.append(f"  ✗ {d}")
+            if len(self.detections) > 20:
+                lines.append(f"  … and {len(self.detections) - 20} more")
+            lines.append("")
+            lines.append("Options:")
+            lines.append("  • Remove secrets from source files before syncing")
+            lines.append("  • Use env var references (e.g. $MY_API_KEY) instead of inline values")
+            lines.append("  • Re-run sync with --allow-secrets to skip this check (not recommended)")
+        return "\n".join(lines)
+
+
+def pre_sync_secret_scan(
+    config_paths: list[str] | None = None,
+    project_dir: "Path | None" = None,
+    redact: bool = False,
+    allow_secrets: bool = False,
+) -> PreSyncSecretScanResult:
+    """Scan config files for secrets before a sync operation.
+
+    This function is intended to be called by the sync orchestrator before
+    writing any target config files.  When secrets are found, it returns a
+    result with ``blocked=True`` so the orchestrator can abort the sync.
+
+    Args:
+        config_paths: Explicit list of file paths to scan.  If None, discovers
+                      all config files in ``project_dir``.
+        project_dir: Root directory for automatic discovery. Defaults to cwd.
+        redact: If True, populate ``redacted_content`` in the result with
+                scrubbed versions that can be used instead of the originals.
+        allow_secrets: If True, always return ``blocked=False`` even when
+                       secrets are detected (escape hatch for CI environments).
+
+    Returns:
+        PreSyncSecretScanResult with scan outcome.
+    """
+    from pathlib import Path as _Path
+
+    detector = SecretDetector()
+    pdir = _Path(project_dir) if project_dir else _Path.cwd()
+
+    # Discover config files if no explicit list provided
+    if config_paths is None:
+        _SCAN_TARGETS = [
+            "CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "GEMINI.md",
+            "CONVENTIONS.md", ".windsurfrules",
+            ".claude/settings.json", ".claude/settings.local.json",
+        ]
+        config_paths = [
+            str(pdir / p) for p in _SCAN_TARGETS if (pdir / p).exists()
+        ]
+
+    all_detections: list[str] = []
+    redacted_map: dict[str, str] = {}
+    files_scanned = 0
+
+    for path_str in config_paths:
+        path = _Path(path_str)
+        if not path.exists():
+            continue
+        files_scanned += 1
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+
+        hits = detector.scan_content(content, source_label=path.name)
+        if hits:
+            all_detections.extend(d.description for d in hits)
+            if redact:
+                scrubbed, _ = detector.scrub_content(content)
+                redacted_map[path_str] = scrubbed
+
+    blocked = bool(all_detections) and not allow_secrets
+    return PreSyncSecretScanResult(
+        blocked=blocked,
+        detections=all_detections,
+        files_scanned=files_scanned,
+        redacted_content=redacted_map if redact else {},
+    )

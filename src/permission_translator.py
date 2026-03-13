@@ -581,3 +581,135 @@ def _infer_approval_label(
     approval_mode = settings.get("approvalMode", settings.get("approval_mode", "suggest"))
     mapping = _APPROVAL_MODE_MAP.get(target, {})
     return mapping.get(str(approval_mode), approval_mode[:8])
+
+
+# ---------------------------------------------------------------------------
+# Permission Security Model Comparator (item 5)
+# ---------------------------------------------------------------------------
+
+# Human-readable explanations of how each permission behaves per harness.
+# Flags semantics that differ significantly from Claude Code.
+_SECURITY_MODEL_DESCRIPTIONS: dict[str, dict[str, str]] = {
+    "shell_execution": {
+        "claude-code": "Bash tool runs commands with full user privileges; approve/deny per-command in suggest mode.",
+        "codex":    "Shell commands in AGENTS.md are executed in a sandboxed container by default; --dangerously-allow-host-access exits sandbox.",
+        "gemini":   "Shell tool executes as the user; gemini-cli has no built-in sandbox.",
+        "cursor":   "Terminal commands run as the user with no additional sandboxing beyond OS permissions.",
+        "aider":    "Aider runs git commands and optionally user-defined scripts; no sandboxing.",
+        "windsurf": "Shell commands execute as the user; Windsurf Flow follows IDE trust model.",
+        "cline":    "Shell commands run as the user inside VS Code's process; no container isolation.",
+        "continue": "Continue.dev does not expose a shell tool by default.",
+        "zed":      "Zed runs commands as the user; no sandboxing beyond OS.",
+        "opencode": "Commands run as the user; opencode inherits terminal permissions.",
+    },
+    "file_write": {
+        "claude-code": "Write/Edit tools modify files directly; all paths accessible unless denied via deniedTools.",
+        "codex":    "File edits are sandboxed; diffs shown before apply; --dangerously-allow-host-access bypasses this.",
+        "gemini":   "File edits applied directly to the working directory with no diff preview by default.",
+        "cursor":   "Cursor applies edits directly; user can review diffs in the IDE before accepting.",
+        "aider":    "Aider always shows a diff and requires confirmation (--yes flag bypasses).",
+        "windsurf": "Cascade applies edits directly; file preview is shown in the IDE.",
+        "cline":    "Cline shows diffs and prompts for approval before writing (configurable).",
+    },
+    "network_access": {
+        "claude-code": "WebFetch/WebSearch tools access the network; can be denied via deniedTools.",
+        "codex":    "Network access is sandboxed by default; --dangerously-allow-host-access enables it.",
+        "gemini":   "Gemini CLI accesses the network for tool calls and grounding; no per-request approval.",
+        "cursor":   "Network requests happen within the IDE process; no separate permission gate.",
+        "aider":    "Aider makes no network requests during editing; LLM API calls are the only network use.",
+    },
+    "env_var_exposure": {
+        "claude-code": "Environment variables in settings.json are injected into the shell; visible to all tools.",
+        "codex":    "Env vars in config.toml are available to shell commands inside the container.",
+        "gemini":   "Env vars in settings.json are available to the gemini-cli process and tools it spawns.",
+        "opencode": "Env vars in opencode.json are available to all tool calls.",
+        "cursor":   "Env vars in .cursor/mcp.json env blocks are passed only to the specific MCP server.",
+    },
+}
+
+# Permission behaviors that differ significantly from Claude Code and warrant a warning
+_SECURITY_DIVERGENCES: dict[str, list[tuple[str, str]]] = {
+    # (harness, permission, warning message)
+    "codex": [
+        ("shell_execution", "Codex sandboxes shell by default — synced allow-all permissions "
+                            "are more restrictive in Codex than in Claude Code."),
+        ("file_write",      "File edits are sandboxed in Codex; --dangerously-allow-host-access "
+                            "exits the sandbox and should be treated as a high-risk permission."),
+    ],
+    "aider": [
+        ("shell_execution", "Aider's --yes flag bypasses confirmation for all commands, similar "
+                            "to Claude Code's acceptEdits mode, but there is no per-command approval."),
+    ],
+    "gemini": [
+        ("network_access",  "Gemini's web search grounding makes network calls automatically with "
+                            "no deny-list equivalent for Claude Code's deniedTools."),
+    ],
+}
+
+
+def compare_security_models(
+    settings: dict,
+    targets: list[str] | None = None,
+) -> str:
+    """Compare how permission settings behave across source and target harnesses.
+
+    Shows a human-readable explanation of what each permission means in Claude Code
+    and in each target harness, and flags where the security models differ in ways
+    that could surprise developers who copy permissions without understanding them.
+
+    Args:
+        settings: Claude Code settings dict (from .claude/settings.json).
+        targets: Harnesses to compare. Defaults to common harnesses.
+
+    Returns:
+        Multi-line explanation string with flagged divergences.
+    """
+    target_list = targets or ["codex", "gemini", "cursor", "aider", "windsurf", "cline", "opencode"]
+
+    lines: list[str] = [
+        "Permission Security Model Comparison",
+        "=" * 60,
+        "",
+        "This report explains how your synced permissions behave differently",
+        "across harnesses — read it before assuming identical security guarantees.",
+        "",
+    ]
+
+    # Determine which permissions are active in the source settings
+    active_permissions: list[str] = []
+    if _infer_shell_allowed(settings, "claude-code", []):
+        active_permissions.append("shell_execution")
+    if _infer_network_allowed(settings, "claude-code", []):
+        active_permissions.append("network_access")
+    file_write = _infer_file_access(settings, "claude-code", [], "write")
+    if file_write is not False:
+        active_permissions.append("file_write")
+
+    env_vars = settings.get("env", {})
+    if env_vars:
+        active_permissions.append("env_var_exposure")
+
+    if not active_permissions:
+        lines.append("No significant permissions detected in the source settings.")
+        return "\n".join(lines)
+
+    for perm in active_permissions:
+        perm_descs = _SECURITY_MODEL_DESCRIPTIONS.get(perm, {})
+        lines.append(f"── {perm.replace('_', ' ').title()} ──")
+        lines.append(f"  Claude Code: {perm_descs.get('claude-code', 'No description available.')}")
+        lines.append("")
+
+        for target in target_list:
+            target_desc = perm_descs.get(target)
+            if target_desc:
+                lines.append(f"  {target:<14} {target_desc}")
+
+            # Check for divergence warnings
+            for t_name, divergences in _SECURITY_DIVERGENCES.items():
+                if t_name == target:
+                    for d_perm, warning in divergences:
+                        if d_perm == perm:
+                            lines.append(f"  {'':14} [WARNING] {warning}")
+        lines.append("")
+
+    return "\n".join(lines)

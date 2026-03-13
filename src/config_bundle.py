@@ -363,3 +363,112 @@ class ConfigBundle:
             return data.get("mcpServers", {})
         except (OSError, ValueError):
             return {}
+
+    # ------------------------------------------------------------------
+    # .harnessbundle archive export/import (item 26)
+    # ------------------------------------------------------------------
+
+    def export_harnessbundle(self, output_path: "str | Path | None" = None) -> "Path":
+        """Export a portable .harnessbundle archive that teammates can import.
+
+        The .harnessbundle format is a ZIP archive containing:
+          - bundle.json   — the canonical bundle manifest (version, files, MCP)
+          - CLAUDE.md, AGENTS.md, GEMINI.md, etc. — config files as individual entries
+          - .harness-sync/mcp-servers.json — MCP config with secrets redacted
+
+        A teammate can call ``import_harnessbundle(path)`` to extract the bundle
+        and immediately replicate the sender's cross-harness AI setup.
+
+        Args:
+            output_path: Destination path for the .harnessbundle file.
+                         Defaults to ``<project_basename>.harnessbundle`` in the
+                         project directory.
+
+        Returns:
+            Path to the written .harnessbundle file.
+        """
+        bundle = self.export()
+
+        if output_path is None:
+            bundle_name = self.project_dir.name or "config"
+            output_path = self.project_dir / f"{bundle_name}.harnessbundle"
+        output_path = Path(output_path)
+
+        with zipfile.ZipFile(output_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            # Write the bundle manifest
+            zf.writestr("bundle.json", json.dumps(bundle, indent=2, ensure_ascii=False))
+
+            # Write individual config files for easy inspection
+            for rel_path, content in bundle.get("files", {}).items():
+                zf.writestr(rel_path, content.encode("utf-8") if isinstance(content, str) else content)
+
+            # Write redacted MCP config separately
+            mcp = bundle.get("mcp_servers", {})
+            if mcp:
+                mcp_json = json.dumps({"mcpServers": mcp}, indent=2, ensure_ascii=False)
+                zf.writestr(".harness-sync/mcp-servers.json", mcp_json.encode("utf-8"))
+
+        return output_path
+
+    @classmethod
+    def import_harnessbundle(
+        cls,
+        bundle_path: "str | Path",
+        target_dir: "str | Path | None" = None,
+        dry_run: bool = False,
+    ) -> dict:
+        """Import a .harnessbundle archive into a target directory.
+
+        Extracts config files from the bundle and writes them into ``target_dir``,
+        allowing a teammate to replicate an AI setup across all harnesses in seconds.
+
+        Secrets are never present in the archive (they are redacted on export),
+        so import is safe to run in any directory.
+
+        Args:
+            bundle_path: Path to the .harnessbundle file to import.
+            target_dir: Directory to write config files into.  Defaults to cwd.
+            dry_run: If True, return what would be written without writing anything.
+
+        Returns:
+            Dict with keys:
+              ``files_written``: list of relative paths written.
+              ``mcp_servers``: dict of MCP server configs (with <REDACTED> values).
+              ``bundle_meta``: dict of bundle metadata (created_at, creator, etc.).
+        """
+        bundle_path = Path(bundle_path)
+        target_dir = Path(target_dir) if target_dir else Path.cwd()
+
+        if not bundle_path.exists():
+            raise FileNotFoundError(f"Bundle not found: {bundle_path}")
+
+        files_written: list[str] = []
+        mcp_servers: dict = {}
+        bundle_meta: dict = {}
+
+        with zipfile.ZipFile(bundle_path, mode="r") as zf:
+            names = set(zf.namelist())
+
+            # Read manifest
+            if "bundle.json" in names:
+                bundle_meta = json.loads(zf.read("bundle.json").decode("utf-8"))
+                mcp_servers = bundle_meta.get("mcp_servers", {})
+
+            # Write individual config files
+            for name in names:
+                if name in ("bundle.json", ".harness-sync/mcp-servers.json"):
+                    continue
+                dest = target_dir / name
+                if not dry_run:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes(zf.read(name))
+                files_written.append(name)
+
+        return {
+            "files_written": sorted(files_written),
+            "mcp_servers": mcp_servers,
+            "bundle_meta": {
+                k: v for k, v in bundle_meta.items()
+                if k not in ("files", "mcp_servers")
+            },
+        }

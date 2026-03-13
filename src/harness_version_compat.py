@@ -1719,3 +1719,178 @@ def get_installed_vs_required_table(project_dir: Path | None = None) -> str:
         lines.append("\nAll installed harnesses meet feature requirements.")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Config Version Pinning (item 23)
+# ---------------------------------------------------------------------------
+
+_PIN_STORE_PATH = Path.home() / ".harnesssync" / "version_pins.json"
+
+
+@dataclass
+class VersionPin:
+    """A snapshot of the HarnessSync source config pinned at a specific point.
+
+    Pinning records the source-side config hash at a moment in time.  When
+    the source drifts from the pin, a notification is emitted so that teams
+    running stable AI-assisted workflows can decide consciously when to
+    accept config changes.
+
+    Attributes:
+        harness: Target harness the pin applies to (or "all").
+        pinned_hash: SHA-256 hash of the source config at pin time.
+        pinned_at: ISO 8601 timestamp when the pin was created.
+        label: Optional human-readable label (e.g. "v1.2-stable").
+        notify_on_drift: Whether to notify when source drifts from this pin.
+    """
+    harness: str
+    pinned_hash: str
+    pinned_at: str
+    label: str = ""
+    notify_on_drift: bool = True
+
+
+def _load_pins() -> dict[str, VersionPin]:
+    """Load pins from the persistent pin store."""
+    if not _PIN_STORE_PATH.exists():
+        return {}
+    try:
+        data = json.loads(_PIN_STORE_PATH.read_text(encoding="utf-8"))
+        return {
+            k: VersionPin(
+                harness=k,
+                pinned_hash=v.get("pinned_hash", ""),
+                pinned_at=v.get("pinned_at", ""),
+                label=v.get("label", ""),
+                notify_on_drift=v.get("notify_on_drift", True),
+            )
+            for k, v in data.items()
+        }
+    except Exception:
+        return {}
+
+
+def _save_pins(pins: dict[str, VersionPin]) -> None:
+    """Persist pins to the pin store."""
+    _PIN_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        k: {
+            "pinned_hash": p.pinned_hash,
+            "pinned_at": p.pinned_at,
+            "label": p.label,
+            "notify_on_drift": p.notify_on_drift,
+        }
+        for k, p in pins.items()
+    }
+    _PIN_STORE_PATH.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def pin_config_version(
+    harness: str,
+    source_hash: str,
+    label: str = "",
+    notify_on_drift: bool = True,
+) -> VersionPin:
+    """Pin the current source config hash for a harness.
+
+    Records the current hash so future syncs can detect when the source
+    has changed relative to the pin.
+
+    Args:
+        harness: Harness name to pin, or "all" to pin all harnesses.
+        source_hash: SHA-256 hash of the source config at pin time.
+        label: Optional descriptive label (e.g. "v1.2-stable").
+        notify_on_drift: Emit a notification when source drifts from pin.
+
+    Returns:
+        The created VersionPin.
+    """
+    from datetime import datetime, timezone
+    pins = _load_pins()
+    pin = VersionPin(
+        harness=harness,
+        pinned_hash=source_hash,
+        pinned_at=datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        label=label,
+        notify_on_drift=notify_on_drift,
+    )
+    pins[harness] = pin
+    _save_pins(pins)
+    return pin
+
+
+def check_pin_drift(
+    harness: str,
+    current_source_hash: str,
+) -> dict:
+    """Check whether the current source config has drifted from its pin.
+
+    Args:
+        harness: Harness name to check.
+        current_source_hash: SHA-256 hash of the current source config.
+
+    Returns:
+        Dict with keys:
+          ``pinned``: bool — True if a pin exists for this harness.
+          ``drifted``: bool — True if the current hash differs from the pin.
+          ``pin``: The VersionPin (or None if not pinned).
+          ``message``: Human-readable status message.
+    """
+    pins = _load_pins()
+    pin = pins.get(harness) or pins.get("all")
+    if pin is None:
+        return {"pinned": False, "drifted": False, "pin": None, "message": f"No pin set for '{harness}'."}
+
+    drifted = pin.pinned_hash != current_source_hash
+    label_str = f" ({pin.label})" if pin.label else ""
+    if drifted:
+        msg = (
+            f"Config has drifted from pin set on {pin.pinned_at}{label_str}. "
+            f"Review changes before syncing to '{harness}'."
+        )
+    else:
+        msg = f"Config matches pin set on {pin.pinned_at}{label_str} — no drift detected."
+
+    return {"pinned": True, "drifted": drifted, "pin": pin, "message": msg}
+
+
+def list_pins() -> str:
+    """Return a formatted list of all active version pins.
+
+    Returns:
+        Human-readable table of pins.
+    """
+    pins = _load_pins()
+    if not pins:
+        return "No version pins configured. Use /sync-pin to create one."
+
+    lines = [
+        "Active Version Pins",
+        "=" * 50,
+        f"{'Harness':<16} {'Pinned At':<26} {'Label':<20} Drift-Notify",
+        "-" * 80,
+    ]
+    for harness, pin in sorted(pins.items()):
+        notify_str = "yes" if pin.notify_on_drift else "no"
+        lines.append(
+            f"{harness:<16} {pin.pinned_at:<26} {pin.label[:20]:<20} {notify_str}"
+        )
+    return "\n".join(lines)
+
+
+def remove_pin(harness: str) -> bool:
+    """Remove the version pin for a harness.
+
+    Args:
+        harness: Harness name to unpin.
+
+    Returns:
+        True if a pin was removed, False if no pin existed.
+    """
+    pins = _load_pins()
+    if harness not in pins:
+        return False
+    del pins[harness]
+    _save_pins(pins)
+    return True

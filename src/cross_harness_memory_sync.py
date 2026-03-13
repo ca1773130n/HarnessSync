@@ -454,3 +454,87 @@ class CrossHarnessMemorySync:
         for r in results:
             lines.append(r.format())
         return "\n".join(lines)
+
+    def diff_memories(
+        self,
+        target: str,
+        target_path: Path,
+    ) -> list[dict]:
+        """Compare Claude Code memory files against the synced content in a target.
+
+        Returns a list of diff entries showing which memories are new, changed,
+        or unchanged in the target harness.  Helps users understand what will
+        be overwritten before running a full memory sync.
+
+        Args:
+            target: Target harness name (e.g. "gemini").
+            target_path: Path to the target harness's memory file/directory.
+
+        Returns:
+            List of dicts with keys: ``name``, ``status`` (new/changed/unchanged),
+            ``source_snippet`` (first 80 chars), ``target_snippet``.
+        """
+        source_memories = self._discover_memories()
+        if not source_memories:
+            return []
+
+        diffs: list[dict] = []
+
+        if target_path.is_file():
+            try:
+                target_content = target_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                target_content = ""
+        else:
+            target_content = ""
+
+        for mem in source_memories:
+            snippet = mem.content[:80].replace("\n", " ").strip()
+            in_target = mem.name in target_content or snippet[:40] in target_content
+            status = "unchanged" if in_target else ("new" if not target_content else "changed")
+            diffs.append({
+                "name": mem.name,
+                "status": status,
+                "source_snippet": snippet,
+                "target_snippet": (target_content[:80].replace("\n", " ").strip() if not in_target else snippet),
+            })
+
+        return diffs
+
+    def format_diff_summary(self, diffs: list[dict]) -> str:
+        """Format memory diff results for terminal display.
+
+        Args:
+            diffs: List of diff dicts from :meth:`diff_memories`.
+
+        Returns:
+            Human-readable diff summary string.
+        """
+        if not diffs:
+            return "No memory differences found."
+
+        new = [d for d in diffs if d["status"] == "new"]
+        changed = [d for d in diffs if d["status"] == "changed"]
+        unchanged = [d for d in diffs if d["status"] == "unchanged"]
+
+        lines = [
+            "Memory Sync Diff Preview",
+            "=" * 50,
+            f"  New:       {len(new)}",
+            f"  Changed:   {len(changed)}",
+            f"  Unchanged: {len(unchanged)}",
+            "",
+        ]
+
+        for d in new:
+            lines.append(f"  + [{d['name']}] {d['source_snippet'][:60]}")
+        for d in changed:
+            lines.append(f"  ~ [{d['name']}] {d['source_snippet'][:60]}")
+
+        if unchanged and len(unchanged) <= 5:
+            for d in unchanged:
+                lines.append(f"  = [{d['name']}] (no change)")
+
+        lines.append("")
+        lines.append("Run /sync-memory to apply these changes to target harnesses.")
+        return "\n".join(lines)

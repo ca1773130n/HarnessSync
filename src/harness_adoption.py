@@ -1280,6 +1280,90 @@ class SkillUsageAnalytics:
         lines.append("Tip: Remove never-used skills to reduce harness config size.")
         return "\n".join(lines)
 
+    def format_heatmap(
+        self,
+        known_skills: list[str] | None = None,
+        harnesses: list[str] | None = None,
+        top_n: int = 20,
+    ) -> str:
+        """Format a 2D heatmap grid of skill invocations by harness.
+
+        Rows = top-N skills by total invocations.
+        Columns = harnesses.
+        Cell value = invocation count (0 shown as '.').
+
+        Dead skills (never invoked) are listed below the grid so users
+        can decide which to prune.
+
+        Args:
+            known_skills: All known skill names. Used to list never-used skills.
+            harnesses: Harnesses to include as columns.
+            top_n: Maximum number of skills to show in the heatmap grid.
+
+        Returns:
+            Multi-line heatmap string suitable for terminal display.
+        """
+        if known_skills is None:
+            known_skills = _discover_skill_names(self.project_dir)
+
+        # Determine harness columns from union of all recorded harnesses
+        all_harnesses: list[str] = harnesses or sorted(
+            {h for rec in self._records.values() for h in rec.by_harness}
+        )
+        if not all_harnesses:
+            all_harnesses = ["claude-code"]
+
+        # Select top-N skills by total invocations
+        top_records = sorted(self._records.values(), key=lambda r: r.total, reverse=True)[:top_n]
+
+        if not top_records:
+            return "No skill invocations recorded yet. Use /sync to start tracking."
+
+        # Column widths
+        skill_w = max((len(r.name) for r in top_records), default=10) + 2
+        col_w = max(max(len(h) for h in all_harnesses), 4) + 1
+
+        # Header row
+        header = f"{'Skill':<{skill_w}}"
+        for h in all_harnesses:
+            header += f"  {h[:col_w - 1]:<{col_w - 1}}"
+        header += "  Total"
+
+        sep = "-" * len(header)
+
+        lines: list[str] = [
+            "Skill Usage Heatmap",
+            "=" * max(len(sep), 40),
+            "",
+            header,
+            sep,
+        ]
+
+        for rec in top_records:
+            row = f"{rec.name:<{skill_w}}"
+            for h in all_harnesses:
+                count = rec.by_harness.get(h, 0)
+                cell = str(count) if count > 0 else "."
+                row += f"  {cell:>{col_w - 1}}"
+            row += f"  {rec.total:>5}"
+            lines.append(row)
+
+        lines.append(sep)
+
+        # Dead skills
+        used_names = {rec.name for rec in self._records.values() if rec.total > 0}
+        dead = [s for s in known_skills if s not in used_names]
+        if dead:
+            lines.append("")
+            lines.append(f"Dead skills ({len(dead)} never invoked):")
+            lines.append("  " + "  ".join(dead[:15]))
+            if len(dead) > 15:
+                lines.append(f"  … and {len(dead) - 15} more")
+
+        lines.append("")
+        lines.append("Higher counts = more cross-harness value. '.' = not used in that harness.")
+        return "\n".join(lines)
+
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------

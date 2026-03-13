@@ -407,6 +407,79 @@ class BenchmarkReport:
             indent=2,
         )
 
+    def format_side_by_side(self, width: int = 120) -> str:
+        """Format benchmark results as a side-by-side column comparison.
+
+        Renders up to 3 harnesses in adjacent columns so users can compare
+        rule coverage, tool availability, and capability gaps at a glance —
+        verifying that synced rules produce consistent harness setups.
+
+        Args:
+            width: Total terminal width to fill. Defaults to 120.
+
+        Returns:
+            Multi-line string with harness columns laid out side by side.
+        """
+        if not self.results:
+            return "No benchmark results available."
+
+        # Limit to top 3 harnesses for readability
+        cols = self.results[:3]
+        n = len(cols)
+        col_w = max(30, (width - (n - 1) * 3) // n)
+
+        def _pad(text: str, w: int) -> str:
+            return text[:w].ljust(w)
+
+        # Build per-harness content blocks as lists of lines
+        def _harness_lines(r: HarnessBenchmarkResult) -> list[str]:
+            bar_len = r.score // 10
+            score_bar = "#" * bar_len + "." * (10 - bar_len)
+            block = [
+                f"{r.harness.upper()}  score={r.score}/100",
+                f"[{score_bar}]",
+                "",
+                f"Rules matched: {len(r.rule_matches)}",
+            ]
+            for rule in r.rule_matches[:4]:
+                block.append(f"  • {rule[:col_w - 6]}")
+            if len(r.rule_matches) > 4:
+                block.append(f"  … +{len(r.rule_matches) - 4} more")
+            block += [
+                "",
+                f"Tools available: {len(r.available_tools)}",
+            ]
+            for tool in r.available_tools[:4]:
+                block.append(f"  • {tool[:col_w - 6]}")
+            if len(r.available_tools) > 4:
+                block.append(f"  … +{len(r.available_tools) - 4} more")
+            block += ["", f"Skills: {len(r.skill_matches)}"]
+            for skill in r.skill_matches[:3]:
+                block.append(f"  • {skill[:col_w - 6]}")
+            block += ["", "Missing:"]
+            if r.missing_capabilities:
+                for cap in r.missing_capabilities:
+                    block.append(f"  ✗ {cap[:col_w - 6]}")
+            else:
+                block.append("  (none)")
+            block += ["", r.notes[:col_w] if r.notes else ""]
+            return block
+
+        col_blocks = [_harness_lines(r) for r in cols]
+        max_rows = max(len(b) for b in col_blocks)
+        for b in col_blocks:
+            b += [""] * (max_rows - len(b))
+
+        sep_line = (" | ".join("─" * col_w for _ in range(n)))
+        title = f"Side-by-Side Benchmark: {self.prompt[:width - 25]}"
+        lines: list[str] = [title, "=" * len(title), "", sep_line]
+        for row_idx in range(max_rows):
+            row = " | ".join(_pad(col_blocks[i][row_idx], col_w) for i in range(n))
+            lines.append(row)
+        lines.append(sep_line)
+        lines.append(f"\nWinner: {self.winner}  |  Run /sync to align configs.")
+        return "\n".join(lines)
+
 
 # ── PromptBenchmark main class ──────────────────────────────────────────────
 

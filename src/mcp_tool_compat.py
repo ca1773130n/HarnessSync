@@ -836,3 +836,155 @@ def format_server_warnings(
 
     lines.append("")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# MCP Server Portability Advisor (item 3)
+# ---------------------------------------------------------------------------
+
+# Known MCP server → harness-native equivalents database
+# Maps server name patterns to per-harness alternatives
+_MCP_EQUIVALENTS: dict[str, dict[str, str]] = {
+    "github": {
+        "cursor":   "GitHub Copilot (built-in) — provides file, PR, and issue context natively",
+        "windsurf": "GitHub Copilot extension for Windsurf",
+        "cline":    "github MCP server (same package, cline supports stdio)",
+        "codex":    "codex has native GitHub context via AGENTS.md; MCP adds extra tools",
+    },
+    "filesystem": {
+        "aider":    "Aider natively reads/writes files — MCP filesystem server not needed",
+        "cursor":   "Cursor has native file access — MCP filesystem server adds little value",
+        "zed":      "Zed has built-in file system access; MCP server is redundant",
+    },
+    "playwright": {
+        "cursor":   "Install Playwright MCP extension from Cursor Extensions marketplace",
+        "cline":    "Playwright MCP (same package) works natively with cline stdio support",
+        "continue": "No direct Continue.dev equivalent; use a browser-testing CI step instead",
+    },
+    "context7": {
+        "cursor":   "No direct Cursor equivalent; copy context7 prompts into .cursor/rules/",
+        "gemini":   "No Gemini CLI equivalent; add library docs to GEMINI.md manually",
+        "codex":    "No Codex equivalent; embed relevant docs snippets in AGENTS.md",
+    },
+    "sqlite": {
+        "cursor":   "DB queries supported via Cursor's built-in terminal; MCP adds structure",
+        "aider":    "Aider cannot execute DB queries; use CLI tools and pipe output as context",
+    },
+    "brave-search": {
+        "gemini":   "Gemini 2.0 has native web search via Google Search grounding",
+        "cursor":   "Cursor has no built-in web search; keep MCP server if available",
+        "codex":    "Codex has no built-in web search; keep MCP server",
+    },
+    "memory": {
+        "windsurf": "Windsurf Memories (native) — use .windsurf/memories/ directory instead",
+        "cursor":   "Cursor has no native memory; consider using a persistent .mdc always-apply rule",
+        "gemini":   "Use GEMINI.md as static memory — no dynamic memory MCP equivalent",
+    },
+}
+
+# MCP server name normalization: strip common package prefixes/suffixes
+_NAME_NORMALIZERS = [
+    (r"^@modelcontextprotocol/server-", ""),
+    (r"^mcp-server-", ""),
+    (r"^mcp-", ""),
+    (r"-mcp$", ""),
+]
+
+
+def _normalize_server_name(raw_name: str) -> str:
+    """Strip common prefixes/suffixes from an MCP server name for lookup."""
+    import re as _re
+    name = raw_name.lower()
+    for pattern, repl in _NAME_NORMALIZERS:
+        name = _re.sub(pattern, repl, name)
+    return name
+
+
+def suggest_alternatives(
+    server_name: str,
+    config: dict,
+    targets: list[str] | None = None,
+) -> dict[str, str]:
+    """Return harness-native alternatives for an MCP server that can't be synced.
+
+    Looks up the server name in a curated equivalents database and returns
+    per-harness suggestions.  Only returns entries for ``targets`` where the
+    server has portability issues (score < 70).
+
+    Args:
+        server_name: Logical MCP server name (e.g. "github", "playwright").
+        config: Server config dict (used to compute portability scores).
+        targets: Harnesses to consider. Defaults to ALL_HARNESSES.
+
+    Returns:
+        Dict mapping harness name → alternative/workaround description.
+        Empty dict if the server is fully portable or has no known alternatives.
+    """
+    target_list = targets or ALL_HARNESSES
+    scores = portability_score(server_name, config, target_list)
+
+    # Find targets where this server has portability problems
+    problem_targets = {t for t, s in scores.items() if s < 70}
+    if not problem_targets:
+        return {}
+
+    # Normalize the server name for lookup
+    canonical = _normalize_server_name(server_name)
+
+    # Also try the full name in case of an exact match
+    equivalents = _MCP_EQUIVALENTS.get(canonical, _MCP_EQUIVALENTS.get(server_name, {}))
+
+    return {
+        t: equivalents[t]
+        for t in problem_targets
+        if t in equivalents
+    }
+
+
+def format_portability_advice(
+    mcp_servers: dict[str, dict],
+    targets: list[str] | None = None,
+) -> str:
+    """Format portability advice for a set of MCP servers.
+
+    Shows which servers have portability issues across which harnesses,
+    with per-harness alternative suggestions from the equivalents database.
+
+    Args:
+        mcp_servers: Dict mapping server name -> config dict.
+        targets: Harnesses to check. Defaults to ALL_HARNESSES.
+
+    Returns:
+        Multi-line advice string, or empty string if all servers are portable.
+    """
+    if not mcp_servers:
+        return "No MCP servers configured."
+
+    target_list = targets or ALL_HARNESSES
+    advice_lines: list[str] = []
+
+    for server_name, config in sorted(mcp_servers.items()):
+        scores = portability_score(server_name, config, target_list)
+        alts = suggest_alternatives(server_name, config, target_list)
+
+        problem_targets = sorted(t for t, s in scores.items() if s < 70)
+        if not problem_targets:
+            continue
+
+        advice_lines.append(f"\n{server_name}:")
+        for target in problem_targets:
+            score = scores.get(target, 0)
+            alt = alts.get(target, "No known equivalent — manual workaround required.")
+            sym = "✗" if score == 0 else "⚠"
+            advice_lines.append(f"  {sym} [{target}]  score={score}  →  {alt}")
+
+    if not advice_lines:
+        return "All configured MCP servers are portable across all target harnesses."
+
+    header = [
+        "MCP Server Portability Advice",
+        "=" * 60,
+        "Servers listed below have portability issues in some harnesses.",
+        "Scores: 100=fully compatible  0=completely unsupported",
+    ]
+    return "\n".join(header + advice_lines + [""])

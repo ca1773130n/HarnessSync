@@ -338,3 +338,114 @@ def extract_routing_hints_from_settings_file(settings_path: "Path") -> ModelRout
         data = {}
     adapter = ModelRoutingAdapter()
     return adapter.read_from_settings(data)
+
+
+# ---------------------------------------------------------------------------
+# Model-Specific Instruction Tuning (item 28)
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+
+# Markers used inside CLAUDE.md rule text to embed model-specific variants.
+# Format:
+#   <!-- model:gemini-2.0-flash -->
+#   <shorter variant of the rule>
+#   <!-- /model:gemini-2.0-flash -->
+_MODEL_BLOCK_RE = _re.compile(
+    r"<!--\s*model:(?P<model>[^\s>]+)\s*-->(?P<content>.*?)<!--\s*/model:[^\s>]+\s*-->",
+    _re.DOTALL | _re.IGNORECASE,
+)
+
+# Maps target harness → primary model identifier (used to select the right variant)
+_HARNESS_PRIMARY_MODEL: dict[str, str] = {
+    "gemini":   "gemini-2.0-flash",
+    "codex":    "claude-sonnet-4-6",
+    "opencode": "claude-sonnet-4-6",
+    "cursor":   "claude-sonnet-4-6",
+    "aider":    "gpt-4o",
+    "windsurf": "claude-sonnet-4-6",
+    "cline":    "claude-sonnet-4-6",
+    "continue": "claude-sonnet-4-6",
+    "zed":      "claude-sonnet-4-6",
+    "neovim":   "claude-sonnet-4-6",
+}
+
+
+def extract_model_variant(rule_text: str, target: str) -> str:
+    """Extract the model-specific variant of a rule for a given target harness.
+
+    Scans ``rule_text`` for ``<!-- model:X --> ... <!-- /model:X -->`` blocks.
+    If a block exists for the target harness's primary model, returns the
+    block's content instead of the full rule text — giving that harness a
+    tailored, often shorter instruction that better fits its capabilities.
+
+    If no matching block is found, returns the original ``rule_text`` unchanged
+    (with model blocks stripped so other harnesses don't see the markup).
+
+    Args:
+        rule_text: Rule content potentially containing model-specific blocks.
+        target: Target harness name (e.g. "gemini", "codex").
+
+    Returns:
+        Rule text with the best-matching model variant selected.
+    """
+    primary_model = _HARNESS_PRIMARY_MODEL.get(target, "")
+    if not primary_model or not _MODEL_BLOCK_RE.search(rule_text):
+        return rule_text
+
+    # First pass: look for an exact match on the target's primary model
+    for match in _MODEL_BLOCK_RE.finditer(rule_text):
+        model_tag = match.group("model").strip().lower()
+        if primary_model.lower().startswith(model_tag) or model_tag in primary_model.lower():
+            # Return the variant content surrounded by the non-model text
+            variant_content = match.group("content").strip()
+            outer = _MODEL_BLOCK_RE.sub("", rule_text).strip()
+            if outer:
+                return outer + "\n\n" + variant_content
+            return variant_content
+
+    # No exact variant found — strip all model blocks and return base text
+    return _MODEL_BLOCK_RE.sub("", rule_text).strip()
+
+
+def inject_model_variant(
+    rule_text: str,
+    model_id: str,
+    variant_text: str,
+) -> str:
+    """Insert a model-specific variant block into a rule.
+
+    Appends a ``<!-- model:X --> ... <!-- /model:X -->`` block to the rule,
+    allowing HarnessSync to select the right variant when syncing to a harness
+    that primarily uses that model.
+
+    Args:
+        rule_text: Original rule content.
+        model_id: Model identifier for the variant (e.g. "gemini-2.0-flash").
+        variant_text: Shorter or adapted instruction text for this model.
+
+    Returns:
+        Updated rule text with the model variant appended.
+    """
+    variant_block = (
+        f"\n\n<!-- model:{model_id} -->\n"
+        f"{variant_text.strip()}\n"
+        f"<!-- /model:{model_id} -->"
+    )
+    return rule_text.rstrip() + variant_block
+
+
+def list_model_variants(rule_text: str) -> list[dict]:
+    """List all model-specific variants embedded in a rule.
+
+    Args:
+        rule_text: Rule content potentially containing model variant blocks.
+
+    Returns:
+        List of dicts with keys ``model`` and ``content`` for each variant found.
+    """
+    return [
+        {"model": m.group("model"), "content": m.group("content").strip()}
+        for m in _MODEL_BLOCK_RE.finditer(rule_text)
+    ]
