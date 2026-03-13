@@ -175,6 +175,65 @@ class DesktopNotifier:
         )
         return self._send(title, body, urgency=_URGENCY_CRITICAL)
 
+    def notify_drift_detected(
+        self,
+        target: str,
+        drifted_files: list[str],
+        likely_cause: str = "",
+    ) -> bool:
+        """Send a notification when out-of-band drift is detected in a target harness.
+
+        Fired by the ambient drift watcher (DriftWatcher) when it detects
+        that a target's config files have been modified outside of HarnessSync.
+        Unlike notify_conflict_detected (which covers post-sync manual edits),
+        this covers real-time drift caught by the background watcher.
+
+        Args:
+            target:        Harness name where drift was detected.
+            drifted_files: List of file paths that drifted (relative to project_dir).
+            likely_cause:  Optional human-readable root-cause hint from DriftWatcher.
+
+        Returns:
+            True if a notification was sent.
+        """
+        if not self._enabled:
+            return False
+        title = f"{_APP_NAME}: Drift detected — {target}"
+        count = len(drifted_files)
+        s = "s" if count != 1 else ""
+        body_parts = [f"{count} file{s} in {target} changed outside HarnessSync."]
+        if likely_cause:
+            body_parts.append(f"Likely: {likely_cause}.")
+        body_parts.append("Run /sync-status to review drift.")
+        body = " ".join(body_parts)
+        if len(body) > _MAX_BODY:
+            body = body[:_MAX_BODY - 3] + "..."
+        return self._send(title, body, urgency=_URGENCY_CRITICAL)
+
+    def notify_sync_failed(self, target: str, reason: str = "") -> bool:
+        """Send a notification when sync to a specific target fails.
+
+        Complements notify_sync_error with a clearer user-facing message
+        that includes the target name prominently and suggests next steps.
+
+        Args:
+            target: Harness name that failed to sync.
+            reason: Short error reason (e.g. "file permission denied").
+
+        Returns:
+            True if a notification was sent.
+        """
+        if not self._enabled:
+            return False
+        title = f"{_APP_NAME}: Sync FAILED — {target}"
+        body = f"Could not sync to {target}"
+        if reason:
+            body += f": {reason[:100]}"
+        body += ". Run /sync-status for details."
+        if len(body) > _MAX_BODY:
+            body = body[:_MAX_BODY - 3] + "..."
+        return self._send(title, body, urgency=_URGENCY_CRITICAL)
+
     # ------------------------------------------------------------------
     # Platform dispatch
     # ------------------------------------------------------------------

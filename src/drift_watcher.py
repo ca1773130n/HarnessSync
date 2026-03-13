@@ -634,7 +634,16 @@ def make_notifying_alert_callback(
 
         sent = False
         if notify:
-            sent = send_os_notification(title, body)
+            # Use the richer notify_drift_detected method when available
+            try:
+                from src.desktop_notifier import DesktopNotifier
+                notifier = DesktopNotifier(enabled=True)
+                sent = notifier.notify_drift_detected(
+                    target=alert.target,
+                    drifted_files=[alert.file_path],
+                )
+            except Exception:
+                sent = send_os_notification(title, body)
 
         # Also post to Slack if webhook configured
         if _slack_url:

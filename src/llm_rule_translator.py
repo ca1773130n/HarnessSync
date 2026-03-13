@@ -57,6 +57,31 @@ class TranslationResult:
         if self.lost_capabilities is None:
             self.lost_capabilities = []
 
+    # Item 8 — Numeric 0-100 quality score
+    @property
+    def confidence_score(self) -> int:
+        """Return a numeric translation quality score from 0 to 100.
+
+        Maps the categorical confidence level to a numeric range, then
+        applies a penalty for each lost capability. Scores below 70 are
+        flagged for manual review per the Rule Translation Quality Score spec.
+
+        Returns:
+            Integer score in [0, 100]. Higher is better.
+            - High:   90 (base) − 5 per lost capability
+            - Medium: 65 (base) − 5 per lost capability
+            - Low:    30 (base) − 5 per lost capability
+        """
+        _base = {"High": 90, "Medium": 65, "Low": 30}
+        base = _base.get(self.confidence, 65)
+        penalty = min(len(self.lost_capabilities) * 5, base)
+        return max(0, base - penalty)
+
+    @property
+    def needs_manual_review(self) -> bool:
+        """Return True if the quality score is below the 70-point review threshold."""
+        return self.confidence_score < 70
+
     def format(self, include_annotation: bool = True) -> str:
         """Return formatted translated content with optional annotation header."""
         if self.skipped:
@@ -64,7 +89,8 @@ class TranslationResult:
         lines = []
         if self.best_effort and include_annotation:
             method = "LLM (best effort)" if self.used_llm else "regex (best effort)"
-            conf_tag = f" confidence='{self.confidence}'"
+            score = self.confidence_score
+            conf_tag = f" confidence='{self.confidence}' score='{score}'"
             lines.append(
                 f"<!-- hs:translated target='{self.target}' method='{method}'{conf_tag} -->"
             )
@@ -73,13 +99,20 @@ class TranslationResult:
             if self.lost_capabilities:
                 lost_str = "; ".join(self.lost_capabilities)
                 lines.append(f"<!-- hs:lost {lost_str} -->")
+            if self.needs_manual_review:
+                lines.append(
+                    f"<!-- hs:review-needed score={score} "
+                    "(below 70 — manual review recommended) -->"
+                )
         lines.append(self.translated)
         return "\n".join(lines)
 
     def format_confidence_summary(self) -> str:
         """Return a one-line confidence summary for user display."""
         conf_emoji = {"High": "✓", "Medium": "~", "Low": "✗"}.get(self.confidence, "?")
-        summary = f"[{conf_emoji} {self.confidence}]"
+        score = self.confidence_score
+        flag = " ⚠ REVIEW" if self.needs_manual_review else ""
+        summary = f"[{conf_emoji} {self.confidence} {score}/100{flag}]"
         if self.lost_capabilities:
             summary += f" Lost: {', '.join(self.lost_capabilities)}"
         return summary

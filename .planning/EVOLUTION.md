@@ -3687,3 +3687,74 @@ _2026-03-13T10:15:06.956Z_
 - Translation confidence scoring is a cross-cutting concern that benefits from being co-located with the TranslationResult type rather than in a separate module — callers get confidence for free with every translation.
 
 ---
+## Iteration 56
+_2026-03-13T10:31:21.558Z_
+
+### Items Attempted
+
+- **Sync Conflict Resolution Wizard** — pass
+- **Live Capability Matrix Dashboard** — pass
+- **Selective Sync Profiles** — pass
+- **Git Commit Sync Hook** — pass
+- **Add New Harness Onboarding Wizard** — pass
+- **MCP Server Compatibility Checker** — pass
+- **Team Config Broadcast** — pass
+- **Harness Parity Score** — pass
+- **Skill Translation Hints** — pass
+- **Timed Rollback Snapshots** — pass
+- **Dry-Run Preview Mode** — pass
+- **CI/CD Sync Action** — pass
+- **Permission Boundary Visualizer** — pass
+- **Rule Tagging & Filtering System** — pass
+- **Harness Usage Insights** — pass
+- **PR Sync Diff Annotations** — pass
+- **Offline Sync Queue** — pass
+- **Config Lint Enforcer** — pass
+- **Context-Aware Env Var Mapping** — pass
+- **Auto-Detect & Install Missing Harnesses** — pass
+- **Sync Event Webhooks** — pass
+- **Rules Inheritance Model** — pass
+- **Sync Simulation Sandbox** — pass
+- **Harness Config Importer** — pass
+- **Plugin Ecosystem Bridge** — pass
+- **Proactive Sync Health Alerts** — pass
+- **Model Preference Sync** — pass
+- **Multi-Machine Config Sync** — pass
+- **Community Adapter Plugin API** — pass
+- **Sync Operation Cost Estimator** — pass
+- **Deprecated Config Warnings** — pass
+- **One-Click Restore to Source Truth** — pass
+- **Skill Usage Analytics** — pass
+- **Sync on Machine Wake** — pass
+- **Harness Version Pinning** — pass
+- **Interactive Scope Selector for Sync** — pass
+- **Sync Time Machine** — pass
+
+### Decisions Made
+
+- Created src/commands/sync_permissions.py as a new /sync-permissions command (Item 13) — the permission_translator.py had a full PermissionTranslator class but no command entry point to surface it to users. The command supports --target, --gaps-only, --json, and --scope flags.
+- Added --gaps-only flag to sync_matrix.py (Item 2) — format_matrix() now accepts gaps_only=True to filter the capability matrix to only rows where at least one target drops the feature, making it faster to identify unsupported sections.
+- Integrated ConflictResolutionWizard into sync.py (Item 1) — replaced the bare cd.resolve_interactive() call with ConflictResolutionWizard.run_interactive() which provides plain-English explanations of each conflict. Added a graceful fallback to the basic resolver if the wizard fails.
+- Added parity scores to sync_status.py output (Item 8) — added a 'Harness Parity Scores' section using ASCII progress bars after the health scores section. Reuses the _score function and _SUPPORT_MATRIX from sync_parity.py.
+- Added stale harness detection to sync_status.py (Item 15) — added a 'Usage Insights' section showing ⚠ warnings for harnesses exceeding the default staleness threshold, using HarnessAdoptionAnalyzer.
+- Integrated inject_agent_translation_hints into orchestrator.py (Item 9) — added Step 5 in per-target data processing that reads each agent file, injects translation hint comment blocks explaining missing Claude Code features, writes to a temp dir if hints were added, and passes updated paths to adapters.
+- Added _model_routing_summary tracking to orchestrator.py (Item 27) — when model preferences are injected into target settings, the target+model mapping is collected and returned as results['_model_routing_summary'] for display after sync.
+- Surfaced model routing summary in sync.py _display_results (Item 27) — after the upgrade notices, the model preference sync annotation is displayed so users see which model was synced to which harness.
+
+### Patterns Discovered
+
+- The codebase follows a consistent pattern of wrapping non-critical post-processing in try/except with pass, ensuring that feature enhancements never break the core sync flow.
+- Results metadata is passed between orchestrator and display layer via _prefixed keys in the results dict — this is a clean pattern for non-result metadata.
+- Command entry points in src/commands/ always check sys.stdin.isatty() before interactive prompts and handle ARGUMENTS env var for Claude Code invocation context.
+- Agent/skill data flows as {name: Path} dicts through the pipeline, with content read lazily by adapters — this means injecting transformed content requires writing to temp files, which is a tradeoff of the lazy-loading pattern.
+- The gaps_only filter pattern (skip rows without any DROPPED cells) is reusable for any matrix/report that wants to surface 'problem areas only'.
+
+### Takeaways
+
+- Many feature modules (skill_translator.py, permission_translator.py, harness_adoption.py) were fully implemented but had no command entry point or integration in the orchestrator — the value was locked behind unused code.
+- The ConflictResolutionWizard was defined but not connected to sync.py; the existing code used lower-level ConflictDetector methods directly, missing the plain-English explanation layer.
+- The model routing was correctly integrated in the orchestrator but silently succeeded with no user-visible feedback — adding the summary required only ~10 lines of tracking code.
+- The orchestrator's per-target data processing (Steps 1-4) is a clean extension point for new transformations; Step 5 (translation hints) fits naturally in this chain.
+- The test suite is thin (28 tests) relative to the codebase size, which means integration-level changes are largely unguarded by automated tests.
+
+---

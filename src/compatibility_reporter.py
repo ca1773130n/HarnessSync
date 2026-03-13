@@ -1497,3 +1497,165 @@ class GapTracker:
                 if g.logged_at:
                     lines.append(f"      logged: {g.logged_at}")
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Item 21 — Sync Coverage Report
+# ---------------------------------------------------------------------------
+# "Like code coverage but for config" — shows what percentage of Claude Code's
+# total config (rules, skills, MCP servers, settings) is successfully
+# represented in each target harness.
+
+
+def generate_sync_coverage_report(
+    source_data: dict,
+    targets: list[str],
+) -> str:
+    """Generate a full sync coverage report showing config parity per target.
+
+    Computes how much of the total Claude Code configuration is faithfully
+    represented in each target harness. Like code coverage but for config:
+
+    - "covered" = section synced with native support (counts 100%)
+    - "adapted" = section synced with translation loss (counts 70%)
+    - "missing"  = section present in CC but not in target (counts 0%)
+
+    Args:
+        source_data: Output of SourceReader.discover_all() or similar dict
+                     with keys: rules, skills, agents, commands, mcp_servers, settings.
+        targets: List of harness names to report on.
+
+    Returns:
+        Multi-line coverage report string. Designed to be printed directly
+        to the user or included in /sync-status output.
+    """
+    # Section → (source_data_key, weight, harness_support_map)
+    # harness_support_map: target -> "full"|"partial"|"none"
+    _SECTION_META: list[tuple[str, str, float, dict[str, str]]] = [
+        ("rules", "rules", 2.0, {
+            "codex": "full", "gemini": "full", "opencode": "full",
+            "cursor": "full", "aider": "full", "windsurf": "full",
+            "cline": "full", "continue": "full", "zed": "full", "neovim": "full",
+        }),
+        ("skills", "skills", 1.5, {
+            "codex": "partial", "gemini": "partial", "opencode": "full",
+            "cursor": "partial", "aider": "none", "windsurf": "partial",
+            "cline": "partial", "continue": "none", "zed": "none", "neovim": "none",
+        }),
+        ("agents", "agents", 1.0, {
+            "codex": "partial", "gemini": "partial", "opencode": "partial",
+            "cursor": "partial", "aider": "none", "windsurf": "partial",
+            "cline": "none", "continue": "none", "zed": "none", "neovim": "none",
+        }),
+        ("commands", "commands", 1.0, {
+            "codex": "partial", "gemini": "partial", "opencode": "partial",
+            "cursor": "partial", "aider": "none", "windsurf": "partial",
+            "cline": "none", "continue": "none", "zed": "none", "neovim": "none",
+        }),
+        ("mcp_servers", "mcp_servers", 1.5, {
+            "codex": "partial", "gemini": "full", "opencode": "full",
+            "cursor": "full", "aider": "none", "windsurf": "partial",
+            "cline": "full", "continue": "full", "zed": "full", "neovim": "full",
+        }),
+        ("settings", "settings", 1.0, {
+            "codex": "partial", "gemini": "partial", "opencode": "partial",
+            "cursor": "none", "aider": "partial", "windsurf": "none",
+            "cline": "partial", "continue": "none", "zed": "none", "neovim": "partial",
+        }),
+    ]
+
+    _SUPPORT_PCT: dict[str, float] = {"full": 1.0, "partial": 0.7, "none": 0.0}
+
+    # Determine active sections (non-empty in source_data)
+    active: list[tuple[str, str, float, dict[str, str]]] = []
+    for display_name, data_key, weight, support_map in _SECTION_META:
+        val = source_data.get(data_key)
+        if val:
+            active.append((display_name, data_key, weight, support_map))
+
+    if not active:
+        return "No config found in source. Run from a Claude Code project directory."
+
+    # Compute total weighted config "points" available
+    total_weight = sum(w for _, _, w, _ in active)
+
+    lines = [
+        "Sync Coverage Report",
+        "=" * 60,
+        f"Source sections: {len(active)} active"
+        + (f" ({', '.join(s for s, *_ in active)})" if active else ""),
+        "",
+    ]
+
+    col_target = 14
+    col_score = 8
+    col_bar = 22
+    col_label = 10
+
+    header = (
+        f"  {'Target':<{col_target}}"
+        f"{'Coverage':>{col_score}}"
+        f"  {'Progress':<{col_bar}}"
+        f"{'Quality':<{col_label}}"
+    )
+    lines.append(header)
+    lines.append("  " + "-" * (col_target + col_score + col_bar + col_label + 2))
+
+    target_rows: list[tuple[str, float, str, str]] = []
+    for target in targets:
+        weighted_sum = 0.0
+        covered = []
+        adapted = []
+        missing = []
+
+        for section, _, weight, support_map in active:
+            support = support_map.get(target, "full" if section == "rules" else "none")
+            pct = _SUPPORT_PCT[support]
+            weighted_sum += pct * weight
+            if support == "full":
+                covered.append(section)
+            elif support == "partial":
+                adapted.append(section)
+            else:
+                missing.append(section)
+
+        score_pct = weighted_sum / total_weight * 100
+        score_int = round(score_pct)
+
+        if score_int >= 90:
+            label = "excellent"
+        elif score_int >= 75:
+            label = "good"
+        elif score_int >= 50:
+            label = "fair"
+        else:
+            label = "poor"
+
+        target_rows.append((target, score_pct, label, (covered, adapted, missing)))
+
+    # Sort by score descending
+    target_rows.sort(key=lambda r: r[1], reverse=True)
+
+    for target, score_pct, label, (covered, adapted, missing) in target_rows:
+        score_int = round(score_pct)
+        bar_filled = int(score_pct / 5)
+        bar = "█" * bar_filled + "░" * (20 - bar_filled)
+        row = (
+            f"  {target:<{col_target}}"
+            f"{score_int:>6}%  "
+            f"[{bar}]  "
+            f"{label:<{col_label}}"
+        )
+        lines.append(row)
+        if adapted:
+            lines.append(f"  {'':{col_target}}  ~ adapted: {', '.join(adapted)}")
+        if missing:
+            lines.append(f"  {'':{col_target}}  ✗ missing: {', '.join(missing)}")
+
+    lines.append("")
+    lines.append(
+        "Coverage = weighted fidelity across active config sections.\n"
+        "Adapted sections sync with translation loss. Missing sections are dropped.\n"
+        "Run /sync-gaps for actionable recommendations on improving coverage."
+    )
+    return "\n".join(lines)

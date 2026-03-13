@@ -10,6 +10,7 @@ Also identifies skills that exist in target harnesses but have no source in
 Claude Code (orphaned skill copies).
 """
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -404,3 +405,267 @@ class SkillGapAnalyzer:
             elif item.is_dir():
                 names.append(item.name)
         return names
+
+
+# ---------------------------------------------------------------------------
+# Item 1 — Real-Time Capability Gap Alerts
+# ---------------------------------------------------------------------------
+
+# MCP features that some targets cannot replicate at all
+_MCP_UNSUPPORTED_TARGETS: dict[str, str] = {
+    "aider": "Aider has no native MCP support; servers must be invoked manually",
+    "cline": "Cline supports MCP but requires manual wiring in VS Code settings",
+    "zed": "Zed AI does not yet support MCP servers",
+    "neovim": "Avante/Neovim has no MCP server support",
+}
+
+# Skill features that some targets cannot replicate
+_SKILL_UNSUPPORTED_REASONS: dict[str, str] = {
+    "aider": "Aider does not support skill files; embed skill content in CONVENTIONS.md",
+    "zed": "Zed has no concept of skills; use .zed/prompts/ as an approximation",
+    "neovim": "Avante does not support skill files natively",
+}
+
+
+@dataclass
+class CapabilityGapAlert:
+    """A single capability gap alert for a newly-added skill or MCP server."""
+
+    item_type: str       # "skill" or "mcp_server"
+    item_name: str       # Name of the skill or MCP server key
+    affected_targets: list[str]   # Targets that can't fully replicate this item
+    reasons: dict[str, str]       # target -> why it can't be replicated
+
+    def format(self) -> str:
+        """Return a human-readable alert string."""
+        lines = [
+            f"Capability gap: new {self.item_type} '{self.item_name}' "
+            f"cannot fully sync to {len(self.affected_targets)} target(s):"
+        ]
+        for target in sorted(self.affected_targets):
+            reason = self.reasons.get(target, "limited support")
+            lines.append(f"  {target}: {reason}")
+        return "\n".join(lines)
+
+    def format_short(self) -> str:
+        """Return a single-line summary suitable for desktop notifications."""
+        targets_str = ", ".join(sorted(self.affected_targets[:3]))
+        suffix = f" +{len(self.affected_targets) - 3} more" if len(self.affected_targets) > 3 else ""
+        return (
+            f"New {self.item_type} '{self.item_name}' won't fully sync to: "
+            f"{targets_str}{suffix}"
+        )
+
+
+class CapabilityGapNotifier:
+    """Detects new skills/MCP servers and surfaces capability gap alerts.
+
+    Maintains a snapshot of known skills and MCP servers in a state file.
+    On each call to ``check()``, compares the current state against the
+    snapshot and returns alerts for newly-added items that can't fully
+    replicate to all active targets.
+
+    This solves the "why doesn't this work in Codex?" confusion hours after
+    syncing a new skill or MCP server.
+
+    Args:
+        project_dir: Project root directory.
+        cc_home: Claude Code home directory (defaults to ~/.claude).
+        state_file: Path to the JSON state file for tracking known items.
+                    Defaults to project_dir/.harness-sync/gap-notifier-state.json
+    """
+
+    def __init__(
+        self,
+        project_dir: Path,
+        cc_home: Path | None = None,
+        state_file: Path | None = None,
+    ) -> None:
+        self.project_dir = project_dir
+        self.cc_home = cc_home or Path.home() / ".claude"
+        self._state_file = (
+            state_file
+            or project_dir / ".harness-sync" / "gap-notifier-state.json"
+        )
+
+    def _load_state(self) -> dict:
+        """Load previous known-items state from the JSON state file."""
+        if not self._state_file.exists():
+            return {"skills": [], "mcp_servers": []}
+        try:
+            data = json.loads(self._state_file.read_text(encoding="utf-8"))
+            return {
+                "skills": list(data.get("skills", [])),
+                "mcp_servers": list(data.get("mcp_servers", [])),
+            }
+        except (json.JSONDecodeError, OSError):
+            return {"skills": [], "mcp_servers": []}
+
+    def _save_state(self, state: dict) -> None:
+        """Persist the current known-items state to the JSON state file."""
+        try:
+            self._state_file.parent.mkdir(parents=True, exist_ok=True)
+            self._state_file.write_text(
+                json.dumps(state, indent=2), encoding="utf-8"
+            )
+        except OSError:
+            pass  # Non-fatal — next check will re-detect the same items
+
+    def _current_skills(self) -> set[str]:
+        """Discover current skill names from ~/.claude/skills/."""
+        skills_dir = self.cc_home / "skills"
+        if not skills_dir.is_dir():
+            return set()
+        return {
+            d.name
+            for d in skills_dir.iterdir()
+            if d.is_dir() and (d / "SKILL.md").is_file()
+        }
+
+    def _current_mcp_servers(self) -> set[str]:
+        """Discover current MCP server names from ~/.claude.json."""
+        claude_json = self.cc_home.parent / ".claude.json"
+        if not claude_json.exists():
+            claude_json = Path.home() / ".claude.json"
+        if not claude_json.exists():
+            return set()
+        try:
+            data = json.loads(claude_json.read_text(encoding="utf-8"))
+            servers = data.get("mcpServers", {})
+            if isinstance(servers, dict):
+                return set(servers.keys())
+        except (json.JSONDecodeError, OSError):
+            pass
+        return set()
+
+    def _active_targets(self) -> list[str]:
+        """Detect active sync targets from known output files."""
+        analyzer = SkillGapAnalyzer(self.project_dir, self.cc_home)
+        return analyzer._detect_active_targets()
+
+    def _skill_alerts_for(
+        self, new_skills: set[str], active_targets: list[str]
+    ) -> list[CapabilityGapAlert]:
+        """Return gap alerts for newly-added skills."""
+        alerts: list[CapabilityGapAlert] = []
+        for skill_name in sorted(new_skills):
+            affected: list[str] = []
+            reasons: dict[str, str] = {}
+            for target in active_targets:
+                if target in _SKILL_UNSUPPORTED_TARGETS:
+                    affected.append(target)
+                    reasons[target] = _SKILL_UNSUPPORTED_REASONS.get(
+                        target, f"{target} does not support skill sync"
+                    )
+            if affected:
+                alerts.append(CapabilityGapAlert(
+                    item_type="skill",
+                    item_name=skill_name,
+                    affected_targets=affected,
+                    reasons=reasons,
+                ))
+        return alerts
+
+    def _mcp_alerts_for(
+        self, new_servers: set[str], active_targets: list[str]
+    ) -> list[CapabilityGapAlert]:
+        """Return gap alerts for newly-added MCP servers."""
+        alerts: list[CapabilityGapAlert] = []
+        for server_name in sorted(new_servers):
+            affected: list[str] = []
+            reasons: dict[str, str] = {}
+            for target in active_targets:
+                if target in _MCP_UNSUPPORTED_TARGETS:
+                    affected.append(target)
+                    reasons[target] = _MCP_UNSUPPORTED_TARGETS[target]
+            if affected:
+                alerts.append(CapabilityGapAlert(
+                    item_type="mcp_server",
+                    item_name=server_name,
+                    affected_targets=affected,
+                    reasons=reasons,
+                ))
+        return alerts
+
+    def check(
+        self,
+        notify: bool = False,
+        update_state: bool = True,
+    ) -> list[CapabilityGapAlert]:
+        """Check for new skills/MCP servers and return capability gap alerts.
+
+        Compares current skills and MCP servers against the last-known state.
+        Newly-added items that can't fully replicate to all active targets
+        generate CapabilityGapAlert entries.
+
+        Args:
+            notify: If True, fire desktop notifications for each alert
+                    (requires HARNESSSYNC_NOTIFY=1 env var).
+            update_state: If True, save the current state after checking so
+                          the same items don't alert again next call.
+
+        Returns:
+            List of CapabilityGapAlert entries for newly-detected items.
+            Empty if nothing new was added or no gaps exist.
+        """
+        state = self._load_state()
+        known_skills = set(state["skills"])
+        known_mcp = set(state["mcp_servers"])
+
+        current_skills = self._current_skills()
+        current_mcp = self._current_mcp_servers()
+        active_targets = self._active_targets()
+
+        new_skills = current_skills - known_skills
+        new_mcp = current_mcp - known_mcp
+
+        alerts: list[CapabilityGapAlert] = []
+        if active_targets:
+            alerts.extend(self._skill_alerts_for(new_skills, active_targets))
+            alerts.extend(self._mcp_alerts_for(new_mcp, active_targets))
+
+        if notify and alerts:
+            self._fire_notifications(alerts)
+
+        if update_state:
+            self._save_state({
+                "skills": sorted(current_skills),
+                "mcp_servers": sorted(current_mcp),
+            })
+
+        return alerts
+
+    def _fire_notifications(self, alerts: list[CapabilityGapAlert]) -> None:
+        """Send desktop notifications for capability gap alerts."""
+        try:
+            from src.desktop_notifier import DesktopNotifier
+            notifier = DesktopNotifier()
+            for alert in alerts:
+                notifier._send(
+                    f"HarnessSync: Capability Gap — {alert.item_name}",
+                    alert.format_short(),
+                    urgency="normal",
+                )
+        except Exception:
+            pass  # Notifications are best-effort
+
+    def format_alerts(self, alerts: list[CapabilityGapAlert]) -> str:
+        """Format a list of capability gap alerts as human-readable text.
+
+        Args:
+            alerts: List of CapabilityGapAlert from check().
+
+        Returns:
+            Formatted multi-line string, or empty string if no alerts.
+        """
+        if not alerts:
+            return ""
+        lines = ["## Capability Gap Alerts", ""]
+        for alert in alerts:
+            lines.append(alert.format())
+            lines.append("")
+        lines.append(
+            "Run /sync-gaps for a full capability gap analysis, "
+            "or /sync-status to see current drift."
+        )
+        return "\n".join(lines)

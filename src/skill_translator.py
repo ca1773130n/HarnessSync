@@ -938,3 +938,152 @@ def format_skill_translation_report(
                  f"({len(skill_paths)} skill(s) across {len(targets)} target(s))")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Item 10 — Harness-Specific Skill Variants (fallback versions)
+# ---------------------------------------------------------------------------
+#
+# A skill can define harness-specific fallback variants by placing additional
+# files alongside SKILL.md in the skill directory:
+#
+#     ~/.claude/skills/my-skill/
+#         SKILL.md               ← canonical Claude Code version
+#         SKILL.codex.md         ← fallback for Codex
+#         SKILL.gemini.md        ← fallback for Gemini
+#         SKILL.fallback.md      ← fallback for ALL other harnesses
+#
+# If a harness-specific variant file exists it is used verbatim (no
+# translation applied). If only the generic SKILL.fallback.md exists it is
+# used for any target without a dedicated variant. Otherwise the normal
+# translate_skill_content() pipeline runs.
+#
+# This mirrors "responsive design but for AI config" — the author
+# explicitly controls the degraded experience instead of accepting silent
+# auto-translation.
+
+_VARIANT_CANDIDATES = [
+    # Most specific → least specific
+    "SKILL.{target}.md",
+    "SKILL.fallback.md",
+]
+
+
+def get_skill_variant_path(skill_dir: Path, target: str) -> Path | None:
+    """Return the path to a harness-specific skill variant file, if one exists.
+
+    Checks for ``SKILL.<target>.md`` first, then the generic
+    ``SKILL.fallback.md``. Returns None if neither variant is present,
+    indicating that the normal translation pipeline should be used.
+
+    Args:
+        skill_dir: Directory containing the skill (e.g. ~/.claude/skills/my-skill).
+        target: Target harness name (e.g. "codex", "gemini").
+
+    Returns:
+        Path to the variant file, or None if no variant is defined.
+    """
+    for pattern in _VARIANT_CANDIDATES:
+        candidate = skill_dir / pattern.format(target=target)
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def translate_skill_with_variant(
+    skill_dir: Path,
+    target: str,
+    skill_file: str = "SKILL.md",
+) -> tuple[str, str]:
+    """Translate a skill for a target harness, using fallback variants when available.
+
+    Resolution order:
+    1. Harness-specific variant: ``SKILL.<target>.md`` → returned verbatim.
+    2. Generic fallback variant: ``SKILL.fallback.md`` → returned verbatim.
+    3. Canonical skill file: ``SKILL.md`` → passed through translate_skill_content().
+
+    Args:
+        skill_dir: Skill directory (e.g. ~/.claude/skills/my-skill/).
+        target: Target harness name.
+        skill_file: Name of the canonical skill file (default: SKILL.md).
+
+    Returns:
+        Tuple of (content, variant_used) where:
+          - content: Translated/variant content string (empty if skill unreadable).
+          - variant_used: One of "harness-specific", "generic-fallback", or "translated".
+    """
+    variant_path = get_skill_variant_path(skill_dir, target)
+    if variant_path is not None:
+        try:
+            content = variant_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            content = ""
+        variant_type = (
+            "harness-specific"
+            if variant_path.name != "SKILL.fallback.md"
+            else "generic-fallback"
+        )
+        return content, variant_type
+
+    # Fall through to normal translation
+    canonical = skill_dir / skill_file
+    content = translate_skill_file(canonical, target)
+    return content, "translated"
+
+
+def list_skill_variants(skill_dir: Path) -> dict[str, str]:
+    """List all harness-specific variant files present in a skill directory.
+
+    Args:
+        skill_dir: Skill root directory (e.g. ~/.claude/skills/my-skill/).
+
+    Returns:
+        Dict mapping target name (or "fallback") to the variant filename.
+        E.g. {"codex": "SKILL.codex.md", "fallback": "SKILL.fallback.md"}
+    """
+    variants: dict[str, str] = {}
+    if not skill_dir.is_dir():
+        return variants
+    for f in skill_dir.iterdir():
+        if not f.is_file():
+            continue
+        name = f.name
+        if name == "SKILL.fallback.md":
+            variants["fallback"] = name
+        elif name.startswith("SKILL.") and name.endswith(".md"):
+            target = name[len("SKILL."):-len(".md")]
+            if target and target not in ("fallback",):
+                variants[target] = name
+    return variants
+
+
+def format_variant_summary(skill_dir: Path) -> str:
+    """Format a human-readable summary of variant coverage for a skill.
+
+    Args:
+        skill_dir: Skill root directory.
+
+    Returns:
+        Multi-line summary string.
+    """
+    variants = list_skill_variants(skill_dir)
+    skill_name = skill_dir.name
+    lines = [f"Skill variants for '{skill_name}':"]
+    if not variants:
+        lines.append("  No harness-specific variants defined.")
+        lines.append("  All targets use auto-translation from SKILL.md.")
+        lines.append(
+            "  Tip: Add SKILL.fallback.md to control the experience in "
+            "harnesses that translate poorly."
+        )
+    else:
+        for key, filename in sorted(variants.items()):
+            label = "all other harnesses" if key == "fallback" else key
+            lines.append(f"  {label}: {filename} (verbatim — no auto-translation)")
+        has_fallback = "fallback" in variants
+        if not has_fallback:
+            lines.append("")
+            lines.append(
+                "  Tip: Add SKILL.fallback.md to catch harnesses without a dedicated variant."
+            )
+    return "\n".join(lines)

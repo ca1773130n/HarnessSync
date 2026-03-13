@@ -30,6 +30,7 @@ Usage::
 
 import json
 import re
+import os
 import shutil
 import subprocess
 import urllib.error
@@ -473,3 +474,336 @@ def _find_skill_file(skill_dir: Path) -> str:
     for p in skill_dir.glob("*.md"):
         return p.name
     return ""
+
+
+# ---------------------------------------------------------------------------
+# Item 22 — Community Adapter Registry
+# ---------------------------------------------------------------------------
+# Lets users publish and install adapters for harnesses not officially
+# supported by HarnessSync. Someone builds a Continue.dev adapter, publishes
+# it tagged "harnesssync-adapter", and everyone benefits.
+
+_ADAPTER_TOPIC = "harnesssync-adapter"
+_ADAPTER_SEARCH_URL = (
+    "https://api.github.com/search/repositories"
+    f"?q=topic:{_ADAPTER_TOPIC}&sort=stars&order=desc&per_page=30"
+)
+
+# Curated offline fallback for community adapters
+_CURATED_ADAPTERS: list[dict] = [
+    {
+        "name": "continue-adapter",
+        "full_name": "harnesssync-community/adapter-continue",
+        "description": "HarnessSync adapter for Continue.dev — syncs rules and skills to .continue/",
+        "harness": "continue",
+        "stars": 0,
+        "topics": [_ADAPTER_TOPIC, "continue-dev"],
+        "clone_url": "",
+        "html_url": "",
+        "source": "curated",
+    },
+    {
+        "name": "zed-adapter",
+        "full_name": "harnesssync-community/adapter-zed",
+        "description": "HarnessSync adapter for Zed editor AI — syncs rules to .zed/system-prompt.md",
+        "harness": "zed",
+        "stars": 0,
+        "topics": [_ADAPTER_TOPIC, "zed-editor"],
+        "clone_url": "",
+        "html_url": "",
+        "source": "curated",
+    },
+]
+
+
+@dataclass
+class AdapterEntry:
+    """A community adapter listed in the registry."""
+
+    name: str
+    full_name: str
+    description: str
+    harness: str        # Target harness this adapter supports
+    stars: int = 0
+    topics: list[str] = None
+    clone_url: str = ""
+    html_url: str = ""
+    source: str = "github"
+
+    def __post_init__(self) -> None:
+        if self.topics is None:
+            self.topics = []
+
+    def format_summary(self) -> str:
+        """Return a one-line summary for display."""
+        return (
+            f"{self.name:<30}  harness={self.harness:<12}  ★{self.stars:<5}  "
+            f"{self.description[:60]}"
+        )
+
+
+@dataclass
+class AdapterInstallResult:
+    """Result of installing a community adapter."""
+
+    adapter_name: str
+    harness: str
+    success: bool
+    adapter_dir: Path | None = None
+    error: str = ""
+    summary: str = ""
+
+
+class CommunityAdapterRegistry:
+    """Browse and install community-published HarnessSync adapters.
+
+    Community members publish adapters by creating a GitHub repo tagged with
+    ``harnesssync-adapter``. Each adapter repo contains:
+    - ``adapter.py``: The adapter class implementing AdapterBase.
+    - ``adapter.json``: Metadata (harness name, version, description).
+    - ``README.md``: Usage instructions.
+
+    Once installed, the adapter is registered with the AdapterRegistry and
+    becomes available as a sync target.
+
+    Args:
+        adapters_dir: Directory to install community adapters into.
+                      Defaults to ~/.harnesssync/community-adapters/
+        github_token: Optional GitHub API token for higher rate limits.
+    """
+
+    def __init__(
+        self,
+        adapters_dir: Path | None = None,
+        github_token: str | None = None,
+    ) -> None:
+        self._adapters_dir = adapters_dir or (
+            Path.home() / ".harnesssync" / "community-adapters"
+        )
+        self._github_token = github_token or os.environ.get("GITHUB_TOKEN", "")
+
+    def search(self, query: str = "", harness: str = "") -> list[AdapterEntry]:
+        """Search the community adapter registry.
+
+        Queries GitHub for repos tagged ``harnesssync-adapter``, then filters
+        by ``query`` (keyword in name/description) and/or ``harness`` name.
+        Falls back to the curated built-in list when GitHub is unreachable.
+
+        Args:
+            query: Keyword to filter by (matched against name and description).
+            harness: Target harness name to filter by (e.g. "continue").
+
+        Returns:
+            List of AdapterEntry results sorted by stars descending.
+        """
+        entries = self._fetch_from_github() or self._curated_entries()
+
+        if query:
+            q = query.lower()
+            entries = [
+                e for e in entries
+                if q in e.name.lower() or q in e.description.lower()
+            ]
+        if harness:
+            entries = [e for e in entries if e.harness == harness]
+
+        return sorted(entries, key=lambda e: e.stars, reverse=True)
+
+    def _fetch_from_github(self) -> list[AdapterEntry] | None:
+        """Fetch adapter entries from GitHub topic search. Returns None on failure."""
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        if self._github_token:
+            headers["Authorization"] = f"token {self._github_token}"
+        try:
+            req = urllib.request.Request(_ADAPTER_SEARCH_URL, headers=headers)
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return None
+
+        entries: list[AdapterEntry] = []
+        for item in data.get("items", []):
+            # Infer harness from topics or description
+            topics = item.get("topics", [])
+            harness = ""
+            for t in topics:
+                if t.startswith("adapter-") and t != _ADAPTER_TOPIC:
+                    harness = t[len("adapter-"):]
+                    break
+            if not harness:
+                # Try to infer from description
+                desc = (item.get("description") or "").lower()
+                for h in ("codex", "gemini", "cursor", "windsurf", "aider",
+                          "continue", "zed", "neovim", "cline", "opencode"):
+                    if h in desc:
+                        harness = h
+                        break
+
+            entries.append(AdapterEntry(
+                name=_repo_to_name(item.get("full_name", "")),
+                full_name=item.get("full_name", ""),
+                description=item.get("description") or "",
+                harness=harness,
+                stars=item.get("stargazers_count", 0),
+                topics=topics,
+                clone_url=item.get("clone_url", ""),
+                html_url=item.get("html_url", ""),
+                source="github",
+            ))
+        return entries
+
+    def _curated_entries(self) -> list[AdapterEntry]:
+        """Return the built-in curated adapter list."""
+        return [
+            AdapterEntry(**{k: v for k, v in a.items()})
+            for a in _CURATED_ADAPTERS
+        ]
+
+    def install(self, repo: str, harness: str = "") -> AdapterInstallResult:
+        """Install a community adapter from GitHub.
+
+        Clones the adapter repository into the community adapters directory
+        and validates that it contains an ``adapter.py`` module. The adapter
+        is NOT automatically registered — users must call ``/sync-registry add``
+        to activate it, giving them a chance to review the code first.
+
+        Args:
+            repo: GitHub repo in ``owner/name`` format, or a full HTTPS/SSH URL.
+            harness: Target harness name (used for the install directory name).
+                     Inferred from adapter.json if empty.
+
+        Returns:
+            AdapterInstallResult with success status and install path.
+        """
+        clone_url = _repo_to_clone_url(repo)
+        adapter_name = _repo_to_name(repo)
+        dest = self._adapters_dir / adapter_name
+
+        if dest.exists():
+            return AdapterInstallResult(
+                adapter_name=adapter_name,
+                harness=harness,
+                success=False,
+                error=f"Adapter already installed at {dest}. Remove it first to reinstall.",
+            )
+
+        try:
+            self._adapters_dir.mkdir(parents=True, exist_ok=True)
+            result = subprocess.run(
+                ["git", "clone", "--depth=1", clone_url, str(dest)],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode != 0:
+                return AdapterInstallResult(
+                    adapter_name=adapter_name,
+                    harness=harness,
+                    success=False,
+                    error=f"git clone failed: {result.stderr.strip()[:200]}",
+                )
+        except FileNotFoundError:
+            return AdapterInstallResult(
+                adapter_name=adapter_name,
+                harness=harness,
+                success=False,
+                error="git not found on PATH. Install git to use the adapter registry.",
+            )
+        except Exception as exc:
+            return AdapterInstallResult(
+                adapter_name=adapter_name,
+                harness=harness,
+                success=False,
+                error=str(exc),
+            )
+
+        # Validate adapter.py exists
+        if not (dest / "adapter.py").exists():
+            return AdapterInstallResult(
+                adapter_name=adapter_name,
+                harness=harness,
+                success=False,
+                adapter_dir=dest,
+                error=(
+                    f"Repository cloned to {dest} but adapter.py was not found. "
+                    "This may not be a valid HarnessSync adapter."
+                ),
+            )
+
+        # Read metadata from adapter.json if present
+        meta_path = dest / "adapter.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                harness = harness or meta.get("harness", adapter_name)
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        return AdapterInstallResult(
+            adapter_name=adapter_name,
+            harness=harness,
+            success=True,
+            adapter_dir=dest,
+            summary=(
+                f"Adapter '{adapter_name}' installed to {dest}.\n"
+                "Review adapter.py before activating. "
+                "Run /sync-registry add {adapter_name} to register it."
+            ),
+        )
+
+    def list_installed(self) -> list[dict]:
+        """List locally installed community adapters.
+
+        Returns:
+            List of dicts with keys: name, harness, path, has_adapter_py,
+            has_metadata.
+        """
+        if not self._adapters_dir.is_dir():
+            return []
+        result: list[dict] = []
+        for d in self._adapters_dir.iterdir():
+            if not d.is_dir():
+                continue
+            meta: dict = {"harness": "unknown", "description": ""}
+            meta_path = d / "adapter.json"
+            if meta_path.exists():
+                try:
+                    loaded = json.loads(meta_path.read_text(encoding="utf-8"))
+                    meta.update(loaded)
+                except (json.JSONDecodeError, OSError):
+                    pass
+            result.append({
+                "name": d.name,
+                "harness": meta.get("harness", "unknown"),
+                "description": meta.get("description", ""),
+                "path": str(d),
+                "has_adapter_py": (d / "adapter.py").is_file(),
+                "has_metadata": meta_path.exists(),
+            })
+        return sorted(result, key=lambda x: x["name"])
+
+    def format_search_results(self, entries: list[AdapterEntry]) -> str:
+        """Format adapter search results for display.
+
+        Args:
+            entries: List of AdapterEntry from search().
+
+        Returns:
+            Formatted multi-line results string.
+        """
+        if not entries:
+            return (
+                "No community adapters found.\n"
+                f"Publish your own by tagging a GitHub repo with '{_ADAPTER_TOPIC}'."
+            )
+        lines = [f"Community Adapters ({len(entries)} found)", "=" * 60]
+        for entry in entries:
+            lines.append(f"\n  {entry.format_summary()}")
+            if entry.html_url:
+                lines.append(f"  {entry.html_url}")
+        lines.append("")
+        lines.append(
+            f"Install: /sync-registry install <owner/repo>\n"
+            f"Publish: tag your adapter repo with '{_ADAPTER_TOPIC}' on GitHub"
+        )
+        return "\n".join(lines)
