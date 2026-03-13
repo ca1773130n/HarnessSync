@@ -46,6 +46,7 @@ Usage:
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 try:
@@ -318,3 +319,239 @@ class RuleDSLCompiler:
                 f"intent={rule.intent}  scope={scope_str}"
             )
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Org-Wide Policy Enforcement (Item 20)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class OrgPolicy:
+    """A single org-level sync policy rule.
+
+    Policies are enforced by OrgPolicyEnforcer on every sync across all
+    team members. Violations block or warn depending on policy severity.
+    """
+    id: str
+    description: str
+    rule_type: str     # "require_mcp", "forbid_skill", "require_section", "require_rule_pattern"
+    value: str         # The MCP name, skill name, section, or regex pattern
+    severity: str = "error"  # "error" | "warning"
+
+    def check(self, source_data: dict) -> str | None:
+        """Check this policy against source_data.
+
+        Args:
+            source_data: Output of SourceReader.discover_all().
+
+        Returns:
+            Violation message string, or None if policy passes.
+        """
+        if self.rule_type == "require_mcp":
+            mcp = source_data.get("mcp_servers", {})
+            if self.value not in mcp:
+                return f"[{self.id}] Required MCP server '{self.value}' is not configured"
+
+        elif self.rule_type == "forbid_skill":
+            skills = source_data.get("skills", {})
+            if self.value in skills:
+                return f"[{self.id}] Skill '{self.value}' is forbidden by org policy"
+
+        elif self.rule_type == "require_section":
+            if not source_data.get(self.value):
+                return f"[{self.id}] Required config section '{self.value}' is missing or empty"
+
+        elif self.rule_type == "require_rule_pattern":
+            import re as _re
+            rules_text = ""
+            raw = source_data.get("rules", "")
+            if isinstance(raw, str):
+                rules_text = raw
+            elif isinstance(raw, list):
+                rules_text = "\n".join(
+                    r.get("content", "") if isinstance(r, dict) else str(r)
+                    for r in raw
+                )
+            if not _re.search(self.value, rules_text):
+                return (
+                    f"[{self.id}] Required rule pattern '{self.value}' not found in CLAUDE.md"
+                )
+
+        return None  # Policy passes
+
+
+class OrgPolicyEnforcer:
+    """Enforce org-level HarnessSync policies on every sync.
+
+    Item 20: Define organization-level policies that HarnessSync enforces on
+    every sync across all team members. Enterprise teams need to ensure AI tools
+    comply with security policies. Without enforcement, individual developers
+    quietly misconfigure their harnesses.
+
+    Policy files live at:
+        .harness-sync/org-policies.json  (project-level)
+        ~/.harnesssync/org-policies.json (user-level, merged with project)
+
+    Policy schema:
+        [
+            {
+                "id": "require-security-mcp",
+                "description": "All setups must include the security-scanner MCP",
+                "rule_type": "require_mcp",
+                "value": "security-scanner",
+                "severity": "error"
+            },
+            {
+                "id": "forbid-raw-exec-skill",
+                "description": "The raw-exec skill is forbidden for security reasons",
+                "rule_type": "forbid_skill",
+                "value": "raw-exec",
+                "severity": "error"
+            }
+        ]
+    """
+
+    _PROJECT_POLICY_PATH = ".harness-sync/org-policies.json"
+    _USER_POLICY_PATH = Path.home() / ".harnesssync" / "org-policies.json"
+
+    def __init__(self, project_dir: Path | None = None):
+        self.project_dir = project_dir or Path.cwd()
+
+    def load_policies(self) -> list[OrgPolicy]:
+        """Load policies from project and user-level policy files.
+
+        Project policies take precedence; user policies fill gaps.
+
+        Returns:
+            List of OrgPolicy objects loaded from disk.
+        """
+        import json as _json
+
+        policies: list[OrgPolicy] = []
+        seen_ids: set[str] = set()
+
+        for policy_path in [
+            self.project_dir / self._PROJECT_POLICY_PATH,
+            self._USER_POLICY_PATH,
+        ]:
+            if not policy_path.exists():
+                continue
+            try:
+                data = _json.loads(policy_path.read_text(encoding="utf-8"))
+            except (_json.JSONDecodeError, OSError):
+                continue
+
+            if not isinstance(data, list):
+                continue
+
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                policy_id = item.get("id", "")
+                if not policy_id or policy_id in seen_ids:
+                    continue
+                try:
+                    policies.append(OrgPolicy(
+                        id=policy_id,
+                        description=item.get("description", ""),
+                        rule_type=item.get("rule_type", ""),
+                        value=item.get("value", ""),
+                        severity=item.get("severity", "error"),
+                    ))
+                    seen_ids.add(policy_id)
+                except (TypeError, KeyError):
+                    continue
+
+        return policies
+
+    def enforce(self, source_data: dict) -> list[dict]:
+        """Run all policies against source_data and return violations.
+
+        Args:
+            source_data: Output of SourceReader.discover_all().
+
+        Returns:
+            List of violation dicts, each with keys:
+                - id: str — policy ID
+                - severity: "error" | "warning"
+                - message: str — violation description
+        """
+        violations: list[dict] = []
+        for policy in self.load_policies():
+            msg = policy.check(source_data)
+            if msg:
+                violations.append({
+                    "id": policy.id,
+                    "severity": policy.severity,
+                    "message": msg,
+                })
+        return violations
+
+    def format_violations(self, violations: list[dict]) -> str:
+        """Format policy violations as human-readable text.
+
+        Args:
+            violations: Output of enforce().
+
+        Returns:
+            Formatted string, or empty string if no violations.
+        """
+        if not violations:
+            return ""
+
+        errors = [v for v in violations if v["severity"] == "error"]
+        warnings = [v for v in violations if v["severity"] == "warning"]
+
+        lines = ["Org Policy Violations", "=" * 45, ""]
+        for v in errors:
+            lines.append(f"  ✗ {v['message']}")
+        for v in warnings:
+            lines.append(f"  ⚠ {v['message']}")
+        lines.append("")
+        if errors:
+            lines.append(f"{len(errors)} policy error(s) must be resolved before sync.")
+        if warnings:
+            lines.append(f"{len(warnings)} policy warning(s).")
+        return "\n".join(lines)
+
+    def save_policy(
+        self,
+        policy: OrgPolicy,
+        scope: str = "project",
+    ) -> None:
+        """Save a policy to the policy file.
+
+        Args:
+            policy: OrgPolicy to save.
+            scope: "project" or "user" — which file to write to.
+        """
+        import json as _json
+
+        if scope == "project":
+            path = self.project_dir / self._PROJECT_POLICY_PATH
+        else:
+            path = self._USER_POLICY_PATH
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        existing: list[dict] = []
+        if path.exists():
+            try:
+                data = _json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    existing = data
+            except (_json.JSONDecodeError, OSError):
+                pass
+
+        # Replace existing policy with same ID, or append
+        new_entry = {
+            "id": policy.id,
+            "description": policy.description,
+            "rule_type": policy.rule_type,
+            "value": policy.value,
+            "severity": policy.severity,
+        }
+        updated = [e for e in existing if e.get("id") != policy.id]
+        updated.append(new_entry)
+
+        path.write_text(_json.dumps(updated, indent=2), encoding="utf-8")

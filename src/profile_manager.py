@@ -505,6 +505,32 @@ class ProfileManager:
             "only_sections": ["rules"],
             # Set "account": "<client-account-name>" and "targets" to client-approved harnesses
         },
+        "data-science": {
+            "description": "Data science / ML project — Jupyter-aware MCP, Python tools, skip frontend skills",
+            "scope": "all",
+            "only_sections": ["rules", "mcp", "settings"],
+            "targets": ["cursor", "continue", "cline"],
+            # MCP suggestion: jupyter, pandas-mcp, filesystem for notebook access
+            # Note: skip codex/aider (no notebook support)
+        },
+        "backend": {
+            "description": "Backend service — rules + MCP (DB, APIs), skip frontend-specific skills",
+            "scope": "all",
+            "only_sections": ["rules", "mcp", "settings"],
+            "targets": ["codex", "cursor", "opencode", "cline"],
+        },
+        "frontend": {
+            "description": "Frontend / UI project — rules + skills for component/CSS workflows, skip DB MCPs",
+            "scope": "all",
+            "only_sections": ["rules", "skills"],
+            "targets": ["cursor", "windsurf", "cline", "continue"],
+        },
+        "devops": {
+            "description": "DevOps / infra project — rules + MCP for cloud/docker/k8s, minimal skills",
+            "scope": "all",
+            "only_sections": ["rules", "mcp"],
+            "targets": ["codex", "cursor", "opencode"],
+        },
     }
 
     def list_templates(self) -> list[str]:

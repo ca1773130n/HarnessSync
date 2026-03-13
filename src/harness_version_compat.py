@@ -1480,3 +1480,154 @@ def format_update_alerts(alerts: list[ConfigUpdateAlert]) -> str:
         lines.append("")
         lines.append(alert.format())
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Harness Update Feed (Item 29 — Harness Update Feed / What's New)
+# ---------------------------------------------------------------------------
+
+# Known harness version improvements that unlock better sync fidelity.
+# Format: {harness: [(version, feature_name, sync_improvement_note)]}
+_VERSION_IMPROVEMENTS: dict[str, list[tuple[str, str, str]]] = {
+    "cursor": [
+        ("0.40", "mdc_alwaysApply", "alwaysApply support in .mdc rules — rules now activate globally without manual trigger"),
+        ("0.42", "mdc_glob_scoping", "glob-based scoping in rules — use globs to target rules to specific file patterns"),
+        ("0.43", "mcp_json", "native .cursor/mcp.json — MCP servers now sync directly without manual setup"),
+    ],
+    "gemini": [
+        ("1.5", "tools_exclude", "tools.exclude permission field — tool restrictions now sync cleanly"),
+        ("2.0", "tools_allowed", "tools.allowed allowlist — precise tool allowlists now supported"),
+        ("2.0", "mcp_servers", "native MCP server support — all configured MCP servers sync to Gemini"),
+    ],
+    "codex": [
+        ("1.0", "mcp_servers", "MCP server config in config.toml — MCP servers now sync to Codex"),
+        ("1.1", "sandbox_mode", "sandbox_mode field — execution safety settings sync correctly"),
+        ("1.2", "approval_policy", "approval_policy — permission modes now translate faithfully to Codex"),
+    ],
+    "windsurf": [
+        ("1.0", "mcp_config_json", ".codeium/windsurf/mcp_config.json — MCP servers sync to Windsurf"),
+        ("1.2", "memory_files", ".windsurf/memories/ — persistent memory files sync as skills"),
+    ],
+    "aider": [
+        ("0.50", "read_files_list", "read_files list in .aider.conf.yml — context files sync cleanly"),
+    ],
+}
+
+
+class HarnessUpdateFeed:
+    """Monitor harness versions and surface sync-relevant improvements.
+
+    Item 29: When a harness update unlocks better sync fidelity (e.g. Gemini CLI
+    1.5 now supports native MCP), this feed notifies users so they know
+    upgrading is worthwhile.
+    """
+
+    def get_available_improvements(
+        self,
+        harness: str,
+        current_version: str | None,
+    ) -> list[dict]:
+        """Return improvements available if the user upgrades from current_version.
+
+        Args:
+            harness: Canonical harness name.
+            current_version: Current installed version string (e.g. "1.4.2").
+                             None if version is unknown.
+
+        Returns:
+            List of improvement dicts, each with keys:
+                - version: str — the harness version that introduced this
+                - feature: str — internal feature name
+                - note: str — human-readable improvement description
+                - unlocks_sync: bool — always True (all listed improvements affect sync)
+        """
+        improvements = _VERSION_IMPROVEMENTS.get(harness, [])
+        if not improvements:
+            return []
+
+        if current_version is None:
+            # Unknown version — return all improvements as potential gains
+            return [
+                {"version": v, "feature": f, "note": n, "unlocks_sync": True}
+                for v, f, n in improvements
+            ]
+
+        result = []
+        for min_ver, feature, note in improvements:
+            if _version_lt(current_version, min_ver):
+                result.append({
+                    "version": min_ver,
+                    "feature": feature,
+                    "note": note,
+                    "unlocks_sync": True,
+                })
+        return result
+
+    def get_all_improvements(
+        self,
+        installed: dict[str, str | None],
+    ) -> dict[str, list[dict]]:
+        """Check all installed harnesses for available sync improvements.
+
+        Args:
+            installed: Dict mapping harness name -> current version (or None).
+
+        Returns:
+            Dict mapping harness name -> list of improvement dicts.
+            Only includes harnesses that have pending improvements.
+        """
+        result: dict[str, list[dict]] = {}
+        for harness, version in installed.items():
+            improvements = self.get_available_improvements(harness, version)
+            if improvements:
+                result[harness] = improvements
+        return result
+
+    def format_feed(self, improvements: dict[str, list[dict]]) -> str:
+        """Format the update feed as a human-readable report.
+
+        Args:
+            improvements: Output of get_all_improvements().
+
+        Returns:
+            Formatted string, or message indicating everything is up to date.
+        """
+        if not improvements:
+            return "All installed harnesses support current sync capabilities. No upgrades needed."
+
+        lines = ["Harness Update Feed — Sync Improvements Available", "=" * 55, ""]
+        for harness in sorted(improvements):
+                items = improvements[harness]
+                lines.append(f"  {harness}  ({len(items)} improvement(s)):")
+                for item in sorted(items, key=lambda x: x["version"]):
+                    lines.append(f"    ↑ v{item['version']}: {item['note']}")
+                lines.append("")
+
+        lines.append("Upgrade these harnesses to unlock better HarnessSync fidelity.")
+        lines.append("After upgrading, run /sync to apply improved config translation.")
+        return "\n".join(lines)
+
+
+def _version_lt(v1: str, v2: str) -> bool:
+    """Return True if version v1 is less than v2 (simple numeric comparison).
+
+    Args:
+        v1: Version string to compare (e.g. "1.4.2").
+        v2: Version string to compare against (e.g. "1.5").
+
+    Returns:
+        True if v1 < v2, False otherwise.
+    """
+    def _parts(v: str) -> tuple:
+        parts = []
+        for seg in v.lstrip("v").split("."):
+            try:
+                parts.append(int(seg))
+            except ValueError:
+                parts.append(0)
+        return tuple(parts)
+
+    try:
+        return _parts(v1) < _parts(v2)
+    except Exception:
+        return False

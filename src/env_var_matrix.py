@@ -321,8 +321,8 @@ class EnvVarMatrix:
             lines.append(f"{row_name}  {'  '.join(cells)}")
 
         lines.append(divider)
-        lines.append(f"\n● = currently set  ○ = not set")
-        lines.append(f"✓ native = same var name  ~ = mapped/partial  ✗ = no equivalent\n")
+        lines.append("\n● = currently set  ○ = not set")
+        lines.append("✓ native = same var name  ~ = mapped/partial  ✗ = no equivalent\n")
 
         if report.total_set > 0:
             lines.append(f"Set vars: {report.total_set}  |  Silent gaps: {report.total_missing_translations}")
@@ -560,3 +560,270 @@ def scan_project_env_vars(
             pass
 
     return check_env_portability(config_texts, targets=targets, current_env=current_env)
+
+
+# ---------------------------------------------------------------------------
+# Secrets Manager Integration (Item 14 — Secure Env Var Sync)
+# ---------------------------------------------------------------------------
+
+class SecretsManagerBackend:
+    """Abstract base for secrets manager backends."""
+
+    def get_secret(self, key: str) -> str | None:
+        """Fetch a secret value by key. Returns None if unavailable."""
+        raise NotImplementedError
+
+    def list_secrets(self) -> list[str]:
+        """Return list of known secret keys. May be empty if listing is unsupported."""
+        return []
+
+
+class MacOSKeychainBackend(SecretsManagerBackend):
+    """Fetch secrets from macOS Keychain via the security CLI.
+
+    Reads secrets stored under a configurable service name so teams can
+    manage shared credentials centrally. Each env var maps to a keychain
+    item: service=<service_name>, account=<var_name>.
+    """
+
+    def __init__(self, service_name: str = "HarnessSync"):
+        self.service_name = service_name
+
+    def get_secret(self, key: str) -> str | None:
+        """Fetch a keychain secret for the given env var name.
+
+        Args:
+            key: Environment variable name (used as the keychain account).
+
+        Returns:
+            Secret value string, or None if not found or platform error.
+        """
+        import shutil
+        import subprocess
+
+        if not shutil.which("security"):
+            return None
+        try:
+            result = subprocess.run(
+                [
+                    "security", "find-generic-password",
+                    "-s", self.service_name,
+                    "-a", key,
+                    "-w",
+                ],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip() or None
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        return None
+
+    def set_secret(self, key: str, value: str) -> bool:
+        """Store a secret in the macOS Keychain.
+
+        Args:
+            key: Environment variable name (keychain account).
+            value: Secret value to store.
+
+        Returns:
+            True if stored successfully, False otherwise.
+        """
+        import shutil
+        import subprocess
+
+        if not shutil.which("security"):
+            return False
+        try:
+            result = subprocess.run(
+                [
+                    "security", "add-generic-password",
+                    "-s", self.service_name,
+                    "-a", key,
+                    "-w", value,
+                    "-U",  # Update if already exists
+                ],
+                capture_output=True, timeout=5,
+            )
+            return result.returncode == 0
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+
+
+class OnePasswordBackend(SecretsManagerBackend):
+    """Fetch secrets from 1Password CLI (op).
+
+    Requires 1Password CLI v2+ (`op` command). Reads from the vault
+    and item specified during initialization.
+
+    Usage::
+
+        backend = OnePasswordBackend(vault="HarnessSync", item="API Keys")
+        key = backend.get_secret("ANTHROPIC_API_KEY")
+    """
+
+    def __init__(self, vault: str = "HarnessSync", item: str = "env-vars"):
+        self.vault = vault
+        self.item = item
+
+    def get_secret(self, key: str) -> str | None:
+        """Fetch a field from a 1Password item.
+
+        Args:
+            key: Field label / env var name.
+
+        Returns:
+            Secret value, or None if unavailable.
+        """
+        import shutil
+        import subprocess
+
+        if not shutil.which("op"):
+            return None
+        try:
+            result = subprocess.run(
+                [
+                    "op", "read",
+                    f"op://{self.vault}/{self.item}/{key}",
+                ],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip() or None
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        return None
+
+    def list_secrets(self) -> list[str]:
+        """List field names in the 1Password item.
+
+        Returns:
+            List of field label strings, or empty list if unavailable.
+        """
+        import json as _json
+        import shutil
+        import subprocess
+
+        if not shutil.which("op"):
+            return []
+        try:
+            result = subprocess.run(
+                ["op", "item", "get", self.item, "--vault", self.vault, "--format=json"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                data = _json.loads(result.stdout)
+                return [
+                    f.get("label", "")
+                    for f in data.get("fields", [])
+                    if f.get("label")
+                ]
+        except (subprocess.TimeoutExpired, OSError, _json.JSONDecodeError):
+            pass
+        return []
+
+
+class SecretsManagerIntegration:
+    """Sync env vars across harnesses using a secrets manager backend.
+
+    Item 14: Each harness has different env var config formats. Today users
+    manually duplicate env var setup per harness — and often forget to update
+    all of them when rotating credentials. This integration fetches secrets
+    from a central manager and emits per-harness env var configs.
+
+    Usage::
+
+        integration = SecretsManagerIntegration(MacOSKeychainBackend())
+        env_map = integration.resolve_env_vars(["ANTHROPIC_API_KEY", "OPENAI_API_KEY"])
+        harness_envs = integration.build_harness_env_configs(env_map, ["codex", "gemini"])
+    """
+
+    def __init__(self, backend: SecretsManagerBackend):
+        self.backend = backend
+
+    def resolve_env_vars(self, var_names: list[str]) -> dict[str, str]:
+        """Fetch multiple env var values from the backend.
+
+        Args:
+            var_names: List of environment variable names to resolve.
+
+        Returns:
+            Dict mapping var_name -> value for each var that was found.
+            Missing vars are omitted.
+        """
+        resolved: dict[str, str] = {}
+        for name in var_names:
+            value = self.backend.get_secret(name)
+            if value is not None:
+                resolved[name] = value
+        return resolved
+
+    def build_harness_env_configs(
+        self,
+        env_map: dict[str, str],
+        targets: list[str],
+    ) -> dict[str, dict[str, str]]:
+        """Generate per-harness env var config dicts from resolved secrets.
+
+        Translates Claude Code env var names to their harness equivalents
+        using the ENV_VAR_REGISTRY mapping. Returns the per-harness dict
+        ready to write to the target harness config.
+
+        Args:
+            env_map: Dict of resolved env var name -> value (from resolve_env_vars).
+            targets: Target harness names.
+
+        Returns:
+            Dict mapping target harness -> {env_var: value} ready for injection.
+        """
+        result: dict[str, dict[str, str]] = {t: {} for t in targets}
+
+        for spec in ENV_VAR_REGISTRY:
+            value = env_map.get(spec.name)
+            if value is None:
+                continue
+            for target in targets:
+                support, equivalent = spec.targets.get(target, (EnvSupport.NONE, ""))
+                if support == EnvSupport.NATIVE:
+                    result[target][spec.name] = value
+                elif support == EnvSupport.MAPPED and equivalent:
+                    # Extract just the var name from the note (first UPPER_CASE token)
+                    import re as _re
+                    m = _re.search(r'\b([A-Z][A-Z0-9_]{2,})\b', equivalent)
+                    if m:
+                        result[target][m.group(1)] = value
+
+        return result
+
+    def format_harness_env_report(
+        self,
+        env_map: dict[str, str],
+        targets: list[str],
+    ) -> str:
+        """Format a report showing how env vars will be distributed across harnesses.
+
+        Args:
+            env_map: Resolved env vars.
+            targets: Target harnesses.
+
+        Returns:
+            Human-readable report string.
+        """
+        if not env_map:
+            return "No env vars resolved from secrets manager."
+
+        harness_configs = self.build_harness_env_configs(env_map, targets)
+        lines = ["Secure Env Var Distribution", "=" * 45, ""]
+
+        for target in sorted(targets):
+            cfg = harness_configs.get(target, {})
+            lines.append(f"  {target}:")
+            if cfg:
+                for var, val in sorted(cfg.items()):
+                    masked = val[:4] + "..." if len(val) > 4 else "***"
+                    lines.append(f"    {var}={masked}")
+            else:
+                lines.append("    (no env vars — none map to this harness)")
+            lines.append("")
+
+        return "\n".join(lines)

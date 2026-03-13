@@ -472,3 +472,107 @@ class SmartSyncScheduler:
     def _load_threshold(self) -> int:
         config = self._load_config()
         return int(config.get("idle_threshold_seconds", self.DEFAULT_IDLE_THRESHOLD_SECONDS))
+
+
+# ---------------------------------------------------------------------------
+# Idle-Time Detection (Item 21 — Smart Idle-Time Background Sync)
+# ---------------------------------------------------------------------------
+
+class IdleTimeDetector:
+    """Detect system idle time to trigger background sync at low-disruption moments.
+
+    Item 21: Instead of syncing immediately on every change (which interrupts
+    workflow), detect when the developer is idle and batch-sync then.
+
+    On macOS, uses `ioreg` to query HIDIdleTime (milliseconds since last input).
+    On Linux, uses `xprintidle` if available, or falls back to /proc/uptime.
+    Returns 0.0 if idle time cannot be determined.
+    """
+
+    def __init__(self, idle_threshold_seconds: float = 30.0):
+        """Initialize detector.
+
+        Args:
+            idle_threshold_seconds: Seconds of idle time before sync is allowed (default: 30).
+        """
+        self.idle_threshold_seconds = idle_threshold_seconds
+
+    def get_idle_seconds(self) -> float:
+        """Return system idle time in seconds.
+
+        Returns:
+            Seconds since last user input, or 0.0 if not determinable.
+        """
+        import platform
+        system = platform.system()
+        if system == "Darwin":
+            return self._get_idle_macos()
+        elif system == "Linux":
+            return self._get_idle_linux()
+        return 0.0
+
+    def is_idle(self) -> bool:
+        """Return True if system has been idle longer than threshold.
+
+        Returns:
+            True if idle time >= idle_threshold_seconds.
+        """
+        return self.get_idle_seconds() >= self.idle_threshold_seconds
+
+    def _get_idle_macos(self) -> float:
+        """Query macOS HIDIdleTime via ioreg."""
+        import subprocess
+        import re
+        try:
+            result = subprocess.run(
+                ["ioreg", "-c", "IOHIDSystem", "-d", "4"],
+                capture_output=True, text=True, timeout=5,
+            )
+            match = re.search(r'"HIDIdleTime"\s*=\s*(\d+)', result.stdout)
+            if match:
+                nanoseconds = int(match.group(1))
+                return nanoseconds / 1_000_000_000.0
+        except (subprocess.TimeoutExpired, OSError, ValueError):
+            pass
+        return 0.0
+
+    def _get_idle_linux(self) -> float:
+        """Query Linux idle time via xprintidle or /proc."""
+        import subprocess
+        import shutil
+
+        # Try xprintidle first (most accurate for X11 sessions)
+        if shutil.which("xprintidle"):
+            try:
+                result = subprocess.run(
+                    ["xprintidle"], capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    ms = int(result.stdout.strip())
+                    return ms / 1000.0
+            except (subprocess.TimeoutExpired, OSError, ValueError):
+                pass
+        return 0.0
+
+    def wait_for_idle(
+        self,
+        poll_interval: float = 5.0,
+        max_wait: float = 300.0,
+    ) -> bool:
+        """Block until idle threshold is reached or max_wait is exceeded.
+
+        Args:
+            poll_interval: How often to check idle time in seconds.
+            max_wait: Maximum total wait time before returning False.
+
+        Returns:
+            True if idle threshold was reached, False if max_wait expired.
+        """
+        import time
+        elapsed = 0.0
+        while elapsed < max_wait:
+            if self.is_idle():
+                return True
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+        return False

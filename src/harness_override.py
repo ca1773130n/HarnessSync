@@ -505,3 +505,48 @@ class HarnessOverride:
         merged = dict(synced_settings)
         merged["model"] = model
         return merged
+
+    def set_exclude_sections(self, harness: str, sections: list[str]) -> None:
+        """Set sections to exclude from sync for a specific harness.
+
+        Item 1 / Item 7: Selective per-harness section control.
+
+        Allows users to skip specific config sections (e.g., skip 'mcp' for
+        a harness where MCP setup is managed separately).
+
+        Args:
+            harness: Target harness name.
+            sections: List of section names to exclude (e.g. ['mcp', 'agents']).
+                      Valid values: rules, skills, agents, commands, mcp, settings
+        """
+        override = self.load(harness)
+        override["exclude_sections"] = list(sections)
+        self.save(harness, override)
+
+    def get_exclude_sections(self, harness: str) -> list[str]:
+        """Return the list of sections excluded from sync for a harness.
+
+        Args:
+            harness: Target harness name.
+
+        Returns:
+            List of excluded section names, or empty list if none configured.
+        """
+        override = self.load(harness)
+        return list(override.get("exclude_sections", []))
+
+    def should_sync_section(self, harness: str, section: str) -> bool:
+        """Return True if the given section should be synced to this harness.
+
+        Checks the per-harness exclude_sections list. Returns True (sync) if
+        the section is not in the exclusion list.
+
+        Args:
+            harness: Target harness name.
+            section: Section name to check (e.g. 'mcp', 'rules').
+
+        Returns:
+            True if sync should proceed, False if this section is excluded.
+        """
+        excluded = self.get_exclude_sections(harness)
+        return section not in excluded

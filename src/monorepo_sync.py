@@ -581,3 +581,242 @@ class OrgConfigFederation:
             state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
         except OSError:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Multi-Workspace Sync Manager (Item 28)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class WorkspaceEntry:
+    """A registered workspace directory with its sync status."""
+
+    path: Path
+    name: str
+    last_sync_time: float | None = None  # Unix timestamp
+    sync_profile: str | None = None      # Named profile override for this workspace
+    enabled: bool = True
+
+
+class MultiWorkspaceSyncManager:
+    """Manage HarnessSync across multiple project directories from a single control plane.
+
+    Item 28: Power users with 10+ projects each have separate Claude Code configs
+    that diverge. A multi-workspace view makes maintaining consistency across
+    projects tractable.
+
+    Workspace registry is stored at ~/.harnesssync/workspaces.json.
+
+    Usage::
+
+        manager = MultiWorkspaceSyncManager()
+        manager.register(Path("/work/projectA"), name="projectA")
+        manager.register(Path("/work/projectB"), name="projectB", profile="backend")
+        statuses = manager.get_all_statuses()
+        print(manager.format_dashboard(statuses))
+    """
+
+    _REGISTRY_FILE = Path.home() / ".harnesssync" / "workspaces.json"
+
+    def __init__(self, registry_file: Path | None = None):
+        self._registry_file = registry_file or self._REGISTRY_FILE
+
+    def _load(self) -> list[dict]:
+        if not self._registry_file.exists():
+            return []
+        try:
+            data = json.loads(self._registry_file.read_text(encoding="utf-8"))
+            return data if isinstance(data, list) else []
+        except (json.JSONDecodeError, OSError):
+            return []
+
+    def _save(self, entries: list[dict]) -> None:
+        self._registry_file.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=self._registry_file.parent,
+            suffix=".tmp",
+            delete=False,
+            encoding="utf-8",
+        ) as tmp:
+            json.dump(entries, tmp, indent=2)
+            tmp_path = Path(tmp.name)
+        tmp_path.replace(self._registry_file)
+
+    def register(
+        self,
+        workspace_dir: Path,
+        name: str | None = None,
+        profile: str | None = None,
+        enabled: bool = True,
+    ) -> WorkspaceEntry:
+        """Register a workspace directory.
+
+        Args:
+            workspace_dir: Absolute path to the project directory.
+            name: Human-readable name (defaults to directory name).
+            profile: Named sync profile to use for this workspace.
+            enabled: Whether this workspace participates in syncs.
+
+        Returns:
+            WorkspaceEntry for the registered workspace.
+        """
+        abs_path = Path(workspace_dir).resolve()
+        name = name or abs_path.name
+
+        entries = self._load()
+        # Remove existing entry for same path
+        entries = [e for e in entries if e.get("path") != str(abs_path)]
+        entries.append({
+            "path": str(abs_path),
+            "name": name,
+            "last_sync_time": None,
+            "sync_profile": profile,
+            "enabled": enabled,
+        })
+        self._save(entries)
+
+        return WorkspaceEntry(
+            path=abs_path,
+            name=name,
+            sync_profile=profile,
+            enabled=enabled,
+        )
+
+    def unregister(self, workspace_dir: Path) -> bool:
+        """Remove a workspace from the registry.
+
+        Args:
+            workspace_dir: Path to remove.
+
+        Returns:
+            True if found and removed, False if not registered.
+        """
+        abs_path = Path(workspace_dir).resolve()
+        entries = self._load()
+        new_entries = [e for e in entries if e.get("path") != str(abs_path)]
+        if len(new_entries) == len(entries):
+            return False
+        self._save(new_entries)
+        return True
+
+    def list_workspaces(self) -> list[WorkspaceEntry]:
+        """Return all registered workspaces.
+
+        Returns:
+            List of WorkspaceEntry objects sorted by name.
+        """
+        entries = self._load()
+        result: list[WorkspaceEntry] = []
+        for e in entries:
+            path_str = e.get("path", "")
+            if not path_str:
+                continue
+            result.append(WorkspaceEntry(
+                path=Path(path_str),
+                name=e.get("name", Path(path_str).name),
+                last_sync_time=e.get("last_sync_time"),
+                sync_profile=e.get("sync_profile"),
+                enabled=e.get("enabled", True),
+            ))
+        return sorted(result, key=lambda w: w.name.lower())
+
+    def update_sync_time(self, workspace_dir: Path) -> None:
+        """Record a successful sync timestamp for a workspace.
+
+        Args:
+            workspace_dir: Path that was synced.
+        """
+        import time as _time
+        abs_path = Path(workspace_dir).resolve()
+        entries = self._load()
+        for entry in entries:
+            if entry.get("path") == str(abs_path):
+                entry["last_sync_time"] = _time.time()
+                break
+        self._save(entries)
+
+    def get_all_statuses(self) -> list[dict]:
+        """Return status dicts for all registered workspaces.
+
+        Returns:
+            List of status dicts with keys:
+                - name: str
+                - path: str
+                - enabled: bool
+                - sync_profile: str | None
+                - days_since_sync: float | None
+                - has_claude_md: bool
+                - drift_status: "fresh" | "stale" | "never" | "unknown"
+        """
+        import time as _time
+
+        now = _time.time()
+        STALE_DAYS = 7
+
+        result: list[dict] = []
+        for ws in self.list_workspaces():
+            has_claude_md = (ws.path / "CLAUDE.md").is_file()
+
+            if ws.last_sync_time is None:
+                days_since = None
+                drift = "never"
+            else:
+                days_since = round((now - ws.last_sync_time) / 86400, 1)
+                drift = "stale" if days_since > STALE_DAYS else "fresh"
+
+            result.append({
+                "name": ws.name,
+                "path": str(ws.path),
+                "enabled": ws.enabled,
+                "sync_profile": ws.sync_profile,
+                "days_since_sync": days_since,
+                "has_claude_md": has_claude_md,
+                "drift_status": drift,
+            })
+
+        return result
+
+    def format_dashboard(self, statuses: list[dict]) -> str:
+        """Render a multi-workspace status dashboard.
+
+        Args:
+            statuses: Output of get_all_statuses().
+
+        Returns:
+            Multi-line formatted string.
+        """
+        if not statuses:
+            return (
+                "No workspaces registered.\n"
+                "Register with: MultiWorkspaceSyncManager().register(Path('.'))"
+            )
+
+        lines = ["Multi-Workspace Sync Dashboard", "=" * 55, ""]
+        for s in statuses:
+            status_icon = {"fresh": "✓", "stale": "⚠", "never": "○", "unknown": "?"}.get(
+                s["drift_status"], "?"
+            )
+            enabled_mark = "" if s["enabled"] else " [disabled]"
+            profile_mark = f" (profile: {s['sync_profile']})" if s["sync_profile"] else ""
+            days_str = (
+                f"{s['days_since_sync']}d ago"
+                if s["days_since_sync"] is not None
+                else "never synced"
+            )
+            claude_mark = "" if s["has_claude_md"] else " [no CLAUDE.md]"
+            lines.append(
+                f"  {status_icon} {s['name']:<20} {days_str:<15}{profile_mark}{enabled_mark}{claude_mark}"
+            )
+            lines.append(f"      {s['path']}")
+            lines.append("")
+
+        stale = [s for s in statuses if s["drift_status"] == "stale"]
+        never = [s for s in statuses if s["drift_status"] == "never"]
+        if stale or never:
+            lines.append(
+                f"  {len(stale)} stale, {len(never)} never-synced workspace(s) need attention."
+            )
+            lines.append("  Run /sync --workspace <path> for each stale workspace.")
+
+        return "\n".join(lines)

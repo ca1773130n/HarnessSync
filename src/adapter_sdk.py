@@ -60,7 +60,7 @@ import inspect
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+
 
 # Re-export the essential types so adapter authors only need to import
 # from src.adapter_sdk (one import).
@@ -404,3 +404,179 @@ def load_community_adapter(path: str | Path) -> type | None:
                 return obj
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Community Adapter Generator (Item 12)
+# ---------------------------------------------------------------------------
+
+class AdapterWizard:
+    """Interactive wizard that generates adapter stub code for new community harnesses.
+
+    Item 12: Community Adapter Generator — produces a working adapter stub
+    from user-provided harness metadata (config format, file locations).
+    """
+
+    def generate_stub(
+        self,
+        harness_name: str,
+        config_file: str,
+        config_format: str = "json",
+        display_name: str = "",
+        author: str = "",
+        supports_mcp: bool = True,
+        supports_skills: bool = False,
+        rules_key: str = "rules",
+    ) -> str:
+        """Generate a complete adapter stub as a Python source string.
+
+        Args:
+            harness_name: Canonical name (lowercase, e.g. 'plandex').
+            config_file: Relative path to the target config file (e.g. '.plandex/config.json').
+            config_format: 'json', 'toml', or 'markdown'.
+            display_name: Human-readable name (e.g. 'Plandex').
+            author: Author/handle for the MANIFEST.
+            supports_mcp: Whether the harness supports MCP servers.
+            supports_skills: Whether the harness has native skill/prompt support.
+            rules_key: JSON key for rules in the config file (if json format).
+
+        Returns:
+            Python source code string for the adapter module.
+        """
+        import re as _re
+        if not _re.match(r'^[a-z0-9][a-z0-9_-]*$', harness_name):
+            raise ValueError(f"Invalid harness_name: {harness_name!r}")
+
+        display = display_name or harness_name.capitalize()
+        class_name = "".join(w.capitalize() for w in _re.split(r'[-_]', harness_name)) + "Adapter"
+
+        # Generate format-specific write logic
+        if config_format == "json":
+            write_logic = f'''        import json
+        config_path = self.project_dir / {config_file!r}
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        existing = {{}}
+        if config_path.exists():
+            try:
+                existing = json.loads(config_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                pass
+        combined = "\\n\\n".join(r.get("content", str(r)) for r in rules)
+        existing[{rules_key!r}] = combined
+        config_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        result.files_written.append(str(config_path))'''
+        elif config_format == "toml":
+            write_logic = f'''        config_path = self.project_dir / {config_file!r}
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        combined = "\\n\\n".join(r.get("content", str(r)) for r in rules)
+        lines = [f"# {display} rules — synced by HarnessSync\\n"]
+        lines.append(f'[{harness_name}]\\n')
+        lines.append(f'rules = """\\n{{combined}}\\n"""\\n')
+        config_path.write_text("".join(lines), encoding="utf-8")
+        result.files_written.append(str(config_path))'''
+        else:  # markdown
+            write_logic = f'''        config_path = self.project_dir / {config_file!r}
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        combined = "\\n\\n".join(r.get("content", str(r)) for r in rules)
+        config_path.write_text(combined, encoding="utf-8")
+        result.files_written.append(str(config_path))'''
+
+        mcp_impl = f'''    def sync_mcp(self, mcp_config: dict) -> SyncResult:
+        result = SyncResult()
+        # TODO: write MCP server config to {config_file}
+        # Example: merge mcp_config["mcpServers"] into the config file
+        result.skipped = len(mcp_config.get("mcpServers", {{}}))
+        return result''' if supports_mcp else f'''    def sync_mcp(self, mcp_config: dict) -> SyncResult:
+        # {display} does not support MCP servers
+        return SyncResult(skipped=len(mcp_config.get("mcpServers", {{}})))'''
+
+        skills_impl = f'''    def sync_skills(self, skills: dict[str, Path]) -> SyncResult:
+        result = SyncResult()
+        # TODO: implement skill sync for {display}
+        # skills is a dict mapping skill_name -> path to SKILL.md
+        result.skipped = len(skills)
+        return result''' if supports_skills else f'''    def sync_skills(self, skills: dict[str, Path]) -> SyncResult:
+        # {display} has no native skill system — skip
+        return SyncResult(skipped=len(skills))'''
+
+        transports_str = '["stdio", "http"]' if supports_mcp else '[]'
+
+        stub = f'''from __future__ import annotations
+"""HarnessSync adapter for {display}.
+
+Generated by AdapterWizard. Edit sync_* methods to match {display}'s config format.
+
+Config file: {config_file}
+Format: {config_format}
+
+To register: place this file in the adapters/ directory and restart HarnessSync.
+"""
+
+from pathlib import Path
+from src.adapter_sdk import community_adapter, AdapterBase, SyncResult, AdapterManifest
+
+
+@community_adapter("{harness_name}")
+class {class_name}(AdapterBase):
+
+    MANIFEST = AdapterManifest(
+        name="{harness_name}",
+        display_name="{display}",
+        version="0.1.0",
+        author={author!r},
+        description="{display} adapter for HarnessSync",
+        supported_transports={transports_str},
+        config_files=[{config_file!r}],
+    )
+
+    @property
+    def target_name(self) -> str:
+        return "{harness_name}"
+
+    def sync_rules(self, rules: list[dict]) -> SyncResult:
+        result = SyncResult()
+        if not rules:
+            return result
+{write_logic}
+        result.synced = len(rules)
+        return result
+
+{skills_impl}
+
+    def sync_agents(self, agents: list[dict]) -> SyncResult:
+        # TODO: translate agents to {display} format if supported
+        return SyncResult(skipped=len(agents))
+
+    def sync_commands(self, commands: list[dict]) -> SyncResult:
+        # TODO: translate slash commands to {display} format if supported
+        return SyncResult(skipped=len(commands))
+
+{mcp_impl}
+
+    def sync_settings(self, settings: dict) -> SyncResult:
+        # TODO: map Claude Code settings to {display} equivalents
+        return SyncResult(skipped=1)
+'''
+        return stub
+
+    def write_stub(
+        self,
+        harness_name: str,
+        output_dir: Path,
+        **kwargs,
+    ) -> Path:
+        """Write the generated stub to output_dir/<harness_name>.py.
+
+        Args:
+            harness_name: Canonical harness name.
+            output_dir: Directory to write the stub file into.
+            **kwargs: Additional args forwarded to generate_stub().
+
+        Returns:
+            Path to the written stub file.
+        """
+        stub = self.generate_stub(harness_name, **kwargs)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        out = output_dir / f"{harness_name}.py"
+        out.write_text(stub, encoding="utf-8")
+        return out

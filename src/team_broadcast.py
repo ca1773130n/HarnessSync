@@ -109,7 +109,7 @@ class BroadcastResult:
                 lines.append(f"  ✓ Commit: {self.commit_sha[:12]}")
             lines.append(f"  ✓ Files:  {len(self.files_included)} included")
             if self.pull_command:
-                lines.append(f"\nTeammates run:")
+                lines.append("\nTeammates run:")
                 lines.append(f"  {self.pull_command}")
         else:
             lines.append("  ✗ Failed")
@@ -712,5 +712,3 @@ class LocalShareBroadcast:
             }
         except (OSError, json.JSONDecodeError):
             return None
-
-        return result
