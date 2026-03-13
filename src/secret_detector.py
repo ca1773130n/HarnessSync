@@ -82,16 +82,53 @@ SECRET_KEYWORDS = [
     'SECRET', 'SECRET_KEY',
     'PASSWORD', 'PASSWD', 'PWD',
     'TOKEN', 'ACCESS_TOKEN', 'AUTH_TOKEN',
-    'PRIVATE_KEY'
+    'PRIVATE_KEY',
+    # AI provider keys
+    'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY',
+    'GOOGLE_API_KEY', 'COHERE_API_KEY', 'MISTRAL_API_KEY',
+    'AZURE_OPENAI_API_KEY', 'AWS_SECRET_ACCESS_KEY',
+    # VCS & CI
+    'GITHUB_TOKEN', 'GITLAB_TOKEN', 'GH_TOKEN', 'CI_TOKEN',
+    'NPM_TOKEN', 'PYPI_TOKEN',
+    # Database / infra
+    'DATABASE_URL', 'DB_PASSWORD', 'REDIS_URL',
+    'MONGO_URI', 'POSTGRES_PASSWORD',
+    # Generic credential names
+    'CREDENTIAL', 'CREDENTIALS', 'CERT', 'CERTIFICATE',
+    'CLIENT_SECRET', 'APP_SECRET',
 ]
 
 # Patterns that look like inline secrets in file content (e.g. CLAUDE.md)
 # Matches: key=VALUE, key: VALUE, key="VALUE" where VALUE looks like a secret
 _INLINE_SECRET_RE = re.compile(
-    r'(?:api[_-]?key|secret[_-]?key?|password|passwd|token|access[_-]token|private[_-]key)'
-    r'\s*[:=]\s*["\']?([A-Za-z0-9_\-+=/.]{16,})["\']?',
+    r'(?:api[_-]?key|secret[_-]?key?|password|passwd|token|access[_-]token|private[_-]key'
+    r'|anthropic[_-]api[_-]key|openai[_-]api[_-]key|github[_-]token|client[_-]secret'
+    r'|app[_-]secret|database[_-]url|db[_-]password|credentials?)'
+    r'\s*[:=]\s*["\']?([A-Za-z0-9_\-+=/.@:]{16,})["\']?',
     re.IGNORECASE,
 )
+
+# Well-known secret value formats — matched directly against values regardless of key name.
+# These patterns catch hardcoded secrets even when the variable name isn't suspicious.
+KNOWN_SECRET_FORMATS: list[re.Pattern] = [
+    # Anthropic API key: sk-ant-api03-...
+    re.compile(r'\bsk-ant-[a-zA-Z0-9_\-]{20,}\b'),
+    # OpenAI API key: sk-...
+    re.compile(r'\bsk-[a-zA-Z0-9]{32,}\b'),
+    # GitHub PAT (classic): ghp_... or github_pat_...
+    re.compile(r'\bghp_[a-zA-Z0-9]{36,}\b'),
+    re.compile(r'\bgithub_pat_[a-zA-Z0-9_]{59}\b'),
+    # AWS access key ID
+    re.compile(r'\bAKIA[0-9A-Z]{16}\b'),
+    # Generic JWT: three base64url segments separated by dots
+    re.compile(r'\beyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\b'),
+    # Slack Bot/App tokens
+    re.compile(r'\bxox[bpoa]-[0-9A-Za-z\-]{10,}\b'),
+    # Stripe secret key
+    re.compile(r'\bsk_(?:live|test)_[a-zA-Z0-9]{24,}\b'),
+    # Google API key
+    re.compile(r'\bAIza[0-9A-Za-z_\-]{35}\b'),
+]
 
 # Safe prefixes to whitelist (testing/example values)
 SAFE_PREFIXES = [
@@ -241,16 +278,42 @@ class SecretDetector:
                 - source: source_label
         """
         detections = []
+        seen_positions: set[tuple[int, int]] = set()
+
         for line_num, line in enumerate(content.splitlines(), start=1):
+            # Check key=value inline patterns
             for m in _INLINE_SECRET_RE.finditer(line):
+                pos = (line_num, m.start())
+                if pos in seen_positions:
+                    continue
+                seen_positions.add(pos)
                 keyword = m.group(0).split("=")[0].split(":")[0].strip()
                 detections.append({
                     "var_name": keyword,
                     "keywords_matched": [keyword],
-                    "confidence": "low",
+                    "confidence": "medium",
                     "reason": f"Inline secret pattern on line {line_num} in {source_label}",
                     "source": source_label,
                 })
+
+            # Check for well-known secret formats (API keys, tokens, JWTs)
+            for pattern in KNOWN_SECRET_FORMATS:
+                for m in pattern.finditer(line):
+                    pos = (line_num, m.start())
+                    if pos in seen_positions:
+                        continue
+                    seen_positions.add(pos)
+                    detections.append({
+                        "var_name": f"<literal on line {line_num}>",
+                        "keywords_matched": [],
+                        "confidence": "high",
+                        "reason": (
+                            f"Matches known secret format pattern on line {line_num}"
+                            f" in {source_label} — matches pattern: {pattern.pattern[:60]}"
+                        ),
+                        "source": source_label,
+                    })
+
         return detections
 
     def scan_config_files(

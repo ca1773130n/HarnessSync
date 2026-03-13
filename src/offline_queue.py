@@ -41,12 +41,32 @@ MAX_RETRY_ATTEMPTS = 5          # Drop entry after this many consecutive failure
 _BACKOFF_BASE_SECONDS = 60      # First retry: 1 minute
 _BACKOFF_MAX_SECONDS = 3600     # Cap backoff at 1 hour
 
-# Target config directories (to check availability)
+# Target config directories (to check availability).
+# Each entry maps a canonical target name to its user-level config home.
+# Targets that live inside the project directory are handled separately
+# via the project_scoped set in is_target_available().
 _TARGET_CONFIG_DIRS: dict[str, Path] = {
     "codex":    Path.home() / ".codex",
     "gemini":   Path.home() / ".gemini",
     "opencode": Path.home() / ".config" / "opencode",
     "windsurf": Path.home() / ".codeium" / "windsurf",
+    # Cursor stores user-level MCP config in ~/.cursor; project rules live in .cursor/
+    "cursor":   Path.home() / ".cursor",
+    # Aider keeps its config in ~/.aider
+    "aider":    Path.home() / ".aider",
+    # Cline (VSCode extension) uses ~/.vscode or .roo at project level
+    "cline":    Path.home() / ".vscode",
+    # Continue.dev stores user config in ~/.continue
+    "continue": Path.home() / ".continue",
+    # Zed stores user settings in ~/Library/Application Support/Zed on macOS,
+    # or ~/.config/zed on Linux
+    "zed":      (
+        Path.home() / "Library" / "Application Support" / "Zed"
+        if (Path.home() / "Library").exists()
+        else Path.home() / ".config" / "zed"
+    ),
+    # Neovim: check for avante.nvim or codecompanion.nvim config in ~/.config/nvim
+    "neovim":   Path.home() / ".config" / "nvim",
 }
 
 
@@ -64,8 +84,9 @@ def is_target_available(target: str, project_dir: Path) -> bool:
         True if the target is accessible, False if the path is unavailable
         (e.g., unmounted drive, disconnected network share).
     """
-    # Project-scoped targets: check if project_dir is writable
-    project_scoped = {"cursor", "aider"}
+    # Project-scoped targets: these store their config inside the project directory
+    # rather than a user-level config home, so availability is tied to project_dir.
+    project_scoped = {"cursor", "aider", "cline", "continue", "zed"}
     if target in project_scoped:
         try:
             return os.access(project_dir, os.W_OK)

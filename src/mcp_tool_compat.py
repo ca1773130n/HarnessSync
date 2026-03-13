@@ -432,6 +432,106 @@ def check_servers_batch(
     }
 
 
+def portability_score(
+    server_name: str,
+    config: dict,
+    targets: list[str] | None = None,
+) -> dict[str, int]:
+    """Compute a portability score (0-100) for an MCP server across all targets.
+
+    A score of 100 means the server config works perfectly in that harness.
+    Errors deduct 50 points each; warnings deduct 15 points each.
+    Score is floored at 0.
+
+    Harnesses that have no MCP transport support at all (aider, vscode) are
+    assigned a score of 0 regardless of the config.
+
+    Args:
+        server_name: MCP server name (used for logging only).
+        config: MCP server config dict from .mcp.json.
+        targets: Subset of harnesses to score. Defaults to ALL_HARNESSES.
+
+    Returns:
+        Dict mapping target name -> integer score 0-100.
+    """
+    if targets is None:
+        targets = ALL_HARNESSES
+
+    scores: dict[str, int] = {}
+    for target in targets:
+        # Targets with no MCP execution capability score 0 unconditionally
+        if not MCP_TRANSPORT_SUPPORT.get(target):
+            scores[target] = 0
+            continue
+
+        issues = check_server_compat(server_name, config, target)
+        score = 100
+        for issue in issues:
+            if issue.severity == "error":
+                score -= 50
+            elif issue.severity == "warning":
+                score -= 15
+        scores[target] = max(0, score)
+
+    return scores
+
+
+def format_portability_report(
+    mcp_servers: dict[str, dict],
+    targets: list[str] | None = None,
+) -> str:
+    """Format a per-server portability score table across all targets.
+
+    Args:
+        mcp_servers: Dict mapping server name -> config dict.
+        targets: Subset of harnesses to report. Defaults to ALL_HARNESSES.
+
+    Returns:
+        Human-readable table string.
+    """
+    if targets is None:
+        targets = ALL_HARNESSES
+
+    if not mcp_servers:
+        return "No MCP servers configured."
+
+    # Column widths
+    name_w = max(len(n) for n in mcp_servers) + 2
+    col_w = 6
+
+    header = f"{'Server':<{name_w}}"
+    for t in targets:
+        header += f"  {t[:col_w - 1]:<{col_w - 1}}"
+    header += "  Avg"
+
+    sep = "-" * (name_w + (col_w + 1) * len(targets) + 6)
+
+    lines: list[str] = [
+        "MCP Server Portability Scores (0-100)",
+        "=" * max(len(sep), 40),
+        "",
+        header,
+        sep,
+    ]
+
+    for server_name, config in sorted(mcp_servers.items()):
+        scores = portability_score(server_name, config, targets)
+        avg = int(sum(scores.values()) / len(scores)) if scores else 0
+        row = f"{server_name:<{name_w}}"
+        for t in targets:
+            s = scores.get(t, 0)
+            row += f"  {s:>{col_w - 1}}"
+        row += f"  {avg:>3}"
+        lines.append(row)
+
+    lines += [
+        sep,
+        "",
+        "100 = fully compatible  0 = no support (errors deduct 50, warnings deduct 15)",
+    ]
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------

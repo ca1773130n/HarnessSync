@@ -714,3 +714,97 @@ class HarnessFeatureMatrix:
         ]
 
         return "\n".join(lines)
+
+    def format_capability_gap_dashboard(
+        self,
+        harnesses: list[str] | None = None,
+        include_workarounds: bool = True,
+    ) -> str:
+        """Return a real-time capability gap dashboard for all (or specified) harnesses.
+
+        For each harness, lists features that are missing or degraded compared
+        to Claude Code, classified as either **blocking** (unsupported — the
+        feature cannot be represented at all) or **advisory** (partial/adapter —
+        the feature syncs with caveats).
+
+        Each blocking gap includes a suggested workaround where one exists.
+
+        Args:
+            harnesses: Harnesses to include. Defaults to ALL_HARNESSES.
+            include_workarounds: Whether to show workaround suggestions.
+
+        Returns:
+            Multi-line formatted string suitable for terminal output.
+        """
+        target_list = harnesses or ALL_HARNESSES
+
+        # Workaround suggestions keyed by (feature, harness)
+        _WORKAROUNDS: dict[tuple[str, str], str] = {
+            ("skills", "zed"):      "Inline skill content in system-prompt.md manually.",
+            ("skills", "neovim"):   "Add skill content to .avante/system-prompt.md.",
+            ("commands", "gemini"): "Document commands as GEMINI.md workflow steps instead.",
+            ("commands", "aider"):  "Use aider /ask prefix or shell aliases as command proxies.",
+            ("commands", "zed"):    "Zed has no command forwarding — document as prose notes.",
+            ("commands", "neovim"): "avante.nvim has no command system — use Neovim keymaps.",
+            ("hooks", "aider"):     "Use aider --before-apply / --after-apply shell hooks instead.",
+            ("hooks", "cursor"):    "Cursor has no hook system — use .cursorrules for guardrails.",
+            ("plugins", "gemini"):  "Gemini CLI has no plugin API — replicate plugin rules inline.",
+            ("plugins", "aider"):   "Aider has no plugin system — apply plugin rules to CONVENTIONS.md.",
+            ("plugins", "cursor"):  "Replicate plugin behavior as .mdc rule files in .cursor/rules/.",
+            ("plugins", "cline"):   "Cline has no plugin API — add plugin guidance to .clinerules.",
+            ("plugins", "continue"):"Continue.dev has no plugins — add to .continue/rules/.",
+            ("plugins", "zed"):     "Zed has no plugin extension API for AI assistants.",
+            ("plugins", "neovim"):  "Use Neovim Lua config to replicate plugin behavior.",
+            ("mcp", "aider"):       "Aider does not execute MCP servers — share tool context via read_files.",
+            ("mcp", "vscode"):      "VS Code AI extensions lack MCP support — no workaround available.",
+        }
+
+        lines: list[str] = [
+            "Capability Gap Dashboard",
+            "=" * 60,
+            "",
+            "BLOCKING = feature has no equivalent in this harness",
+            "ADVISORY = feature syncs with caveats or partial support",
+            "",
+        ]
+
+        for harness in target_list:
+            if harness not in ALL_HARNESSES:
+                continue
+
+            blocking: list[str] = []
+            advisory: list[str] = []
+
+            for feat in ALL_FEATURES:
+                level = _FEATURE_MATRIX.get(feat, {}).get(harness, "unsupported")
+                if level == "unsupported":
+                    blocking.append(feat)
+                elif level in ("partial", "adapter"):
+                    advisory.append(feat)
+
+            score = self.coverage_score(harness)
+            header_line = f"  {harness:<12}  coverage={score}/100"
+            lines.append(header_line)
+
+            if not blocking and not advisory:
+                lines.append("    All features supported natively.")
+            else:
+                if blocking:
+                    lines.append(f"    [BLOCKING x{len(blocking)}]")
+                    for feat in sorted(blocking):
+                        lines.append(f"      - {feat}")
+                        if include_workarounds:
+                            hint = _WORKAROUNDS.get((feat, harness), "")
+                            if hint:
+                                lines.append(f"        Workaround: {hint}")
+                if advisory:
+                    lines.append(f"    [ADVISORY x{len(advisory)}]")
+                    for feat in sorted(advisory):
+                        lines.append(f"      ~ {feat}")
+
+            lines.append("")
+
+        lines.append(
+            "Run /sync-gaps <harness> for full details on a specific target."
+        )
+        return "\n".join(lines)

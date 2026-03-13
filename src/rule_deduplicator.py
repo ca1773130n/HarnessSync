@@ -166,6 +166,84 @@ class RuleDeduplicator:
             return ""
         return max(cluster.blocks, key=lambda b: len(b.text)).text
 
+    def format_consolidation_plan(self) -> str:
+        """Generate an actionable consolidation plan from detected duplicates.
+
+        For each duplicate cluster, the plan recommends:
+        1. The canonical text to keep (the most complete version).
+        2. Which files should have the duplicate text removed.
+        3. Whether to add the canonical version to CLAUDE.md if it isn't already there.
+
+        The output is suitable for direct use as a step-by-step guide.
+        Running the suggested actions eliminates config drift and ensures
+        HarnessSync propagates a single authoritative rule to all harnesses.
+
+        Returns:
+            Multi-line string with numbered consolidation steps, or a
+            "no duplicates found" message.
+        """
+        clusters = self.scan()
+        cross_harness = [c for c in clusters if c.is_cross_harness]
+
+        if not clusters:
+            return "No duplicate rules found — config is already consolidated."
+
+        lines: list[str] = [
+            "Rule Consolidation Plan",
+            "=" * 60,
+            f"Found {len(clusters)} duplicate cluster(s)"
+            + (f" ({len(cross_harness)} cross-harness)" if cross_harness else ""),
+            "",
+        ]
+
+        step = 1
+        for idx, cluster in enumerate(clusters, start=1):
+            canonical_text = self.suggest_canonical_content(cluster)
+            canonical_source = cluster.canonical.source if cluster.canonical else "?"
+            canonical_file = cluster.canonical.file_path if cluster.canonical else "?"
+
+            # Determine which files have non-canonical copies to remove
+            files_to_clean: list[str] = [
+                b.file_path
+                for b in cluster.blocks
+                if b is not cluster.canonical
+            ]
+
+            lines.append(f"Cluster {idx}  (similarity {cluster.min_similarity:.0%})  "
+                         f"sources: {', '.join(cluster.sources)}")
+            lines.append(f"  Canonical version ({canonical_source}:{canonical_file}):")
+            preview = canonical_text[:200].replace("\n", " ")
+            lines.append(f"    {preview!r}")
+            lines.append("")
+
+            # Step A: Ensure canonical is in CLAUDE.md
+            if canonical_source != "claude":
+                lines.append(
+                    f"  Step {step}: Add the canonical text above to CLAUDE.md "
+                    f"(currently only in {canonical_source})."
+                )
+                step += 1
+
+            # Step B: Remove duplicates from other files
+            for f in sorted(set(files_to_clean)):
+                lines.append(
+                    f"  Step {step}: Remove the near-duplicate entry from {f}."
+                    " HarnessSync will regenerate it from CLAUDE.md on next sync."
+                )
+                step += 1
+
+            lines.append("")
+
+        if cross_harness:
+            lines += [
+                "Summary:",
+                "  Run /sync after completing the steps above so HarnessSync",
+                "  redistributes the canonical rules to all configured harnesses.",
+                "",
+            ]
+
+        return "\n".join(lines)
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------

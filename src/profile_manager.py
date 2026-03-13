@@ -99,8 +99,65 @@ class ProfileManager:
         return sorted(self._load().keys())
 
     def get_profile(self, name: str) -> dict | None:
-        """Return profile config dict or None if not found."""
-        return self._load().get(name)
+        """Return profile config dict or None if not found.
+
+        Supports profile inheritance via the ``extends`` key.  A profile with
+        ``"extends": "base-profile"`` inherits all keys from the named base
+        profile, with the child's keys taking precedence.  Inheritance is
+        resolved recursively up to a depth of 5 to prevent cycles.
+
+        Example::
+
+            {
+              "base": {"scope": "all", "targets": ["codex", "gemini"]},
+              "work": {"extends": "base", "skip_sections": ["mcp"]}
+            }
+
+        ``work`` inherits ``scope`` and ``targets`` from ``base`` and adds
+        its own ``skip_sections`` override.
+        """
+        profiles = self._load()
+        return self._resolve_profile(name, profiles, depth=0)
+
+    def _resolve_profile(
+        self,
+        name: str,
+        profiles: dict,
+        depth: int,
+    ) -> dict | None:
+        """Recursively resolve profile inheritance.
+
+        Args:
+            name: Profile name to resolve.
+            profiles: Full profiles dict (from _load()).
+            depth: Current recursion depth (guard against cycles).
+
+        Returns:
+            Merged profile dict, or None if the name is not found.
+        """
+        raw = profiles.get(name)
+        if raw is None or not isinstance(raw, dict):
+            return None
+
+        parent_name = raw.get("extends")
+        if not parent_name or depth >= 5:
+            # No parent or cycle guard hit — return as-is (strip meta key)
+            result = {k: v for k, v in raw.items() if k != "extends"}
+            return result
+
+        parent = self._resolve_profile(parent_name, profiles, depth + 1)
+        if parent is None:
+            # Parent doesn't exist — return child as-is
+            return {k: v for k, v in raw.items() if k != "extends"}
+
+        # Merge: parent provides defaults, child overrides
+        merged = dict(parent)
+        for k, v in raw.items():
+            if k == "extends":
+                continue
+            merged[k] = v
+
+        return merged
 
     def save_profile(self, name: str, config: dict) -> None:
         """Create or update a named profile.

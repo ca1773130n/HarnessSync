@@ -2932,3 +2932,67 @@ _2026-03-13T07:10:40.488Z_
 - The compliance:pinned block correctly bypasses even the new Python-style annotations, which confirms the filter priority order is correct and robust.
 
 ---
+## Iteration 45
+_2026-03-13T07:26:11.979Z_
+
+### Items Attempted
+
+- **First-Run Onboarding Wizard** — pass
+- **Global Dry-Run Mode Flag** — pass
+- **Interactive Conflict Resolution** — pass
+- **Team Sync Profiles via Git** — pass
+- **CI/CD Sync Validation Action** — pass
+- **Sync History & Audit Timeline** — pass
+- **Per-Project Sync Overrides** — pass
+- **Live Feature Parity Dashboard** — pass
+- **Automatic Rule Categorization & Tagging** — pass
+- **MCP Server Compatibility Checker** — pass
+- **Harness Context Export for Handoff** — pass
+- **Rule Effectiveness Scoring** — pass
+- **VS Code / Cursor Extension Sync** — pass
+- **Aider Convention Adapter** — pass
+- **Browser-Based Sync Preview UI** — pass
+- **Semantic Versioning for Config Sets** — pass
+- **Secrets & Env Var Leak Auditor** — pass
+- **Rule Translation Quality Suggestions** — pass
+- **Team Sync Notifications via Slack/Discord** — pass
+- **Skill Compatibility Smoke Tests** — pass
+- **New Harness Bootstrap Command** — pass
+- **Config Health Score & Report** — pass
+- **Model Routing Hints Sync** — pass
+- **Auto-Generated Config Changelog** — pass
+- **Multi-Repo Config Federation** — pass
+- **Target-Specific Rule Annotations** — pass
+- **Remote Config Pull from Team Registry** — pass
+- **Scheduled Background Sync** — pass
+- **Context-Aware Partial Sync** — pass
+- **MCP Server Dependency-Aware Ordering** — pass
+- **Harness-Agnostic Skill Format Standard** — pass
+- **Claude Code Status Bar Sync Indicator** — pass
+- **Sync Impact Preview Before CLAUDE.md Edits** — pass
+
+### Decisions Made
+
+- Implemented rule_categorizer.py as a standalone heuristic engine (no LLM dependency) using regex pattern scoring per category — 'security', 'style', 'testing', 'workflow', 'tool-use', 'performance', 'documentation', 'error-handling', 'general'. Chose Kahn-style topological sort for MCP ordering to give clean cycle detection without recursion.
+- Added global dry-run mode as a boolean flag in the existing state.json schema (get_global_dry_run/set_global_dry_run on StateManager) rather than a separate config file, minimizing files and keeping all persistent state co-located. The orchestrator reads this at construction time so it applies to every code path without requiring callers to pass dry_run=True.
+- Model routing translation uses tier-based prefix matching (opus→pro, sonnet→flash/mini, haiku→flash-lite) rather than a static mapping table so it handles future Claude model variants gracefully.
+- MCP dependency resolver uses three detection layers: explicit _depends_on annotations (highest priority), name-pattern heuristics (catches common naming conventions like 'task-*' → 'memory'), and env-var cross-reference (catches servers that reference other servers by name in their env dict). Best-effort wrapping in the orchestrator means failures never block sync.
+- rule_effectiveness.py uses slug-based lookup (not titles) to survive renames, and caps session history at 90 days to bound file growth. Citation detection uses both exact title match and multi-word keyword intersection to avoid false negatives.
+- Added sync_categorize.py command as the primary UX entry point for items 9 and 12, keeping the underlying modules (rule_categorizer.py, rule_effectiveness.py) pure library code with no I/O or CLI dependencies.
+
+### Patterns Discovered
+
+- The codebase consistently uses 'best-effort try/except pass' wrapping for new integrations in orchestrator.py — this pattern ensures new features never block the core sync path but makes debugging harder. Consider adding at least logger.debug on caught exceptions.
+- All new persistent stores follow the same atomic write pattern (tempfile + os.fsync + os.replace) established in state_manager.py — this is a good project-wide pattern for JSON state files.
+- The project has a very large number of src/*.py files (80+) with single-feature modules — the naming convention is clear and consistent, making it easy to add new features without touching existing code.
+- Most items from the 30-item roadmap were already implemented in prior iterations; the remaining gaps (items 9, 12, 23, 30) were genuinely missing and benefited from new standalone modules.
+
+### Takeaways
+
+- The orchestrator is the right integration point for new sync-time features since it already has the full source data and per-target loop. Adding integrations there as best-effort blocks is low-risk.
+- The global dry-run flag pattern (persistent in state.json, auto-applied in orchestrator constructor) is more ergonomic than requiring --dry-run on every command invocation for users who want it as a default.
+- MCP dependency ordering is most valuable for complex multi-server setups (5+ servers). For the common case of 1-3 servers the ordering is trivially correct already; the feature adds value as teams scale their MCP configs.
+- Rule categorization heuristics work well for rule text that uses domain vocabulary, but struggle with abstract or meta-rules ('Always ask before doing X'). A future improvement could use embeddings for better coverage of abstract rules.
+- The deepeval package in the test environment is incompatible with Python 3.9 (uses X | None union syntax). Tests must be run with -p no:deepeval to avoid collection errors. This is a pre-existing environment issue, not caused by this iteration's changes.
+
+---

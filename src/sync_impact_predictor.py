@@ -54,20 +54,51 @@ _HARNESS_PREFERENCES: dict[str, list[tuple[re.Pattern, str]]] = {
     "gemini": [
         (re.compile(r"use typescript|prefer ts over js", re.I),
          "Gemini CLI is language-agnostic — TS preference may not be enforced"),
+        (re.compile(r"use\b.{0,30}\bskill\b|invoke\b.{0,30}\bskill", re.I),
+         "Gemini CLI has no slash command / skill system — skill invocations won't work"),
+        (re.compile(r"/[a-z][-a-z]+\b", re.I),
+         "Slash commands don't exist in Gemini CLI — prefix rules using them may be ignored"),
+    ],
+    "windsurf": [
+        (re.compile(r"cascade|flow\s+mode", re.I),
+         "Windsurf-specific terminology may confuse other harnesses if rules reference it"),
+    ],
+    "cline": [
+        (re.compile(r"autoApprove|auto.approve|approve all", re.I),
+         "Cline auto-approval is configured in VSCode settings, not in rules files"),
+    ],
+    "continue": [
+        (re.compile(r"tab\s*complete|inline\s*suggest", re.I),
+         "Continue.dev inline suggestions are controlled via config.json, not system rules"),
+    ],
+    "zed": [
+        (re.compile(r"context\s*window|token\s*limit", re.I),
+         "Zed assistant uses a fixed context window — token limit rules have no effect"),
+    ],
+    "neovim": [
+        (re.compile(r"buffer|window|split|nvim|neovim", re.I),
+         "Neovim-specific terms in rules may confuse other harnesses"),
     ],
 }
 
 # MCP server tool name patterns for impact estimation
 _MCP_TOOL_PATTERNS: dict[str, list[str]] = {
-    "filesystem": ["read_file", "write_file", "list_directory", "search_files"],
-    "github": ["get_repo", "list_prs", "create_issue", "merge_pr"],
-    "postgres": ["query", "list_tables", "describe_table", "execute"],
-    "sqlite": ["query", "insert", "list_tables"],
-    "memory": ["store", "recall", "list_memories"],
-    "fetch": ["fetch_url", "get_page"],
-    "puppeteer": ["navigate", "screenshot", "click", "type"],
-    "git": ["log", "diff", "status", "commit"],
+    "filesystem": ["read_file", "write_file", "list_directory", "search_files", "create_directory"],
+    "github": ["get_repo", "list_prs", "create_issue", "merge_pr", "get_file_contents", "push_files"],
+    "postgres": ["query", "list_tables", "describe_table", "execute", "list_schemas"],
+    "sqlite": ["query", "insert", "list_tables", "create_table"],
+    "memory": ["store", "recall", "list_memories", "delete_memory"],
+    "fetch": ["fetch_url", "get_page", "post_request"],
+    "puppeteer": ["navigate", "screenshot", "click", "type", "evaluate"],
+    "playwright": ["navigate", "screenshot", "click", "fill_form", "take_screenshot"],
+    "git": ["log", "diff", "status", "commit", "create_branch"],
     "brave-search": ["web_search", "local_search"],
+    "slack": ["send_message", "list_channels", "get_thread"],
+    "jira": ["get_issue", "create_issue", "update_issue", "search_issues"],
+    "linear": ["get_issues", "create_issue", "update_issue"],
+    "aws": ["list_buckets", "get_object", "put_object", "list_functions"],
+    "docker": ["list_containers", "run_container", "exec_command"],
+    "kubernetes": ["get_pods", "apply_manifest", "exec_command"],
 }
 
 
