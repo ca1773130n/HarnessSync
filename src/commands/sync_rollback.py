@@ -310,6 +310,16 @@ def main() -> None:
         default=False,
         help="Show what would be restored without making any changes.",
     )
+    parser.add_argument(
+        "--context",
+        action="store_true",
+        default=False,
+        help=(
+            "Show change context for each listed backup: what triggered the sync, "
+            "which sections changed, and which rule was modified. "
+            "Turns rollback into a root-cause debugging tool."
+        ),
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -349,7 +359,28 @@ def main() -> None:
             label_str = f"  [label: {snap['label']}]" if snap.get("label") else ""
             print(f"  {snap['name']}  ({dt}){label_str}")
 
+            # --context: show change context from backup metadata (item 23)
+            if args.context:
+                try:
+                    from src.backup_manager import get_backup_context
+                    ctx = get_backup_context(snap["path"])
+                    trigger = ctx.get("trigger")
+                    sections = ctx.get("changed_sections") or []
+                    rule = ctx.get("changed_rule")
+                    if trigger:
+                        print(f"      trigger        : {trigger}")
+                    if sections:
+                        print(f"      changed sections: {', '.join(sections)}")
+                    if rule:
+                        print(f"      changed rule    : {rule}")
+                    if not trigger and not sections and not rule:
+                        print("      (no change context recorded for this backup)")
+                except Exception:
+                    print("      (change context unavailable)")
+
         print("\nUse: /sync-rollback --target <target> [--backup <name>] [--label <label>]")
+        if not args.context:
+            print("     Add --context to see what triggered each backup.")
         return
 
     # Rollback specific target

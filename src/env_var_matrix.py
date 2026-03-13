@@ -563,6 +563,73 @@ def scan_project_env_vars(
 
 
 # ---------------------------------------------------------------------------
+# Cross-harness env var name translation (Item 13 — Env Variable Vault)
+# ---------------------------------------------------------------------------
+
+def translate_env_var(source_name: str, target: str) -> tuple[str | None, EnvSupport]:
+    """Return the target-harness equivalent name for a Claude Code env var.
+
+    Looks up *source_name* in the ENV_VAR_REGISTRY and returns the name that
+    should be used in the target harness config, along with the support level.
+
+    Example::
+
+        name, support = translate_env_var("ANTHROPIC_API_KEY", "aider")
+        # name = "ANTHROPIC_API_KEY", support = EnvSupport.NATIVE
+
+        name, support = translate_env_var("ANTHROPIC_MODEL", "aider")
+        # name = "AIDER_MODEL", support = EnvSupport.MAPPED
+
+        name, support = translate_env_var("ANTHROPIC_API_KEY", "codex")
+        # name = None, support = EnvSupport.NONE  (no equivalent)
+
+    Args:
+        source_name: The Claude Code / Anthropic environment variable name.
+        target: Target harness name (e.g. "aider", "gemini", "codex").
+
+    Returns:
+        (target_var_name_or_None, support_level). Returns (None, EnvSupport.NONE)
+        when the variable has no equivalent in the target harness.
+    """
+    import re as _re
+    for spec in ENV_VAR_REGISTRY:
+        if spec.name != source_name:
+            continue
+        support, note = spec.targets.get(target, (EnvSupport.NONE, ""))
+        if support == EnvSupport.NATIVE:
+            return source_name, support
+        if support == EnvSupport.MAPPED and note:
+            # Extract the mapped variable name: first ALL_CAPS token in the note
+            m = _re.search(r'\b([A-Z][A-Z0-9_]{2,})\b', note)
+            if m:
+                return m.group(1), support
+        if support in (EnvSupport.PARTIAL,):
+            return source_name, support
+        return None, support
+    return None, EnvSupport.NONE
+
+
+def list_translatable_env_vars(target: str) -> list[tuple[str, str, EnvSupport]]:
+    """List all Claude Code env vars that can be translated to a target harness.
+
+    Returns a sorted list of (source_name, target_name, support_level) tuples
+    for vars with support level NATIVE, MAPPED, or PARTIAL in the given target.
+
+    Args:
+        target: Harness name (e.g. "aider", "gemini").
+
+    Returns:
+        List of (claude_code_var, target_var, support_level) sorted by source name.
+    """
+    results: list[tuple[str, str, EnvSupport]] = []
+    for spec in ENV_VAR_REGISTRY:
+        target_name, support = translate_env_var(spec.name, target)
+        if target_name and support != EnvSupport.NONE:
+            results.append((spec.name, target_name, support))
+    return sorted(results, key=lambda t: t[0])
+
+
+# ---------------------------------------------------------------------------
 # Secrets Manager Integration (Item 14 — Secure Env Var Sync)
 # ---------------------------------------------------------------------------
 

@@ -3826,3 +3826,66 @@ _2026-03-13T10:47:06.719Z_
 - The CapabilityGapNotifier (item 1) uses a state file approach rather than a database to track seen items, keeping dependencies minimal and making the state file human-readable and debuggable.
 
 ---
+## Iteration 58
+_2026-03-13T11:03:52.703Z_
+
+### Items Attempted
+
+- **Sync Conflict Resolution Wizard** — pass
+- **Sync Preview / Dry Run Mode** — pass
+- **Live Capability Matrix Dashboard** — pass
+- **Team Sync Broadcast via Git** — pass
+- **New Harness Onboarding Wizard** — pass
+- **MCP Server Portability Analyzer** — pass
+- **Rule Effectiveness Scoring** — pass
+- **Auto-Generated Sync Changelog** — pass
+- **CI/CD Sync GitHub Action** — pass
+- **Sync Health Notifications** — pass
+- **Skill Compatibility Transpiler** — pass
+- **Env Var Secret Scanner** — pass
+- **Config Snapshot Versioning** — pass
+- **Multi-Project Sync Profiles** — pass
+- **Harness Benchmark Comparison** — pass
+- **Plugin/Extension Ecosystem Discovery** — pass
+- **Context Window Budget Advisor** — pass
+- **Sync on Git Commit Hook** — pass
+- **Cross-Harness Rule Deduplication** — pass
+- **Harness Migration Assistant** — pass
+- **Shared MCP Server Registry** — pass
+- **Sync Simulation Mode** — pass
+- **Permission Model Translator** — pass
+- **Slack/Discord Sync Notifications** — pass
+- **Incremental Partial Sync** — pass
+- **Harness Config Starter Templates** — pass
+- **Sync Audit Trail with Blame** — pass
+- **Live Target Config Watcher** — pass
+- **Cross-Harness Skill Marketplace** — pass
+- **Model Routing Config Sync** — pass
+- **Config Size Optimizer** — pass
+
+### Decisions Made
+
+- Updated CONTEXT_WINDOWS in token_estimator.py to reflect 2026 model reality: codex/cursor/aider/windsurf/cline moved from 8K-16K to 200K (Claude Sonnet 4), gemini from 32K to 1M (Gemini 2.0 Flash), continue/neovim to 128K conservative. Also updated INPUT_COST_PER_MTK to match 2026 pricing and tightened WARN/CRITICAL thresholds from 25%/50% to 5%/10% since rules should be a tiny fraction of modern large-context windows.
+- Added _CONTRADICTION_PATTERNS list and detect_contradictions()/format_contradiction_report() to RuleDeduplicator rather than a separate module, since contradiction detection is a natural extension of deduplication — both are about finding problematic rule pairs in the same config files.
+- Added MCP portability classification at the module level (constants, _infer_portability, _PORTABILITY_OVERRIDES) rather than as methods on McpRegistry, so portability data is available without instantiating the registry. RegistryEntry.portability is inferred from command launcher (npx→node, uvx→python) with per-server overrides for known Claude-Code-only plugins.
+- Added TargetConfigHistory to config_snapshot.py (same file as NamedCheckpointStore and SyncAuditLog) to keep all snapshot/versioning concerns co-located. The class uses a per-target/per-filename directory structure under ~/.harnesssync/target-history/ and stores versions as timestamped .txt files with a configurable keep limit.
+- Added scan_harness_configs() to SecretDetector as a new method that scans all known harness config file paths (cursor/mcp.json, opencode.json, windsurf mcp_config.json, etc.) for inline secrets. JSON files also get their mcpServers.env vars scanned via the existing scan_mcp_env() method, giving layered coverage.
+- Added RESOLUTION_BACKPORT constant and backport_to_source() method to ConflictResolutionWizard. The back-port option strips HarnessSync managed block markers from the target file to extract only user edits, then appends them to CLAUDE.md with a timestamped comment block so the provenance is clear.
+
+### Patterns Discovered
+
+- The codebase consistently uses a pattern of 'atomic write via tempfile + os.replace()' for state persistence — all JSON state files use this to prevent corruption on crash. New code should follow this pattern.
+- Most modules use @dataclass with field(default_factory=...) for mutable defaults rather than Optional[list] = None, which is idiomatic and avoids mutable default argument bugs.
+- The codebase organizes related functionality into a single module (e.g., config_snapshot.py contains ConfigSnapshot, NamedCheckpointStore, SyncAuditLog, and now TargetConfigHistory) rather than splitting into many small files. This reduces import complexity but can make files large.
+- Pattern: portability/compatibility metadata is best attached to the entity dataclass (RegistryEntry.portability) rather than computed externally, so any consumer can access it without extra logic.
+- The existing CONTEXT_WINDOWS dict (now updated) was stale by 10-100x — indicating a pattern where AI model context windows are volatile and need regular maintenance updates.
+
+### Takeaways
+
+- The token_estimator.py context windows were severely outdated (8K-32K when modern models have 128K-1M), making the budget advisor useless or actively misleading. Stale configuration constants are a recurring maintenance risk in AI tooling.
+- The ConflictResolutionWizard already had a sophisticated interactive UI but was missing the critical 'back-port' option that makes it genuinely useful — users who choose 'keep target' currently lose their manual edits on the next sync unless they remember to manually port them back.
+- config_snapshot.py is already quite large (800+ lines) and now exceeds 1000 lines with TargetConfigHistory. A future refactor could split it into config_snapshot.py (export/import), config_checkpoint.py (named checkpoints), config_audit.py (audit log), and config_history.py (target file history).
+- The mcp_registry.py portability analysis correctly infers that most MCP servers (npx-based) are 'node-required' not 'universal'. This is important since several harnesses run in sandboxed environments where subprocess execution is restricted.
+- The rule_deduplicator.py contradiction detection reuses the same contradiction patterns that already existed in conflict_detector.py, suggesting these patterns should be extracted to a shared constants module to avoid divergence.
+
+---

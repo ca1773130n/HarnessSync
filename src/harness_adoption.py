@@ -664,6 +664,97 @@ class UsageAttributionAnalyzer:
         return "\n".join(lines)
 
 
+def suggest_idle_harness_removal(
+    project_dir: Path | None = None,
+    idle_threshold_days: int = 30,
+    state_manager=None,
+) -> list[dict]:
+    """Return actionable removal suggestions for harnesses idle beyond threshold.
+
+    Analyses shell history, config file mtimes, and sync changelog to determine
+    which configured harnesses are unused. Returns a list of suggestion dicts so
+    callers can display them, log them, or act on them programmatically.
+
+    Args:
+        project_dir: Project root directory.
+        idle_threshold_days: Days of inactivity before a harness is considered idle.
+        state_manager: StateManager (created from project_dir if None).
+
+    Returns:
+        List of suggestion dicts:
+        {
+            "target":      str,
+            "days_idle":   float | None,
+            "reason":      str,
+            "remove_cmd":  str,
+        }
+    """
+    if state_manager is None:
+        from src.state_manager import StateManager
+        state_manager = StateManager()
+
+    analyzer = HarnessAdoptionAnalyzer(
+        project_dir=project_dir or Path.cwd(),
+        state_manager=state_manager,
+        stale_days=idle_threshold_days,
+    )
+    reports = analyzer.analyze()
+
+    suggestions: list[dict] = []
+    for report in reports:
+        if not report.stale:
+            continue
+        days_idle = report.days_since_sync
+        if days_idle is None:
+            reason = "Never synced and no config files detected."
+        else:
+            reason = (
+                f"No sync or config-file activity in {days_idle:.0f} day(s) "
+                f"(threshold: {idle_threshold_days}d)."
+            )
+        suggestions.append({
+            "target": report.target,
+            "days_idle": days_idle,
+            "reason": reason,
+            "remove_cmd": f"/sync-setup --remove {report.target}",
+        })
+
+    # Sort by most-idle first
+    suggestions.sort(key=lambda s: -(s["days_idle"] or 0))
+    return suggestions
+
+
+def format_idle_harness_suggestions(suggestions: list[dict]) -> str:
+    """Format idle harness suggestions for terminal display.
+
+    Args:
+        suggestions: Output of suggest_idle_harness_removal().
+
+    Returns:
+        Human-readable string ready to print.
+    """
+    if not suggestions:
+        return "All configured harnesses appear to be in use. No idle harnesses detected."
+
+    lines = [
+        f"Idle Harness Suggestions ({len(suggestions)} found)",
+        "─" * 54,
+        "",
+    ]
+    for s in suggestions:
+        days_str = f"{s['days_idle']:.0f}d" if s["days_idle"] is not None else "unknown"
+        lines.append(f"  {s['target']} — idle {days_str}")
+        lines.append(f"    Reason : {s['reason']}")
+        lines.append(f"    Remove : {s['remove_cmd']}")
+        lines.append("")
+
+    lines.append(
+        "You haven't used these harnesses recently. "
+        "Removing them reduces sync overhead and avoids stale config drift."
+    )
+    return "\n".join(lines)
+
+
 def generate_weekly_digest(
     project_dir: Path | None = None,
     targets: list[str] | None = None,

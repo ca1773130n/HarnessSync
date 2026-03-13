@@ -324,21 +324,25 @@ class BackupManager:
                 ensure_dir(backup_dir)
                 shutil.copy2(target_path, backup_dir / target_path.name)
 
-            # Write label metadata file if label provided
-            if label:
-                try:
-                    import json
-                    meta = {
-                        "label": label,
-                        "timestamp": timestamp,
-                        "source": str(target_path),
-                        "target_name": target_name,
-                    }
-                    (backup_dir / ".harnesssync-snapshot.json").write_text(
-                        json.dumps(meta, indent=2), encoding="utf-8"
-                    )
-                except OSError:
-                    pass  # Metadata write failure is non-fatal
+            # Always write metadata file (not just when label is provided).
+            # Stores change context for /sync-rollback --context (item 23).
+            try:
+                import json
+                meta: dict = {
+                    "label": label,
+                    "timestamp": timestamp,
+                    "source": str(target_path),
+                    "target_name": target_name,
+                    # Change-context fields populated by annotate_backup_context()
+                    "trigger": None,
+                    "changed_sections": [],
+                    "changed_rule": None,
+                }
+                (backup_dir / ".harnesssync-snapshot.json").write_text(
+                    json.dumps(meta, indent=2), encoding="utf-8"
+                )
+            except OSError:
+                pass  # Metadata write failure is non-fatal
 
             self.logger.debug(f"Backed up {target_path} to {backup_dir}")
             return backup_dir
@@ -606,6 +610,68 @@ def auto_snapshot_targets(
             result[target_name] = backup_paths
 
     return result
+
+
+def annotate_backup_context(
+    backup_dir: Path,
+    trigger: str,
+    changed_sections: list[str] | None = None,
+    changed_rule: str | None = None,
+) -> bool:
+    """Write change-context metadata into an existing backup directory.
+
+    Called after a backup is created to record *why* it was made — what
+    triggered the sync, which sections changed, and which specific rule was
+    modified. This data is surfaced by /sync-rollback --context.
+
+    Args:
+        backup_dir: Path to the backup directory created by backup_target().
+        trigger: Human-readable description of what triggered the backup
+                 (e.g. "manual /sync", "git pre-commit hook", "drift detected").
+        changed_sections: Config sections that were modified (e.g. ["rules", "mcp"]).
+        changed_rule: The specific rule that changed, if known.
+
+    Returns:
+        True if the metadata was written successfully, False otherwise.
+    """
+    meta_file = backup_dir / ".harnesssync-snapshot.json"
+    try:
+        meta: dict = {}
+        if meta_file.exists():
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        meta["trigger"] = trigger
+        meta["changed_sections"] = changed_sections or []
+        meta["changed_rule"] = changed_rule
+        meta_file.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        return True
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
+def get_backup_context(backup_dir: Path) -> dict:
+    """Read change-context metadata from a backup directory.
+
+    Returns a dict with keys: trigger, changed_sections, changed_rule, label,
+    timestamp, source, target_name. Missing keys default to None / empty list.
+    """
+    meta_file = backup_dir / ".harnesssync-snapshot.json"
+    defaults: dict = {
+        "trigger": None,
+        "changed_sections": [],
+        "changed_rule": None,
+        "label": None,
+        "timestamp": None,
+        "source": None,
+        "target_name": None,
+    }
+    if not meta_file.exists():
+        return defaults
+    try:
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        defaults.update(meta)
+        return defaults
+    except (OSError, json.JSONDecodeError):
+        return defaults
 
 
 def format_snapshot_manifest(snapshot_map: dict[str, list[Path]]) -> str:

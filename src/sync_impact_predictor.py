@@ -132,6 +132,10 @@ class SyncImpactReport:
     removed_mcp_servers: list[str] = field(default_factory=list)
     new_rules_lines: int = 0
     removed_rules_lines: int = 0
+    # File-count estimates per target (item 21 — Sync Impact Estimator)
+    estimated_files_per_target: dict[str, int] = field(default_factory=dict)
+    # Targets where a high-importance file (e.g. system prompt) would change
+    high_impact_targets: list[str] = field(default_factory=list)
 
     @property
     def has_warnings(self) -> bool:
@@ -245,6 +249,15 @@ class SyncImpactReport:
             for item in notes:
                 target_tag = f"[{item.target}] " if item.target != "all" else ""
                 lines.append(f"  {target_tag}{item.message}")
+            lines.append("")
+
+        # File-count estimates per target (item 21 — Sync Impact Estimator)
+        if self.estimated_files_per_target:
+            total_files = sum(self.estimated_files_per_target.values())
+            lines.append(f"Files to change: ~{total_files} across {len(self.estimated_files_per_target)} target(s)")
+            for target, count in sorted(self.estimated_files_per_target.items()):
+                flag = "  ⚠ high-impact" if target in self.high_impact_targets else ""
+                lines.append(f"  {target:<12} ~{count} file(s){flag}")
 
         return "\n".join(lines)
 
@@ -289,8 +302,63 @@ class SyncImpactPredictor:
         self._analyze_mcp_changes(current_source, previous_source, report)
         self._analyze_rules_changes(current_source, previous_source, report, targets)
         self._analyze_settings_changes(current_source, previous_source, report)
+        self._estimate_file_counts(current_source, previous_source, targets, report)
 
         return report
+
+    # Number of adapter-written files per section per harness (conservative estimates)
+    _FILES_PER_SECTION: dict[str, dict[str, int]] = {
+        "rules":    {"codex": 1, "gemini": 1, "opencode": 1, "cursor": 1, "aider": 1, "windsurf": 1},
+        "skills":   {"codex": 3, "gemini": 3, "opencode": 3, "cursor": 3, "aider": 1, "windsurf": 2},
+        "agents":   {"codex": 2, "gemini": 2, "opencode": 2, "cursor": 2, "aider": 0, "windsurf": 2},
+        "commands": {"codex": 2, "gemini": 2, "opencode": 2, "cursor": 2, "aider": 0, "windsurf": 0},
+        "mcp":      {"codex": 1, "gemini": 1, "opencode": 1, "cursor": 1, "aider": 0, "windsurf": 1},
+        "settings": {"codex": 1, "gemini": 1, "opencode": 1, "cursor": 0, "aider": 1, "windsurf": 0},
+    }
+
+    # Sections considered "high importance" — changing them alters the AI's core behaviour
+    _HIGH_IMPORTANCE_SECTIONS = frozenset({"rules", "settings"})
+
+    def _estimate_file_counts(
+        self,
+        current: dict,
+        previous: dict,
+        targets: list[str],
+        report: SyncImpactReport,
+    ) -> None:
+        """Populate estimated_files_per_target and high_impact_targets on *report*.
+
+        Counts how many output files each target adapter would write based on
+        which sections are present in *current* and whether they differ from
+        *previous*. High-impact targets are those where a high-importance section
+        (rules or settings) has changed content.
+        """
+        changed_sections: set[str] = set()
+
+        for section in ("rules", "skills", "agents", "commands", "mcp", "settings"):
+            cur_val = current.get(section) or current.get(f"{section}_content")
+            prev_val = previous.get(section) or previous.get(f"{section}_content")
+            if cur_val and cur_val != prev_val:
+                changed_sections.add(section)
+
+        # Also treat non-empty additions as "changed"
+        if report.new_mcp_servers or report.removed_mcp_servers:
+            changed_sections.add("mcp")
+        if report.new_rules_lines or report.removed_rules_lines:
+            changed_sections.add("rules")
+
+        for target in targets:
+            file_count = 0
+            is_high_impact = False
+            for section in changed_sections:
+                per_harness = self._FILES_PER_SECTION.get(section, {})
+                file_count += per_harness.get(target, 0)
+                if section in self._HIGH_IMPORTANCE_SECTIONS and per_harness.get(target, 0) > 0:
+                    is_high_impact = True
+            if file_count > 0:
+                report.estimated_files_per_target[target] = file_count
+            if is_high_impact and file_count > 0:
+                report.high_impact_targets.append(target)
 
     def _analyze_mcp_changes(
         self, current: dict, previous: dict, report: SyncImpactReport
