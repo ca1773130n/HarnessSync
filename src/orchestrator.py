@@ -629,6 +629,20 @@ class SyncOrchestrator:
                         'scope_patterns': [],
                     })
 
+                # --- INLINE HARNESS BLOCKS: inject <!-- harness:X --> blocks ---
+                try:
+                    _inline_block = reader.get_inline_harness_block(target)
+                    if _inline_block:
+                        target_data['rules'] = list(target_data.get('rules', []))
+                        target_data['rules'].append({
+                            'path': f'CLAUDE.md#harness:{target}',
+                            'content': _inline_block,
+                            'scope': 'project',
+                            'scope_patterns': [],
+                        })
+                except Exception:
+                    pass  # Inline block extraction is best-effort
+
                 # --- MCP ALIASING: apply per-target server name aliases ---
                 try:
                     from src.mcp_aliasing import load_aliases, apply_aliases

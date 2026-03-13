@@ -399,6 +399,31 @@ class HarnessUndoStack:
         )
         return header + "\n\n" + "\n\n".join(diff_chunks)
 
+    def undo_n(self, steps: int, dry_run: bool = False) -> list[UndoResult]:
+        """Undo the last *steps* sync operations in sequence.
+
+        Applies :meth:`undo` *steps* times, stopping early if the stack
+        becomes empty or an individual undo fails.
+
+        Args:
+            steps: Number of undo steps to perform (must be >= 1).
+            dry_run: If True, report what would be restored without writing.
+
+        Returns:
+            List of UndoResult, one per attempted step, in order of
+            application.  May be shorter than *steps* if the stack is
+            exhausted or an error occurs.
+        """
+        if steps < 1:
+            return []
+        results: list[UndoResult] = []
+        for _ in range(steps):
+            result = self.undo(dry_run=dry_run)
+            results.append(result)
+            if not result.ok:
+                break  # Stack exhausted or error — stop here
+        return results
+
     def undo_with_diff(self, show_diff: bool = True) -> tuple[str, UndoResult]:
         """Show a diff preview then perform the undo operation.
 
@@ -473,6 +498,10 @@ class SyncUndoManager:
     def undo(self, harness: str, dry_run: bool = False) -> UndoResult:
         """Undo the last sync for ``harness``."""
         return self._stack(harness).undo(dry_run=dry_run)
+
+    def undo_n(self, harness: str, steps: int, dry_run: bool = False) -> list[UndoResult]:
+        """Undo the last *steps* sync operations for ``harness``."""
+        return self._stack(harness).undo_n(steps, dry_run=dry_run)
 
     def redo(self, harness: str, dry_run: bool = False) -> UndoResult:
         """Redo the last undone operation for ``harness``."""

@@ -320,6 +320,16 @@ def main() -> None:
             "Turns rollback into a root-cause debugging tool."
         ),
     )
+    parser.add_argument(
+        "--steps",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Undo the last N sync operations using the undo stack (not file backups). "
+            "Requires --target.  Example: --target codex --steps 3"
+        ),
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -327,6 +337,36 @@ def main() -> None:
         return
 
     project_dir = Path(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
+
+    # --steps N: undo the last N operations via HarnessUndoStack
+    if args.steps is not None:
+        if not args.target:
+            print("Error: --steps requires --target.", file=sys.stderr)
+            sys.exit(1)
+        try:
+            from src.sync_undo_stack import SyncUndoManager
+            mgr = SyncUndoManager(project_dir=project_dir)
+            results = mgr.undo_n(args.target, args.steps, dry_run=args.dry_run)
+        except Exception as exc:
+            print(f"Error accessing undo stack: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        if not results:
+            print(f"Undo stack for '{args.target}' is empty.")
+            return
+
+        for i, result in enumerate(results, 1):
+            if result.ok:
+                mode = "Would restore" if args.dry_run else "Restored"
+                files = ", ".join(result.files_restored) or "(none)"
+                print(f"  Step {i}: {mode} '{result.label}' — {files}")
+            else:
+                print(f"  Step {i}: {result.error}")
+                break
+
+        ok_count = sum(1 for r in results if r.ok)
+        print(f"\n{ok_count}/{len(results)} undo step(s) {'previewed' if args.dry_run else 'applied'}.")
+        return
 
     if args.list or (not args.target):
         # List all available backups using BackupManager for label-aware output

@@ -877,6 +877,79 @@ class SourceReader:
                     break
         return result
 
+    def get_inline_harness_block(self, target_name: str) -> str:
+        """Extract the inline ``<!-- harness:X -->`` block for *target_name* from CLAUDE.md.
+
+        Supports the fenced inline override syntax described in product-ideation
+        item 3: users can embed harness-specific sections directly inside CLAUDE.md
+        without maintaining separate files::
+
+            <!-- harness:codex -->
+            Always use TypeScript.  No implicit any.
+            <!-- /harness:codex -->
+
+        This method reads the primary CLAUDE.md (project or global) and returns the
+        content of the matching block for *target_name*.  It returns an empty string
+        when no inline block exists for the target, making it safe to call
+        unconditionally — callers should treat the empty string as "no override".
+
+        Args:
+            target_name: Target harness name (e.g. "codex", "gemini").
+
+        Returns:
+            Extracted block content (stripped), or empty string if none found.
+        """
+        from src.harness_override import extract_inline_block
+
+        # Try project CLAUDE.md first, then global ~/.claude/CLAUDE.md
+        candidates: list[Path] = []
+        if self.project_dir:
+            candidates.append(self.project_dir / "CLAUDE.md")
+            candidates.append(self.project_dir / ".claude" / "CLAUDE.md")
+        if self.cc_home:
+            candidates.append(self.cc_home / "CLAUDE.md")
+
+        for path in candidates:
+            if path.is_file():
+                try:
+                    content = path.read_text(encoding="utf-8")
+                    block = extract_inline_block(content, target_name)
+                    if block:
+                        return block
+                except OSError:
+                    continue
+        return ""
+
+    def get_all_inline_harness_blocks(self) -> dict[str, str]:
+        """Return all inline harness blocks found in CLAUDE.md as {harness: content}.
+
+        Scans the primary CLAUDE.md file for all ``<!-- harness:X -->`` blocks and
+        returns a mapping of harness name → block content.  Empty if CLAUDE.md
+        has no inline blocks.
+
+        Returns:
+            Dict mapping harness name → extracted block content.
+        """
+        from src.harness_override import parse_inline_harness_blocks
+
+        candidates: list[Path] = []
+        if self.project_dir:
+            candidates.append(self.project_dir / "CLAUDE.md")
+            candidates.append(self.project_dir / ".claude" / "CLAUDE.md")
+        if self.cc_home:
+            candidates.append(self.cc_home / "CLAUDE.md")
+
+        for path in candidates:
+            if path.is_file():
+                try:
+                    content = path.read_text(encoding="utf-8")
+                    blocks = parse_inline_harness_blocks(content)
+                    if blocks:
+                        return blocks
+                except OSError:
+                    continue
+        return {}
+
     def discover_all(self) -> dict:
         """
         Convenience method to get all config types at once.

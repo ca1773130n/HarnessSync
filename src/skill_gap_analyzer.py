@@ -1225,6 +1225,53 @@ def build_skill_coverage_report(
     )
 
 
+def post_sync_capability_report(
+    synced_targets: list[str],
+    project_dir: Path | None = None,
+) -> str:
+    """Generate a compact capability gap summary to display after a sync.
+
+    Surfaces which Claude Code capabilities are unavailable in each target
+    that was just synced, with suggested workarounds.  Returns an empty
+    string when all targets support all capabilities (nothing to warn about).
+
+    This is the *post-sync alert* described in product-ideation item 5:
+    "After each sync, report which Claude Code capabilities have no
+    equivalent in each target and suggest workarounds."
+
+    Args:
+        synced_targets: List of harness names that were synced in this run.
+        project_dir: Project root (unused currently, reserved for future
+                     per-project capability overrides).
+
+    Returns:
+        Human-readable capability gap summary, or empty string if no gaps.
+    """
+    if not synced_targets:
+        return ""
+
+    reports = [build_agent_gap_report(t) for t in synced_targets]
+    gapped = [r for r in reports if r.gaps]
+    if not gapped:
+        return ""
+
+    lines = ["", "## Post-Sync Capability Alerts", ""]
+    for report in gapped:
+        cap_names = ", ".join(g.capability for g in report.gaps)
+        lines.append(
+            f"  {report.target} ({report.coverage_score}/100): "
+            f"missing — {cap_names}"
+        )
+        for gap in report.gaps:
+            if gap.workaround:
+                lines.append(f"    → {gap.capability}: {gap.workaround}")
+    lines += [
+        "",
+        "  Run /sync-gaps for a full capability analysis.",
+    ]
+    return "\n".join(lines)
+
+
 def _check_skill_in_target(skill_name: str, target: str, project_dir: Path) -> bool:
     """Check if a skill has been synced to the target harness location.
 

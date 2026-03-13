@@ -34,12 +34,117 @@ team-specific tools, internal services) without breaking sync purity.
 """
 
 import json
+import re
 import tempfile
 from pathlib import Path
 
 
 _OVERRIDE_MARKER_START = "\n\n<!-- HarnessSync per-harness override: {harness} -->\n"
 _OVERRIDE_MARKER_END = "\n<!-- End HarnessSync override: {harness} -->\n"
+
+# Inline harness block pattern: <!-- harness:X -->...<!-- /harness:X -->
+# Matches both tightly-spaced and whitespace-padded forms.
+_INLINE_BLOCK_RE = re.compile(
+    r"<!--\s*harness:(?P<harness>[a-zA-Z0-9_-]+)\s*-->"
+    r"(?P<content>.*?)"
+    r"<!--\s*/harness:(?P=harness)\s*-->",
+    re.DOTALL,
+)
+
+
+def parse_inline_harness_blocks(content: str) -> dict[str, str]:
+    """Extract all inline harness-specific blocks from CLAUDE.md content.
+
+    Parses fenced sections of the form::
+
+        <!-- harness:codex -->
+        This text is injected only into Codex's config.
+        <!-- /harness:codex -->
+
+    Multiple blocks for the same harness are concatenated in order.
+
+    Args:
+        content: Raw CLAUDE.md text.
+
+    Returns:
+        Dict mapping harness name → extracted block content (stripped).
+        Harnesses with no blocks are not included.
+    """
+    result: dict[str, list[str]] = {}
+    for m in _INLINE_BLOCK_RE.finditer(content):
+        harness = m.group("harness").lower()
+        block = m.group("content").strip()
+        if block:
+            result.setdefault(harness, []).append(block)
+    return {h: "\n\n".join(parts) for h, parts in result.items()}
+
+
+def extract_inline_block(content: str, harness: str) -> str:
+    """Return the concatenated inline block content for *harness* in *content*.
+
+    Convenience wrapper around :func:`parse_inline_harness_blocks` for a
+    single harness.
+
+    Args:
+        content: Raw CLAUDE.md text.
+        harness: Target harness name (case-insensitive).
+
+    Returns:
+        Extracted block content, or empty string if none found.
+    """
+    blocks = parse_inline_harness_blocks(content)
+    return blocks.get(harness.lower(), "")
+
+
+def strip_all_inline_blocks(content: str) -> str:
+    """Remove all harness-specific inline blocks from *content*.
+
+    Use this to produce the "default" version of CLAUDE.md that is sent to
+    harnesses that have no matching inline block — they receive the base
+    content without any harness-specific sections.
+
+    Args:
+        content: Raw CLAUDE.md text.
+
+    Returns:
+        Content with all ``<!-- harness:X -->…<!-- /harness:X -->`` blocks
+        removed.  Surrounding blank lines are collapsed.
+    """
+    stripped = _INLINE_BLOCK_RE.sub("", content)
+    # Collapse runs of 3+ blank lines down to 2
+    stripped = re.sub(r"\n{3,}", "\n\n", stripped)
+    return stripped.strip()
+
+
+def inject_inline_block(base_content: str, harness: str, block_content: str) -> str:
+    """Add or replace the inline block for *harness* in *base_content*.
+
+    If an existing block for *harness* is found it is replaced in place.
+    Otherwise the new block is appended at the end of *base_content*.
+
+    Args:
+        base_content: Existing CLAUDE.md text.
+        harness: Target harness name.
+        block_content: New content to place inside the harness block.
+
+    Returns:
+        Updated CLAUDE.md text.
+    """
+    harness_lower = harness.lower()
+    tag_open = f"<!-- harness:{harness_lower} -->"
+    tag_close = f"<!-- /harness:{harness_lower} -->"
+    new_block = f"{tag_open}\n{block_content.strip()}\n{tag_close}"
+
+    # Pattern for existing block (case-insensitive match on the harness name)
+    existing_re = re.compile(
+        rf"<!--\s*harness:{re.escape(harness_lower)}\s*-->.*?<!--\s*/harness:{re.escape(harness_lower)}\s*-->",
+        re.DOTALL | re.IGNORECASE,
+    )
+    if existing_re.search(base_content):
+        return existing_re.sub(new_block, base_content, count=1)
+
+    # Append new block separated by blank lines
+    return base_content.rstrip() + "\n\n" + new_block + "\n"
 
 _DEFAULT_OVERRIDES_DIR = Path.home() / ".harnesssync" / "overrides"
 
