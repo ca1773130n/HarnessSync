@@ -482,13 +482,11 @@ class ConflictDetector:
         """
         import os
         import subprocess
-        import sys
         import tempfile
 
         file_path = three_way["file_path"]
         source_lines = three_way["source_lines"]
         current_lines = three_way["current_lines"]
-        diff_source_vs_current = three_way["unified_source_vs_current"]
         diff_base_vs_current = three_way["unified_base_vs_current"]
 
         print(f"\n{'=' * 70}")

@@ -11,11 +11,15 @@ Supported dotfile managers:
 - dotbot: Generates a link block for dotbot config (install.conf.yaml)
 - bare git repo: Generic list of paths to git add
 
-Solving the "my new machine doesn't have my AI rules" problem by ensuring
-synced configs are checked into the user's dotfile repo.
+Also provides DotfilesAutoCommitter: after each successful sync, optionally
+commit the changed target configs to a designated dotfiles git repo with a
+structured commit message (item 2).
 """
 
+import shutil
+import subprocess
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -232,3 +236,273 @@ class DotfileIntegrationGenerator:
                 "run these commands to track HarnessSync output files."
             ),
         )
+
+
+# ---------------------------------------------------------------------------
+# Dotfiles Repo Auto-Committer (item 2)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AutoCommitResult:
+    """Result of an auto-commit operation."""
+
+    repo_path: str
+    committed: bool
+    commit_sha: str = ""
+    files_staged: list[str] = field(default_factory=list)
+    message: str = ""
+    error: str = ""
+
+    def format(self) -> str:
+        if self.error:
+            return f"dotfiles auto-commit failed: {self.error}"
+        if not self.committed:
+            return f"dotfiles repo {self.repo_path}: nothing to commit"
+        return (
+            f"dotfiles auto-commit: {self.commit_sha[:8] if self.commit_sha else 'ok'} "
+            f"({len(self.files_staged)} file(s)) — {self.message}"
+        )
+
+
+class DotfilesAutoCommitter:
+    """Auto-commit changed harness configs into a dotfiles git repository.
+
+    After a successful HarnessSync sync, call ``commit()`` to stage all
+    tracked harness config files that have changed and create a structured
+    git commit in the specified dotfiles repo.
+
+    The dotfiles repo can be:
+    - A normal git repo at the given path (files copied/symlinked there)
+    - The user's home directory if it is itself a git repo (bare-git style)
+
+    Args:
+        dotfiles_repo: Path to the dotfiles git repository root.
+        project_dir: HarnessSync project directory (used to find tracked files).
+        targets: Optional list of target harnesses to include. Defaults to all.
+        push_after_commit: If True, run ``git push`` after committing.
+        commit_message_prefix: Prefix for auto-generated commit messages.
+    """
+
+    _GIT = "git"
+
+    def __init__(
+        self,
+        dotfiles_repo: Path,
+        project_dir: Path,
+        targets: list[str] | None = None,
+        push_after_commit: bool = False,
+        commit_message_prefix: str = "harnesssync",
+    ):
+        self.dotfiles_repo = dotfiles_repo
+        self.project_dir = project_dir
+        self.targets = targets
+        self.push_after_commit = push_after_commit
+        self.commit_message_prefix = commit_message_prefix
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def is_available(self) -> bool:
+        """Return True if git is on PATH and dotfiles_repo is a git repo."""
+        if not shutil.which(self._GIT):
+            return False
+        git_dir = self.dotfiles_repo / ".git"
+        return git_dir.exists() or self._is_bare_git_root(self.dotfiles_repo)
+
+    def commit(
+        self,
+        changed_targets: list[str] | None = None,
+        dry_run: bool = False,
+    ) -> AutoCommitResult:
+        """Stage changed harness config files and commit them.
+
+        Discovers which tracked files have been modified (git status),
+        stages them, and creates a commit with a structured message listing
+        which targets changed.
+
+        Args:
+            changed_targets: Names of targets that were updated in this sync
+                             (used in the commit message). If None, all targets.
+            dry_run: If True, show what would be committed without writing.
+
+        Returns:
+            AutoCommitResult describing what happened.
+        """
+        if not self.is_available():
+            return AutoCommitResult(
+                repo_path=str(self.dotfiles_repo),
+                committed=False,
+                error="git not available or dotfiles_repo is not a git repository",
+            )
+
+        # Collect tracked files that exist on disk
+        targets = changed_targets or self.targets or list(_TARGET_PROJECT_FILES.keys())
+        tracked = self._collect_tracked_files(targets)
+        if not tracked:
+            return AutoCommitResult(
+                repo_path=str(self.dotfiles_repo),
+                committed=False,
+                message="no tracked files found",
+            )
+
+        # Determine which files are actually modified vs repo
+        staged = self._find_modified_files(tracked)
+        if not staged:
+            return AutoCommitResult(
+                repo_path=str(self.dotfiles_repo),
+                committed=False,
+                message="no changes detected",
+            )
+
+        if dry_run:
+            return AutoCommitResult(
+                repo_path=str(self.dotfiles_repo),
+                committed=False,
+                files_staged=staged,
+                message=f"[dry-run] would commit {len(staged)} file(s)",
+            )
+
+        # Stage files
+        stage_err = self._stage_files(staged)
+        if stage_err:
+            return AutoCommitResult(
+                repo_path=str(self.dotfiles_repo),
+                committed=False,
+                files_staged=staged,
+                error=f"git add failed: {stage_err}",
+            )
+
+        # Build commit message
+        msg = self._build_commit_message(targets, staged)
+
+        # Commit
+        sha, commit_err = self._create_commit(msg)
+        if commit_err:
+            return AutoCommitResult(
+                repo_path=str(self.dotfiles_repo),
+                committed=False,
+                files_staged=staged,
+                message=msg,
+                error=f"git commit failed: {commit_err}",
+            )
+
+        result = AutoCommitResult(
+            repo_path=str(self.dotfiles_repo),
+            committed=True,
+            commit_sha=sha,
+            files_staged=staged,
+            message=msg,
+        )
+
+        if self.push_after_commit:
+            push_err = self._push()
+            if push_err:
+                result.error = f"commit ok but git push failed: {push_err}"
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _collect_tracked_files(self, targets: list[str]) -> list[str]:
+        """Return relative paths of tracked files that exist in dotfiles_repo."""
+        files: list[str] = []
+        seen: set[str] = set()
+        for target in targets:
+            for rel in _TARGET_PROJECT_FILES.get(target, []):
+                if rel in seen:
+                    continue
+                # File could live in dotfiles_repo directly or be sourced from project_dir
+                candidate = self.dotfiles_repo / rel
+                if candidate.is_file():
+                    files.append(rel)
+                    seen.add(rel)
+        return sorted(files)
+
+    def _find_modified_files(self, tracked: list[str]) -> list[str]:
+        """Return which tracked files show as modified/untracked in git status."""
+        try:
+            result = subprocess.run(
+                [self._GIT, "-C", str(self.dotfiles_repo), "status", "--porcelain", "--"] + tracked,
+                capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode != 0:
+                return tracked  # Assume all changed on git error
+
+            modified = []
+            for line in result.stdout.splitlines():
+                if len(line) >= 3:
+                    path = line[3:].strip().strip('"')
+                    if path in tracked:
+                        modified.append(path)
+            return modified
+        except Exception:
+            return tracked  # Fail open: stage everything
+
+    def _stage_files(self, files: list[str]) -> str:
+        """Stage files for commit. Returns error string or empty string."""
+        try:
+            result = subprocess.run(
+                [self._GIT, "-C", str(self.dotfiles_repo), "add", "--"] + files,
+                capture_output=True, text=True, timeout=15,
+            )
+            return result.stderr.strip() if result.returncode != 0 else ""
+        except Exception as e:
+            return str(e)
+
+    def _create_commit(self, message: str) -> tuple[str, str]:
+        """Create git commit. Returns (sha, error_str)."""
+        try:
+            result = subprocess.run(
+                [self._GIT, "-C", str(self.dotfiles_repo), "commit", "-m", message],
+                capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode != 0:
+                return "", result.stderr.strip()
+            # Parse commit SHA from output like "[main abc1234] ..."
+            sha = ""
+            for line in result.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 2 and "]" in parts[0]:
+                    sha = parts[1].rstrip("]")
+                    break
+            return sha, ""
+        except Exception as e:
+            return "", str(e)
+
+    def _push(self) -> str:
+        """Push to remote. Returns error string or empty string."""
+        try:
+            result = subprocess.run(
+                [self._GIT, "-C", str(self.dotfiles_repo), "push"],
+                capture_output=True, text=True, timeout=30,
+            )
+            return result.stderr.strip() if result.returncode != 0 else ""
+        except Exception as e:
+            return str(e)
+
+    def _build_commit_message(self, targets: list[str], staged_files: list[str]) -> str:
+        """Build a structured commit message for the auto-commit."""
+        now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        target_list = ", ".join(sorted(set(targets))) if targets else "all"
+        prefix = self.commit_message_prefix
+        return (
+            f"{prefix}: sync harness configs [{target_list}]\n\n"
+            f"Auto-committed by HarnessSync at {now}\n"
+            f"Files updated ({len(staged_files)}):\n"
+            + "\n".join(f"  {f}" for f in sorted(staged_files))
+        )
+
+    @staticmethod
+    def _is_bare_git_root(path: Path) -> bool:
+        """Check if path is the working tree of a bare git repo."""
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(path), "rev-parse", "--git-dir"],
+                capture_output=True, text=True, timeout=5,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False

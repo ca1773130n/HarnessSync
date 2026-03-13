@@ -3278,3 +3278,71 @@ _2026-03-13T08:36:20.512Z_
 - Indentation errors from string insertion near method boundaries (the return paths bug in source_reader.py) are easy to miss; the stale return was at the end of the _collect_source_paths method that my insertion cut off from its natural end
 
 ---
+## Iteration 50
+_2026-03-13T08:53:03.617Z_
+
+### Items Attempted
+
+- **Sync Conflict Resolution Wizard** — pass
+- **Live Capability Gap Dashboard** — pass
+- **Selective Sync Profiles** — pass
+- **MCP Server Compatibility Checker** — pass
+- **Team Config Sharing via Git** — pass
+- **Secret Scrubber for Synced Configs** — pass
+- **Context-Aware Harness Switcher** — pass
+- **Timestamped Rollback Snapshots** — pass
+- **Skill Translation Quality Score** — pass
+- **Watch Mode with Live Sync** — pass
+- **AI-Powered Adapter Gap Filler** — pass
+- **Per-Project Sync Overrides** — pass
+- **Auto-Detect New Harness Installs** — pass
+- **Human-Readable Sync Changelog** — pass
+- **Harness Feature Benchmark Comparison** — pass
+- **Environment Variable Mapping Across Harnesses** — pass
+- **Sync on PR Merge via Git Hook** — pass
+- **Harness Health Monitor** — pass
+- **Community Skill Registry** — pass
+- **Sync Status Webhook Notifications** — pass
+- **Permission Model Translator** — pass
+- **Skills Usage Frequency Tracker** — pass
+- **Multi-Machine Sync via Cloud State** — pass
+- **Harness Version Pinning** — pass
+- **Rule Tagging and Selective Sync** — pass
+- **First-Time Setup Wizard** — pass
+- **Drift Alert Notifications** — pass
+- **Unified AI Tool Inventory** — pass
+- **Sync Performance Metrics** — pass
+- **Auto Harness CLI Updater** — pass
+- **Context Window Budget Advisor** — pass
+- **Reverse Import: Adopt Target Config into Claude Code** — pass
+- **Harness-Specific Rule Preview** — pass
+
+### Decisions Made
+
+- Added format_side_by_side_diff() to ConflictDetector to render visual two-column terminal diffs using SequenceMatcher opcodes (equal/replace/delete/insert), filling a gap where three-way diff data existed but had no visual renderer
+- Added get_features_missing_everywhere(), get_cross_harness_gaps(), and format_feature_adoption_report() to HarnessFeatureMatrix to provide adoption metrics and Unicode block-char progress bars for the capability gap dashboard
+- Added auto_snapshot_targets() and format_snapshot_manifest() to backup_manager as module-level functions to enable bulk pre-sync snapshotting from state dict, complementing the existing per-file BackupManager.backup_target()
+- Added score_skills_batch() and format_batch_score_report() to skill_translator to score a list of (name, content) tuples in one call, making batch translation quality assessment practical for large skill sets
+- Added SkillUsageTracker class and SkillUsageEntry dataclass to rule_effectiveness.py to track skill invocations per harness — separate from RuleEffectivenessTracker which only tracked rules, not skills
+- Added notify_drift_event() to WebhookNotifier to dispatch drift-specific webhook payloads with event=drift_detected, routing to webhooks subscribed to 'drift' or 'success' events
+- Added generate_upgrade_migration_guide() and format_upgrade_migration_guide() to harness_version_compat to produce step-by-step migration guides when upgrading a harness, showing features gained/lost, auto-migrations, deprecated fields, and manual actions
+- Added pre_sync_check() and format_pre_sync_report() to mcp_tool_compat to validate all MCP server configs before writing to targets, returning a go/no-go structured result with blocking errors and warnings
+- Added suggest_size_optimizations() to token_estimator to identify over-budget harnesses and produce per-harness suggestions for trimming synced rules files to a target context fraction
+
+### Patterns Discovered
+
+- Most files already had thorough implementations — the effective strategy was identifying functional gaps (reporting/bulk operations missing when per-item operations existed, visual rendering missing when data structures existed) rather than building from scratch
+- The atomic write pattern (tempfile + os.replace + os.fsync) is used consistently across state_manager, rule_effectiveness, webhook_notifier, and harness_version_compat — new persistence code should follow this pattern
+- Functions that format data for terminal display follow a consistent shape: build a list[str] of lines then join with newline — this keeps individual lines easy to compose and test
+- Product-ideation items often map to 'add the missing layer': data exists but no aggregation (score_skills_batch), structure exists but no renderer (format_side_by_side_diff), per-item API exists but no bulk API (auto_snapshot_targets)
+- Version comparison throughout the codebase uses _version_gte() from harness_version_compat — callers should import this rather than implement their own tuple comparison
+
+### Takeaways
+
+- 30 product-ideation items across a mature codebase means most functionality already exists — iterate on presentation, aggregation, and integration rather than creating new modules
+- Pre-sync validation hooks (pre_sync_check, auto_snapshot_targets) are high-leverage additions because they run unconditionally before writes, catching problems before they corrupt target configs
+- Adding suggest_size_optimizations() alongside the existing token estimator demonstrates a useful pattern: metrics + advice is more actionable than metrics alone
+- SkillUsageTracker was a genuine gap: the codebase tracked rule effectiveness comprehensively but had no equivalent for skills, which are a first-class HarnessSync concept
+- Shannon entropy-based secret detection was already well-implemented; adding more patterns there would yield diminishing returns compared to adding the missing higher-level workflow integrations (bulk snapshot, pre-sync check, drift webhook)
+
+---

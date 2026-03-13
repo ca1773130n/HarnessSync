@@ -889,10 +889,6 @@ class HarnessFeatureMatrix:
                 1 for h in ALL_HARNESSES
                 if _FEATURE_MATRIX.get(feat, {}).get(h) in ("partial", "adapter")
             )
-            unsupported_count = sum(
-                1 for h in ALL_HARNESSES
-                if _FEATURE_MATRIX.get(feat, {}).get(h) == "unsupported"
-            )
             total = len(ALL_HARNESSES)
             score = (native_count + 0.5 * partial_count) / total
             scored.append((score, feat))

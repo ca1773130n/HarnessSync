@@ -226,7 +226,6 @@ class RuleEffectivenessTracker:
         Args:
             titles: List of rule heading strings from CLAUDE.md.
         """
-        now_iso = datetime.now(timezone.utc).isoformat()
         rules = self._data.setdefault("rules", {})
         for title in titles:
             slug = _slugify(title)

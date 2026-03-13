@@ -9,9 +9,14 @@ Analyzes the current Claude Code config and scores it across dimensions:
 - size: CLAUDE.md too large for some targets?
 
 Outputs actionable recommendations.
+
+Also provides SyncHealthScore: a per-harness 0-100 score with trend tracking
+(item 19) stored in ~/.claude/harnesssync_health_history.json.
 """
 
+import json
 import re
+import time
 from pathlib import Path
 
 
@@ -812,3 +817,230 @@ def get_drift_analytics(state_manager, targets: list[str] | None = None) -> dict
         "stale_targets": stale_targets,
         "insights": insights,
     }
+
+
+# ---------------------------------------------------------------------------
+# Per-Harness Sync Health Score with Trend Tracking (item 19)
+# ---------------------------------------------------------------------------
+
+_HEALTH_HISTORY_FILE = Path.home() / ".claude" / "harnesssync_health_history.json"
+
+# Weights for computing the composite health score (sum = 1.0)
+_SCORE_WEIGHTS = {
+    "skills_coverage":    0.25,   # Fraction of skills synced natively
+    "rule_fidelity":      0.25,   # Estimated fraction of rules preserved
+    "mcp_availability":   0.20,   # Fraction of MCP servers reachable
+    "settings_drift":     0.15,   # 1.0 = no drift, 0.0 = all settings drifted
+    "sync_freshness":     0.15,   # Recency of last sync (0.0 if > 30 days)
+}
+
+# Maximum history entries stored per target
+_MAX_HISTORY_ENTRIES = 90   # ~3 months of daily snapshots
+
+
+class HarnessHealthScore:
+    """A 0-100 health score for a single harness with trend data."""
+
+    def __init__(
+        self,
+        target: str,
+        score: int,
+        label: str,
+        dimensions: dict[str, float],
+        trend: list[dict],    # Recent history: [{ts, score}, ...]
+    ):
+        self.target = target
+        self.score = score          # 0-100
+        self.label = label          # "excellent" | "good" | "fair" | "poor" | "critical"
+        self.dimensions = dimensions
+        self.trend = trend          # Most recent last
+
+    @property
+    def trend_direction(self) -> str:
+        """Return "up", "down", or "stable" based on recent trend."""
+        if len(self.trend) < 3:
+            return "stable"
+        scores = [e["score"] for e in self.trend[-5:]]
+        if scores[-1] > scores[0] + 5:
+            return "up"
+        if scores[-1] < scores[0] - 5:
+            return "down"
+        return "stable"
+
+    def format(self, show_trend: bool = True) -> str:
+        arrow = {"up": "↑", "down": "↓", "stable": "→"}.get(self.trend_direction, "")
+        bar = _score_bar(self.score)
+        lines = [
+            f"{self.target:12s}  {bar}  {self.score:3d}/100  {self.label}  {arrow}",
+        ]
+        if show_trend and len(self.trend) >= 2:
+            recent = [e["score"] for e in self.trend[-8:]]
+            sparkline = _sparkline(recent)
+            lines.append(f"             trend: {sparkline}")
+        return "\n".join(lines)
+
+
+def _sparkline(values: list[int]) -> str:
+    """Render a text sparkline for a list of 0-100 scores."""
+    if not values:
+        return ""
+    bars = " ▁▂▃▄▅▆▇█"
+    result = []
+    for v in values:
+        idx = min(8, max(0, int(v / 100 * 8)))
+        result.append(bars[idx])
+    return "".join(result)
+
+
+class SyncHealthTracker:
+    """Track and trend per-harness sync health scores over time.
+
+    Computes a 0-100 composite score for each harness based on:
+    - Skills coverage (fraction of skills synced natively)
+    - Rule fidelity (estimated fraction of CLAUDE.md rules preserved)
+    - MCP server availability (fraction reachable)
+    - Settings drift (manual edits since last sync)
+    - Sync freshness (recency of last sync)
+
+    Scores are persisted to ~/.claude/harnesssync_health_history.json so
+    trend data survives across sessions.
+
+    Args:
+        cc_home: Claude Code config home (default: ~/.claude).
+    """
+
+    def __init__(self, cc_home: Path | None = None):
+        self._history_file = (
+            (cc_home or Path.home() / ".claude") / "harnesssync_health_history.json"
+        )
+
+    def compute_score(
+        self,
+        target: str,
+        skills_coverage: float = 1.0,
+        rule_fidelity: float = 1.0,
+        mcp_availability: float = 1.0,
+        settings_drift: float = 1.0,
+        days_since_sync: float | None = None,
+    ) -> HarnessHealthScore:
+        """Compute and persist a health score for a single harness.
+
+        Args:
+            target: Harness name (e.g. "gemini", "codex").
+            skills_coverage: 0.0-1.0 fraction of skills synced natively.
+            rule_fidelity: 0.0-1.0 fraction of rules preserved faithfully.
+            mcp_availability: 0.0-1.0 fraction of MCP servers reachable.
+            settings_drift: 0.0-1.0 (1.0 = no drift, 0.0 = fully drifted).
+            days_since_sync: Days since last sync (None = freshly synced).
+
+        Returns:
+            HarnessHealthScore with current score and historical trend.
+        """
+        # Compute freshness (0.0 if never synced or > 30 days, 1.0 if today)
+        if days_since_sync is None:
+            freshness = 1.0
+        elif days_since_sync >= 30:
+            freshness = 0.0
+        else:
+            freshness = max(0.0, 1.0 - (days_since_sync / 30.0))
+
+        dimensions = {
+            "skills_coverage": max(0.0, min(1.0, skills_coverage)),
+            "rule_fidelity": max(0.0, min(1.0, rule_fidelity)),
+            "mcp_availability": max(0.0, min(1.0, mcp_availability)),
+            "settings_drift": max(0.0, min(1.0, settings_drift)),
+            "sync_freshness": freshness,
+        }
+
+        weighted = sum(
+            _SCORE_WEIGHTS.get(k, 0.0) * v for k, v in dimensions.items()
+        )
+        score = round(weighted * 100)
+        label = _health_label(score)
+
+        # Load history and append this entry
+        history = self._load_history()
+        target_history = history.get(target, [])
+        target_history.append({
+            "ts": time.time(),
+            "score": score,
+        })
+        # Trim to max history
+        target_history = target_history[-_MAX_HISTORY_ENTRIES:]
+        history[target] = target_history
+        self._save_history(history)
+
+        return HarnessHealthScore(
+            target=target,
+            score=score,
+            label=label,
+            dimensions={k: round(v * 100) for k, v in dimensions.items()},
+            trend=target_history,
+        )
+
+    def get_trend(self, target: str, last_n: int = 30) -> list[dict]:
+        """Retrieve the score history for a target.
+
+        Args:
+            target: Harness name.
+            last_n: Maximum number of entries to return.
+
+        Returns:
+            List of {'ts': float, 'score': int} dicts, most recent last.
+        """
+        history = self._load_history()
+        return history.get(target, [])[-last_n:]
+
+    def format_dashboard(self, scores: list[HarnessHealthScore]) -> str:
+        """Render all harness health scores as a compact dashboard.
+
+        Args:
+            scores: List of HarnessHealthScore from compute_score().
+
+        Returns:
+            Multi-line formatted string.
+        """
+        if not scores:
+            return "No health scores available."
+        lines = ["HarnessSync Health Dashboard", "=" * 55, ""]
+        for hs in sorted(scores, key=lambda s: s.score, reverse=True):
+            lines.append(hs.format(show_trend=True))
+            lines.append("")
+        avg = sum(s.score for s in scores) // len(scores)
+        avg_label = _health_label(avg)
+        lines.append(f"Overall: {avg}/100 ({avg_label})")
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def _load_history(self) -> dict[str, list[dict]]:
+        try:
+            if self._history_file.exists():
+                return json.loads(self._history_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+        return {}
+
+    def _save_history(self, history: dict[str, list[dict]]) -> None:
+        try:
+            self._history_file.parent.mkdir(parents=True, exist_ok=True)
+            self._history_file.write_text(
+                json.dumps(history, indent=2), encoding="utf-8"
+            )
+        except OSError:
+            pass
+
+
+def _health_label(score: int) -> str:
+    """Convert a 0-100 score to a human-readable label."""
+    if score >= 90:
+        return "excellent"
+    if score >= 75:
+        return "good"
+    if score >= 55:
+        return "fair"
+    if score >= 35:
+        return "poor"
+    return "critical"

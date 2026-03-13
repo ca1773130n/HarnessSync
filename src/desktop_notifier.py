@@ -31,6 +31,7 @@ import os
 import platform
 import shutil
 import subprocess
+from pathlib import Path
 
 
 # Notification title prefix
@@ -430,3 +431,304 @@ def notify_from_results(
         targets_skipped=targets_skipped,
         errors=errors,
     )
+
+
+# ---------------------------------------------------------------------------
+# Scheduled Sync Manager (item 8)
+# ---------------------------------------------------------------------------
+
+_LAUNCHD_PLIST_TEMPLATE = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.harnesssync.scheduled</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{python}</string>
+        <string>{script}</string>
+        <string>--notify-on-change</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>{interval_seconds}</integer>
+    <key>RunAtLoad</key>
+    <{run_at_load}/>
+    <key>StandardOutPath</key>
+    <string>{log_dir}/harnesssync-scheduled.log</string>
+    <key>StandardErrorPath</key>
+    <string>{log_dir}/harnesssync-scheduled.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+        <key>HARNESSSYNC_NOTIFY</key>
+        <string>1</string>
+    </dict>
+</dict>
+</plist>
+"""
+
+_SYSTEMD_UNIT_TEMPLATE = """\
+[Unit]
+Description=HarnessSync scheduled config sync
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart={python} {script} --notify-on-change
+Environment=HARNESSSYNC_NOTIFY=1
+StandardOutput=append:{log_dir}/harnesssync-scheduled.log
+StandardError=append:{log_dir}/harnesssync-scheduled.err
+
+[Install]
+WantedBy=default.target
+"""
+
+_SYSTEMD_TIMER_TEMPLATE = """\
+[Unit]
+Description=HarnessSync scheduled sync timer
+After=network.target
+
+[Timer]
+OnBootSec={interval_seconds}s
+OnUnitActiveSec={interval_seconds}s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+
+
+class ScheduledSyncManager:
+    """Configure cron-style scheduled HarnessSync runs with desktop notifications.
+
+    Generates platform-appropriate scheduler configs (launchd on macOS,
+    systemd timers on Linux) that run HarnessSync on a configurable interval
+    and send a desktop notification *only when something actually changed*.
+
+    Users who don't rely on PostToolUse hooks get eventual consistency without
+    manual runs. The scheduler stays silent when nothing changed.
+
+    Args:
+        interval_minutes: How often to run sync (default: 60).
+        run_at_load: macOS only — also run immediately on login/boot.
+        cc_home: Claude Code home directory (default: ~/.claude).
+        script_path: Path to the harnesssync CLI entry point.
+    """
+
+    SERVICE_LABEL = "com.harnesssync.scheduled"
+
+    def __init__(
+        self,
+        interval_minutes: int = 60,
+        run_at_load: bool = True,
+        cc_home: Path | None = None,
+        script_path: Path | None = None,
+    ):
+        self.interval_minutes = max(1, interval_minutes)
+        self.run_at_load = run_at_load
+        self._cc_home = cc_home or (Path.home() / ".claude")
+        self._script_path = script_path or (Path.home() / ".cc2all" / "harnesssync.py")
+
+    @property
+    def interval_seconds(self) -> int:
+        return self.interval_minutes * 60
+
+    def generate_launchd_plist(self) -> str:
+        """Generate a launchd plist for macOS scheduled sync.
+
+        Returns:
+            XML plist string ready to write to
+            ~/Library/LaunchAgents/com.harnesssync.scheduled.plist
+        """
+        import sys
+        log_dir = str(self._cc_home / "logs")
+        return _LAUNCHD_PLIST_TEMPLATE.format(
+            python=sys.executable,
+            script=str(self._script_path),
+            interval_seconds=self.interval_seconds,
+            run_at_load="true" if self.run_at_load else "false",
+            log_dir=log_dir,
+        )
+
+    def generate_systemd_unit(self) -> tuple[str, str]:
+        """Generate a systemd service unit and timer for Linux scheduled sync.
+
+        Returns:
+            Tuple of (service_unit_content, timer_unit_content).
+            Write to ~/.config/systemd/user/harnesssync.service and
+            ~/.config/systemd/user/harnesssync.timer
+        """
+        import sys
+        log_dir = str(self._cc_home / "logs")
+        service = _SYSTEMD_UNIT_TEMPLATE.format(
+            python=sys.executable,
+            script=str(self._script_path),
+            log_dir=log_dir,
+        )
+        timer = _SYSTEMD_TIMER_TEMPLATE.format(
+            interval_seconds=self.interval_seconds,
+        )
+        return service, timer
+
+    def install(self, dry_run: bool = False) -> dict[str, str]:
+        """Install the scheduler for the current platform.
+
+        On macOS: writes the launchd plist and runs launchctl load.
+        On Linux: writes systemd unit/timer and runs systemctl --user enable.
+
+        Args:
+            dry_run: If True, return the generated configs without writing.
+
+        Returns:
+            Dict with keys 'platform', 'status', 'files', and optionally 'error'.
+        """
+        plat = platform.system()
+        if plat == "Darwin":
+            return self._install_macos(dry_run)
+        elif plat == "Linux":
+            return self._install_linux(dry_run)
+        else:
+            return {
+                "platform": plat,
+                "status": "unsupported",
+                "files": {},
+                "error": f"Scheduled sync not supported on {plat}; use cron manually.",
+            }
+
+    def uninstall(self) -> dict[str, str]:
+        """Remove the installed scheduler."""
+        plat = platform.system()
+        if plat == "Darwin":
+            return self._uninstall_macos()
+        elif plat == "Linux":
+            return self._uninstall_linux()
+        return {"platform": plat, "status": "unsupported"}
+
+    def format_status(self) -> str:
+        """Return a human-readable description of the schedule configuration."""
+        lines = [
+            "HarnessSync Scheduled Sync",
+            f"  Interval:     every {self.interval_minutes} minute(s)",
+            f"  Run at load:  {'yes' if self.run_at_load else 'no'}",
+            f"  Platform:     {platform.system()}",
+            f"  Notifications: on change only (HARNESSSYNC_NOTIFY=1)",
+        ]
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Platform-specific install/uninstall
+    # ------------------------------------------------------------------
+
+    def _install_macos(self, dry_run: bool) -> dict[str, str]:
+        plist_content = self.generate_launchd_plist()
+        plist_dir = Path.home() / "Library" / "LaunchAgents"
+        plist_path = plist_dir / f"{self.SERVICE_LABEL}.plist"
+
+        result: dict[str, str] = {
+            "platform": "Darwin",
+            "status": "dry-run" if dry_run else "pending",
+            "files": {str(plist_path): plist_content},
+        }
+
+        if dry_run:
+            return result
+
+        try:
+            plist_dir.mkdir(parents=True, exist_ok=True)
+            plist_path.write_text(plist_content, encoding="utf-8")
+            # Unload existing if present (ignore errors)
+            subprocess.run(
+                ["launchctl", "unload", str(plist_path)],
+                capture_output=True, timeout=10,
+            )
+            load_result = subprocess.run(
+                ["launchctl", "load", str(plist_path)],
+                capture_output=True, text=True, timeout=10,
+            )
+            if load_result.returncode != 0:
+                result["status"] = "partial"
+                result["error"] = f"launchctl load: {load_result.stderr.strip()}"
+            else:
+                result["status"] = "installed"
+        except Exception as e:
+            result["status"] = "error"
+            result["error"] = str(e)
+
+        return result
+
+    def _install_linux(self, dry_run: bool) -> dict[str, str]:
+        service_content, timer_content = self.generate_systemd_unit()
+        unit_dir = Path.home() / ".config" / "systemd" / "user"
+        service_path = unit_dir / "harnesssync.service"
+        timer_path = unit_dir / "harnesssync.timer"
+
+        result: dict[str, str] = {
+            "platform": "Linux",
+            "status": "dry-run" if dry_run else "pending",
+            "files": {
+                str(service_path): service_content,
+                str(timer_path): timer_content,
+            },
+        }
+
+        if dry_run:
+            return result
+
+        try:
+            unit_dir.mkdir(parents=True, exist_ok=True)
+            service_path.write_text(service_content, encoding="utf-8")
+            timer_path.write_text(timer_content, encoding="utf-8")
+            subprocess.run(
+                ["systemctl", "--user", "daemon-reload"],
+                capture_output=True, timeout=10,
+            )
+            enable_result = subprocess.run(
+                ["systemctl", "--user", "enable", "--now", "harnesssync.timer"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if enable_result.returncode != 0:
+                result["status"] = "partial"
+                result["error"] = f"systemctl enable: {enable_result.stderr.strip()}"
+            else:
+                result["status"] = "installed"
+        except Exception as e:
+            result["status"] = "error"
+            result["error"] = str(e)
+
+        return result
+
+    def _uninstall_macos(self) -> dict[str, str]:
+        plist_path = (
+            Path.home() / "Library" / "LaunchAgents" / f"{self.SERVICE_LABEL}.plist"
+        )
+        try:
+            subprocess.run(
+                ["launchctl", "unload", str(plist_path)],
+                capture_output=True, timeout=10,
+            )
+            if plist_path.exists():
+                plist_path.unlink()
+            return {"platform": "Darwin", "status": "uninstalled"}
+        except Exception as e:
+            return {"platform": "Darwin", "status": "error", "error": str(e)}
+
+    def _uninstall_linux(self) -> dict[str, str]:
+        unit_dir = Path.home() / ".config" / "systemd" / "user"
+        try:
+            subprocess.run(
+                ["systemctl", "--user", "disable", "--now", "harnesssync.timer"],
+                capture_output=True, timeout=10,
+            )
+            for name in ("harnesssync.service", "harnesssync.timer"):
+                p = unit_dir / name
+                if p.exists():
+                    p.unlink()
+            subprocess.run(
+                ["systemctl", "--user", "daemon-reload"],
+                capture_output=True, timeout=10,
+            )
+            return {"platform": "Linux", "status": "uninstalled"}
+        except Exception as e:
+            return {"platform": "Linux", "status": "error", "error": str(e)}

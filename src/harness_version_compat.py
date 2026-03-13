@@ -518,8 +518,6 @@ def detect_and_migrate(
     Returns:
         MigrationResult if migrations were applied, None otherwise.
     """
-    import json
-    import shutil
 
     # Get currently pinned (last-synced) version
     pinned_versions = load_pinned_versions(project_dir)
@@ -1351,4 +1349,134 @@ def format_upgrade_migration_guide(guide: dict) -> str:
         lines.append("")
 
     lines.append(guide.get("summary", ""))
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Post-Update Config Validation (item 11)
+# ---------------------------------------------------------------------------
+
+class ConfigUpdateAlert:
+    """An alert produced when a harness update may affect synced configs."""
+
+    def __init__(
+        self,
+        harness: str,
+        old_version: str | None,
+        new_version: str,
+        broken_fields: list[str],
+        new_features: list[str],
+        action_required: bool,
+    ):
+        self.harness = harness
+        self.old_version = old_version
+        self.new_version = new_version
+        self.broken_fields = broken_fields      # Fields no longer valid in new version
+        self.new_features = new_features        # New native features now available
+        self.action_required = action_required  # True if re-sync is recommended
+
+    def format(self) -> str:
+        lines = [
+            f"Harness update detected: {self.harness} "
+            f"{self.old_version or '?'} → {self.new_version}",
+        ]
+        if self.broken_fields:
+            lines.append("  Breaking changes (re-sync recommended):")
+            for f in self.broken_fields:
+                lines.append(f"    ✗ {f}")
+        if self.new_features:
+            lines.append("  New features now available:")
+            for f in self.new_features:
+                lines.append(f"    + {f}")
+        if self.action_required:
+            lines.append("  Action: run /sync to apply updated config format.")
+        return "\n".join(lines)
+
+
+def validate_configs_after_update(
+    update_entries: list[dict],
+    project_dir: Path | None = None,
+) -> list[ConfigUpdateAlert]:
+    """Re-validate synced configs against new harness formats after an update.
+
+    When detect_harness_updates() reports version changes, call this function
+    to determine whether the updated harnesses require config changes (broken
+    fields) or now offer new native features that weren't available before.
+
+    Args:
+        update_entries: Output of detect_harness_updates() — list of dicts
+                        with keys 'harness', 'old_version', 'new_version', 'kind'.
+        project_dir: Project root for loading pinned version config.
+
+    Returns:
+        List of ConfigUpdateAlert for harnesses that need attention.
+        Empty list if all updates are backwards-compatible.
+    """
+    alerts: list[ConfigUpdateAlert] = []
+
+    for entry in update_entries:
+        if entry.get("kind") not in ("updated", "new"):
+            continue
+
+        harness = entry["harness"]
+        old_ver = entry.get("old_version")
+        new_ver = entry.get("new_version")
+        if not new_ver:
+            continue
+
+        harness_features = VERSIONED_FEATURES.get(harness, {})
+
+        broken_fields: list[str] = []
+        new_features: list[str] = []
+
+        # Detect deprecated fields that the old config may have written.
+        # DEPRECATED_FIELDS[harness][field] = (since_version, description)
+        deprecated = DEPRECATED_FIELDS.get(harness, {})
+        for field_name, field_info in deprecated.items():
+            # field_info is (since_version_str, description)
+            since = field_info[0] if isinstance(field_info, (tuple, list)) else "0"
+            description = field_info[1] if isinstance(field_info, (tuple, list)) and len(field_info) > 1 else ""
+            # If old version was before deprecation and new version is at or after it
+            if old_ver and _version_gte(new_ver, since) and not _version_gte(old_ver, since):
+                msg = f"{field_name} deprecated in v{since}"
+                if description:
+                    msg += f": {description}"
+                broken_fields.append(msg)
+
+        # Detect new features that are now available in the new version
+        for feature_name, (min_ver, description) in harness_features.items():
+            was_available = old_ver and _version_gte(old_ver, min_ver)
+            now_available = _version_gte(new_ver, min_ver)
+            if now_available and not was_available:
+                new_features.append(f"{feature_name}: {description} (v{min_ver}+)")
+
+        action_required = bool(broken_fields)
+        if broken_fields or new_features:
+            alerts.append(ConfigUpdateAlert(
+                harness=harness,
+                old_version=old_ver,
+                new_version=new_ver,
+                broken_fields=broken_fields,
+                new_features=new_features,
+                action_required=action_required,
+            ))
+
+    return alerts
+
+
+def format_update_alerts(alerts: list[ConfigUpdateAlert]) -> str:
+    """Format a list of ConfigUpdateAlerts into a user-facing message.
+
+    Args:
+        alerts: Output of validate_configs_after_update().
+
+    Returns:
+        Formatted string, or empty string if no alerts.
+    """
+    if not alerts:
+        return ""
+    lines = ["Harness update compatibility check:"]
+    for alert in alerts:
+        lines.append("")
+        lines.append(alert.format())
     return "\n".join(lines)

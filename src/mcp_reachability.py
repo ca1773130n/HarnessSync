@@ -298,6 +298,115 @@ class McpReachabilityChecker:
             return McpReachabilityResult(name, False, reason)
 
 
+# ---------------------------------------------------------------------------
+# Cross-Harness Transport Compatibility Check (item 7)
+# ---------------------------------------------------------------------------
+
+# Transport support matrix per harness.
+# "stdio": supports command-based (stdio) MCP servers
+# "http":  supports URL-based (HTTP/SSE/WebSocket) MCP servers
+_HARNESS_TRANSPORT_SUPPORT: dict[str, set[str]] = {
+    "codex":    {"stdio", "http"},
+    "gemini":   {"http"},           # Gemini CLI requires HTTP/SSE transport
+    "opencode": {"stdio", "http"},
+    "cursor":   {"stdio", "http"},
+    "aider":    set(),              # Aider has no MCP support
+    "windsurf": {"stdio", "http"},
+    "cline":    {"stdio", "http"},
+    "continue": {"stdio", "http"},
+    "zed":      {"stdio"},
+    "neovim":   {"stdio", "http"},
+}
+
+
+class TransportCompatIssue:
+    """A server/harness pair with a transport incompatibility."""
+
+    def __init__(self, server_name: str, harness: str, transport: str, reason: str):
+        self.server_name = server_name
+        self.harness = harness
+        self.transport = transport
+        self.reason = reason
+
+    def __repr__(self) -> str:
+        return (
+            f"TransportCompatIssue({self.server_name!r}, {self.harness!r}, "
+            f"{self.transport!r})"
+        )
+
+
+def check_harness_transport_compat(
+    mcp_servers: dict[str, dict],
+    target_harnesses: list[str],
+) -> list[TransportCompatIssue]:
+    """Validate that each MCP server's transport is supported by each target harness.
+
+    Before syncing MCP configs, this check flags servers that use a transport
+    type the target harness does not support — e.g. stdio-based servers synced
+    to Gemini CLI (which only supports HTTP/SSE transport).
+
+    Args:
+        mcp_servers: Dict mapping server name to server config dict.
+                     Uses 'command'/'cmd' for stdio, 'url' for HTTP.
+        target_harnesses: List of harness names to check against.
+
+    Returns:
+        List of TransportCompatIssue for each incompatible server/harness pair.
+        Empty list means all servers are compatible with all requested harnesses.
+    """
+    issues: list[TransportCompatIssue] = []
+
+    for server_name, cfg in mcp_servers.items():
+        url = cfg.get("url") or cfg.get("serverUrl")
+        command = cfg.get("command") or cfg.get("cmd")
+
+        if url:
+            transport = "http"
+        elif command:
+            transport = "stdio"
+        else:
+            continue  # Unknown transport — skip
+
+        for harness in target_harnesses:
+            supported = _HARNESS_TRANSPORT_SUPPORT.get(harness, {"stdio", "http"})
+            if not supported:
+                issues.append(TransportCompatIssue(
+                    server_name=server_name,
+                    harness=harness,
+                    transport=transport,
+                    reason=f"{harness} has no MCP support",
+                ))
+            elif transport not in supported:
+                supported_str = " and ".join(sorted(supported)) or "none"
+                issues.append(TransportCompatIssue(
+                    server_name=server_name,
+                    harness=harness,
+                    transport=transport,
+                    reason=(
+                        f"{harness} only supports {supported_str} transport; "
+                        f"'{server_name}' uses {transport}"
+                    ),
+                ))
+
+    return issues
+
+
+def format_transport_compat_warnings(issues: list[TransportCompatIssue]) -> list[str]:
+    """Format transport compatibility issues as warning strings.
+
+    Args:
+        issues: Output of check_harness_transport_compat().
+
+    Returns:
+        List of human-readable warning strings.
+    """
+    return [
+        f"MCP transport mismatch: '{issue.server_name}' ({issue.transport}) — "
+        f"{issue.reason}"
+        for issue in issues
+    ]
+
+
 def filter_unreachable_servers(
     mcp_servers: dict[str, dict],
     timeout: float = 3.0,
