@@ -7,12 +7,183 @@ Analyzes Claude Code config and flags:
    no active sync target (i.e., all targets skip or don't support them).
 2. Config artifacts in target harnesses that have no corresponding source in
    Claude Code (orphaned files left from previous syncs).
+3. Skills, agents, and commands that haven't been invoked in N days across
+   any harness (usage-based dead config detection).
 
 Helps users clean up config debt they didn't know they had.
 """
 
+import json
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+# Usage log stored at ~/.harnesssync/usage_log.json
+# Format: {item_key: {"last_used": float_timestamp, "use_count": int, "harness": str}}
+# item_key: "skill:<name>", "agent:<name>", "command:<name>", "rule:<path>"
+_USAGE_LOG_PATH = Path.home() / ".harnesssync" / "usage_log.json"
+
+# Default staleness threshold in days
+_DEFAULT_STALE_DAYS = 30
+
+
+class UsageTracker:
+    """Track and query invocation history for skills, agents, and commands.
+
+    Usage data is persisted to ~/.harnesssync/usage_log.json.
+    Each record stores the last-used UNIX timestamp, total use count,
+    and which harness last invoked the item.
+
+    Usage::
+
+        tracker = UsageTracker()
+        tracker.record("skill", "commit", harness="gemini")
+        stale = tracker.find_stale(days=30)
+    """
+
+    def __init__(self, log_path: Path | None = None):
+        self._path = log_path or _USAGE_LOG_PATH
+
+    def _load(self) -> dict[str, dict]:
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _save(self, data: dict[str, dict]) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    def _key(self, category: str, name: str) -> str:
+        return f"{category}:{name}"
+
+    def record(self, category: str, name: str, harness: str = "") -> None:
+        """Record an invocation of a skill, agent, command, or rule.
+
+        Args:
+            category: "skill" | "agent" | "command" | "rule"
+            name:     Item name (e.g. skill directory name, agent stem).
+            harness:  Which harness invoked it (e.g. "gemini", "cursor").
+        """
+        data = self._load()
+        key = self._key(category, name)
+        existing = data.get(key, {"use_count": 0})
+        data[key] = {
+            "last_used": time.time(),
+            "use_count": existing.get("use_count", 0) + 1,
+            "harness": harness,
+        }
+        self._save(data)
+
+    def last_used(self, category: str, name: str) -> float | None:
+        """Return the last-used timestamp for an item, or None if never used.
+
+        Args:
+            category: "skill" | "agent" | "command" | "rule"
+            name:     Item name.
+
+        Returns:
+            UNIX timestamp float or None.
+        """
+        data = self._load()
+        entry = data.get(self._key(category, name))
+        return entry["last_used"] if entry else None
+
+    def use_count(self, category: str, name: str) -> int:
+        """Return how many times an item has been invoked (0 if never)."""
+        data = self._load()
+        entry = data.get(self._key(category, name))
+        return entry.get("use_count", 0) if entry else 0
+
+    def find_stale(
+        self,
+        names: dict[str, list[str]],
+        days: int = _DEFAULT_STALE_DAYS,
+    ) -> list[dict]:
+        """Find items that haven't been used in the last N days.
+
+        Args:
+            names: Dict mapping category -> list of item names.
+                   E.g. {"skill": ["commit", "debug"], "agent": ["reviewer"]}
+            days:  Staleness threshold in days (default 30).
+
+        Returns:
+            List of dicts with keys: category, name, last_used_days_ago (None=never),
+            use_count, harness.
+        """
+        data = self._load()
+        cutoff = time.time() - days * 86400
+        stale = []
+
+        for category, item_names in names.items():
+            for name in item_names:
+                key = self._key(category, name)
+                entry = data.get(key)
+                if entry is None:
+                    # Never used
+                    stale.append({
+                        "category": category,
+                        "name": name,
+                        "last_used_days_ago": None,
+                        "use_count": 0,
+                        "harness": "",
+                    })
+                elif entry.get("last_used", 0) < cutoff:
+                    days_ago = int((time.time() - entry["last_used"]) / 86400)
+                    stale.append({
+                        "category": category,
+                        "name": name,
+                        "last_used_days_ago": days_ago,
+                        "use_count": entry.get("use_count", 0),
+                        "harness": entry.get("harness", ""),
+                    })
+
+        return stale
+
+    def format_stale_report(
+        self,
+        stale_items: list[dict],
+        days: int = _DEFAULT_STALE_DAYS,
+    ) -> str:
+        """Format stale items as a human-readable report.
+
+        Args:
+            stale_items: Output from find_stale().
+            days:        Threshold used (for report header).
+
+        Returns:
+            Formatted multi-line string.
+        """
+        if not stale_items:
+            return f"No unused config items found (threshold: {days} days)."
+
+        lines = [
+            f"Unused Config Items (not invoked in {days}+ days)",
+            "=" * 50,
+            "",
+        ]
+        by_cat: dict[str, list[dict]] = {}
+        for item in stale_items:
+            by_cat.setdefault(item["category"], []).append(item)
+
+        for cat, items in sorted(by_cat.items()):
+            lines.append(f"  {cat.upper()}S ({len(items)}):")
+            for it in sorted(items, key=lambda x: (x["last_used_days_ago"] is None, x["name"])):
+                if it["last_used_days_ago"] is None:
+                    age_str = "never used"
+                else:
+                    age_str = f"last used {it['last_used_days_ago']}d ago"
+                count_str = f", {it['use_count']} total uses" if it["use_count"] else ""
+                lines.append(f"    {it['name']:<30} {age_str}{count_str}")
+            lines.append("")
+
+        lines.append(
+            f"Tip: Remove unused items from ~/.claude/ to reduce config bloat,\n"
+            f"     or tag them with <!-- sync:skip --> if intentionally kept."
+        )
+        return "\n".join(lines)
 
 
 # Known synced output file patterns per target (relative to project_dir)
@@ -93,7 +264,12 @@ class DeadConfigDetector:
         self.project_dir = project_dir
         self.cc_home = cc_home or Path.home() / ".claude"
 
-    def detect(self, source_data: dict = None, active_targets: list[str] = None) -> DeadConfigReport:
+    def detect(
+        self,
+        source_data: dict = None,
+        active_targets: list[str] = None,
+        stale_days: int = _DEFAULT_STALE_DAYS,
+    ) -> DeadConfigReport:
         """Run dead config detection.
 
         Args:
@@ -101,6 +277,8 @@ class DeadConfigDetector:
                          If None, a minimal scan of the project dir is used.
             active_targets: List of active sync targets. If None, all known targets
                             with output files present in project_dir are checked.
+            stale_days: Number of days without invocation before an item is
+                        considered unused (default: 30). Pass 0 to skip usage check.
 
         Returns:
             DeadConfigReport with categorized issues.
@@ -119,7 +297,52 @@ class DeadConfigDetector:
         # Check 2: Orphaned files in targets
         self._check_target_orphans(active_targets, source_data, report)
 
+        # Check 3: Usage-based stale detection (skills/agents/commands unused for N days)
+        if stale_days > 0:
+            self._check_stale_by_usage(source_data, stale_days, report)
+
         return report
+
+    def _check_stale_by_usage(
+        self, source_data: dict, stale_days: int, report: "DeadConfigReport"
+    ) -> None:
+        """Flag skills, agents, and commands that haven't been invoked in stale_days days.
+
+        Uses the HarnessSync usage log (~/.harnesssync/usage_log.json) which is
+        updated whenever a skill/agent/command is invoked via any synced harness.
+        Items that have never been logged are also reported as unused.
+
+        Args:
+            source_data:  Discovered source data dict.
+            stale_days:   Days threshold for staleness.
+            report:       Report to append items to.
+        """
+        tracker = UsageTracker()
+        to_check: dict[str, list[str]] = {
+            "skill": list(source_data.get("skills", {}).keys()),
+            "agent": list(source_data.get("agents", {}).keys()),
+            "command": list(source_data.get("commands", {}).keys()),
+        }
+
+        stale_items = tracker.find_stale(to_check, days=stale_days)
+        for item in stale_items:
+            if item["last_used_days_ago"] is None:
+                detail = (
+                    f"{item['category'].capitalize()} '{item['name']}' has never been "
+                    f"invoked across any harness (consider removing or tagging <!-- sync:skip -->)"
+                )
+            else:
+                detail = (
+                    f"{item['category'].capitalize()} '{item['name']}' last used "
+                    f"{item['last_used_days_ago']} days ago (threshold: {stale_days}d). "
+                    f"Total uses: {item['use_count']}"
+                )
+            report.source_no_target.append(DeadConfigItem(
+                kind="source_no_target",
+                category=item["category"],
+                name=item["name"],
+                detail=detail,
+            ))
 
     def _minimal_source_scan(self) -> dict:
         """Perform a minimal scan for source data without importing SourceReader."""

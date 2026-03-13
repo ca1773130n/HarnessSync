@@ -742,3 +742,182 @@ class ConfigLinter:
                 "duplicate_deduction": duplicate_deduction,
             },
         }
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Skill Portability Linter (Item 30)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # Patterns in skill files that won't translate to other harnesses
+    _SKILL_PORTABILITY_CHECKS: list[tuple[re.Pattern, str, str]] = [
+        # Claude Code-specific tool references
+        (
+            re.compile(
+                r"\b(?:use\s+the\s+)?(?:Read|Write|Edit|Bash|Glob|Grep|Agent|TodoWrite"
+                r"|TodoRead|WebFetch|WebSearch|NotebookRead|NotebookEdit)\s+tool\b",
+                re.IGNORECASE,
+            ),
+            "CC_TOOL_REF",
+            "References Claude Code tool names directly (e.g. 'Read tool', 'Bash tool'). "
+            "Rewrite as generic actions ('read the file', 'run the command') so other harnesses understand.",
+        ),
+        # $ARGUMENTS placeholder
+        (
+            re.compile(r"\$ARGUMENTS\b"),
+            "CC_ARGUMENTS",
+            "$ARGUMENTS is Claude Code-specific. Replace with '[user arguments]' or describe "
+            "expected input in a generic way.",
+        ),
+        # /slash-command references in skill body
+        (
+            re.compile(r"(?<!\w)/[a-z][a-z0-9-]*\b"),
+            "CC_SLASH_CMD",
+            "Slash-command references (e.g. /sync, /commit) are Claude Code-specific. "
+            "Describe the action in plain language for portability.",
+        ),
+        # Hardcoded absolute paths
+        (
+            re.compile(r"(?<!\$)\b(/Users/|/home/|C:\\\\Users\\\\)[^\s\"']+"),
+            "HARDCODED_PATH",
+            "Hardcoded absolute path detected. Use ${HOME} or a relative path so the skill "
+            "works across different machines and harnesses.",
+        ),
+        # YAML frontmatter keys used by Claude Code agent system but not others
+        (
+            re.compile(r"^subagent_type\s*:", re.MULTILINE),
+            "CC_SUBAGENT_TYPE",
+            "'subagent_type' frontmatter is Claude Code-specific and will be ignored by "
+            "other harnesses. Document the agent role in the description instead.",
+        ),
+        # XML-style tool_call blocks
+        (
+            re.compile(r"<tool_call>", re.IGNORECASE),
+            "CC_TOOL_CALL_XML",
+            "<tool_call> XML syntax is Claude Code-specific. Remove these blocks or replace "
+            "with plain-language instructions.",
+        ),
+        # Claude Code MCP tool references (mcp__*)
+        (
+            re.compile(r"\bmcp__[a-z][a-z0-9_]*__[a-z][a-z0-9_]*\b", re.IGNORECASE),
+            "CC_MCP_TOOL_REF",
+            "MCP tool reference (mcp__server__tool) is Claude Code-specific. "
+            "Describe what the tool does generically.",
+        ),
+    ]
+
+    def lint_skill_portability(
+        self, skill_name: str, skill_path: Path
+    ) -> list[dict]:
+        """Lint a single skill file for cross-harness portability issues.
+
+        Scans the SKILL.md (or the skill file directly if skill_path is a
+        file) for patterns that are Claude Code-specific and won't translate
+        to other harnesses (Cursor, Gemini, Aider, etc.).
+
+        Args:
+            skill_name: Human-readable skill name (for issue messages).
+            skill_path: Path to skill directory (with SKILL.md) or .md file.
+
+        Returns:
+            List of issue dicts with keys:
+              - ``code``:    Short identifier (e.g. "CC_TOOL_REF")
+              - ``message``: Human-readable description of the issue
+              - ``fix``:     Suggested fix description
+              - ``line``:    1-based line number of first match (or 0 if unknown)
+        """
+        skill_md = (
+            skill_path / "SKILL.md"
+            if skill_path.is_dir() and (skill_path / "SKILL.md").is_file()
+            else skill_path
+        )
+        if not skill_md.is_file():
+            return [{
+                "code": "MISSING_SKILL_MD",
+                "message": f"Skill '{skill_name}': SKILL.md not found at {skill_md}",
+                "fix": "Create a SKILL.md file in the skill directory.",
+                "line": 0,
+            }]
+
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+        except OSError as e:
+            return [{
+                "code": "READ_ERROR",
+                "message": f"Skill '{skill_name}': cannot read {skill_md}: {e}",
+                "fix": "Check file permissions.",
+                "line": 0,
+            }]
+
+        issues: list[dict] = []
+        lines = content.splitlines()
+
+        for pattern, code, fix_description in self._SKILL_PORTABILITY_CHECKS:
+            for lineno, line in enumerate(lines, start=1):
+                if pattern.search(line):
+                    issues.append({
+                        "code": code,
+                        "message": (
+                            f"Skill '{skill_name}' line {lineno}: "
+                            f"{fix_description.split('.')[0]}."
+                        ),
+                        "fix": fix_description,
+                        "line": lineno,
+                    })
+                    break  # One issue per check type per skill
+
+        return issues
+
+    def lint_all_skills_portability(
+        self, skills: dict[str, Path]
+    ) -> dict[str, list[dict]]:
+        """Lint all skills for portability issues.
+
+        Args:
+            skills: Dict mapping skill name -> skill path (from SourceReader).
+
+        Returns:
+            Dict mapping skill_name -> list of issue dicts.
+            Only skills with issues are included.
+        """
+        results: dict[str, list[dict]] = {}
+        for name, path in (skills or {}).items():
+            issues = self.lint_skill_portability(name, Path(path) if not isinstance(path, Path) else path)
+            if issues:
+                results[name] = issues
+        return results
+
+    def format_skill_portability_report(
+        self, issues_by_skill: dict[str, list[dict]]
+    ) -> str:
+        """Format the skill portability report as human-readable text.
+
+        Args:
+            issues_by_skill: Output from lint_all_skills_portability().
+
+        Returns:
+            Formatted report string.
+        """
+        if not issues_by_skill:
+            return "Skill Portability Linter: All skills are portable across harnesses."
+
+        total = sum(len(v) for v in issues_by_skill.values())
+        lines = [
+            f"Skill Portability Report — {total} issue(s) in {len(issues_by_skill)} skill(s)",
+            "=" * 60,
+            "",
+            "Flagged patterns won't translate well to Cursor, Gemini, Aider, or other harnesses.",
+            "",
+        ]
+
+        for skill_name, skill_issues in sorted(issues_by_skill.items()):
+            lines.append(f"  [{skill_name}]  ({len(skill_issues)} issue(s))")
+            for issue in skill_issues:
+                line_ref = f" (line {issue['line']})" if issue.get("line") else ""
+                lines.append(f"    [{issue['code']}]{line_ref}: {issue['message']}")
+                lines.append(f"      Fix: {issue['fix']}")
+            lines.append("")
+
+        lines.append(
+            "Tip: Tag Claude-Code-only skill sections with <!-- sync:skip --> to exclude\n"
+            "     them from non-CC harnesses, or rewrite in harness-agnostic language."
+        )
+        return "\n".join(lines)

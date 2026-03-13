@@ -41,7 +41,8 @@ class SyncOrchestrator:
                  only_sections: set = None, skip_sections: set = None,
                  incremental: bool = False,
                  cli_only_targets: set = None, cli_skip_targets: set = None,
-                 harness_env: str = None):
+                 harness_env: str = None,
+                 cli_per_target_only: dict = None):
         """Initialize orchestrator.
 
         Args:
@@ -58,6 +59,9 @@ class SyncOrchestrator:
             incremental: If True, skip targets where no source files changed since last sync
             harness_env: Environment name for env-tagged section filtering (e.g. 'production', 'dev').
                          Falls back to HARNESS_ENV environment variable if not provided.
+            cli_per_target_only: Per-target section overrides from --only-for CLI flag.
+                                 Maps target_name -> set of section names to sync for that target only.
+                                 E.g. {"gemini": {"skills", "rules"}, "codex": {"rules", "mcp"}}
         """
         self.project_dir = project_dir
         self.scope = scope
@@ -72,6 +76,8 @@ class SyncOrchestrator:
         # CLI-level target filters (applied before per-project .harnesssync overrides)
         self.cli_only_targets: set[str] = cli_only_targets or set()
         self.cli_skip_targets: set[str] = cli_skip_targets or set()
+        # CLI-level per-target section overrides (from --only-for TARGET:sections)
+        self._cli_per_target_only: dict[str, set[str]] = cli_per_target_only or {}
         # Environment-aware sync: resolve from arg, then HARNESS_ENV env var
         import os as _os
         self.harness_env: str | None = harness_env or _os.environ.get("HARNESS_ENV") or None
@@ -260,6 +266,24 @@ class SyncOrchestrator:
         reader = SourceReader(scope=self.scope, project_dir=self.project_dir,
                               cc_home=self.cc_home)
         source_data = reader.discover_all()
+
+        # --- PRE-SYNC: CONFIG VARIABLE SUBSTITUTION (${VAR} placeholders) ---
+        # Substitute ${PROJECT_NAME}, ${GIT_USER}, ${REPO_URL}, etc. in rules content.
+        # Custom variables can be declared in .harnesssync under "vars".
+        try:
+            from src.source_reader import substitute_config_vars
+            rules_raw = source_data.get('rules', '')
+            if isinstance(rules_raw, str) and '${' in rules_raw:
+                substituted, replaced_vars = substitute_config_vars(
+                    rules_raw, project_dir=self.project_dir
+                )
+                source_data['rules'] = substituted
+                if replaced_vars:
+                    self.logger.info(
+                        f"Config vars substituted: {', '.join(f'${{{v}}}' for v in sorted(set(replaced_vars)))}"
+                    )
+        except Exception:
+            pass  # Variable substitution is best-effort, never blocks sync
 
         # Convert rules string to list[dict] format expected by adapters
         rules_str = source_data.get('rules', '')
@@ -845,6 +869,10 @@ class SyncOrchestrator:
                 tgt_only = self._per_target_only[tgt_lower]
                 # Intersect with global only_sections if both are set
                 effective_only = (effective_only & tgt_only) if effective_only else tgt_only
+            # Apply CLI --only-for overrides (merged on top of project config overrides)
+            if tgt_lower in self._cli_per_target_only:
+                cli_tgt_only = self._cli_per_target_only[tgt_lower]
+                effective_only = (effective_only & cli_tgt_only) if effective_only else cli_tgt_only
 
         if not effective_only and not effective_skip:
             return data

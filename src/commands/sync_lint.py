@@ -62,6 +62,14 @@ def main() -> None:
         choices=["text", "json"],
         help="Output format (--ci implies json)",
     )
+    parser.add_argument(
+        "--skills",
+        action="store_true",
+        help=(
+            "Run skill portability linter: flag Claude Code-specific patterns in "
+            "SKILL.md files that won't translate to Cursor, Gemini, Aider, etc."
+        ),
+    )
     parser.add_argument("--project-dir", type=str, default=None)
 
     try:
@@ -73,6 +81,7 @@ def main() -> None:
     output_json: bool = ci_mode or args.format == "json"
     apply_fixes: bool = args.fix
     scope: str = args.scope
+    check_skills: bool = getattr(args, "skills", False)
     project_dir = Path(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
 
     if not ci_mode:
@@ -132,20 +141,28 @@ def main() -> None:
     has_errors = any(_issue_severity(i) == "error" for i in issues)
     has_issues = bool(issues)
 
+    # Skill portability check (--skills flag)
+    skill_portability_issues: dict = {}
+    if check_skills:
+        skills = source_data.get("skills", {})
+        if skills:
+            skill_portability_issues = linter.lint_all_skills_portability(skills)
+
     if output_json:
         payload = {
-            "ok": not issues,
+            "ok": not issues and not skill_portability_issues,
             "issue_count": len(issues),
             "issues": [
                 {"message": issue, "severity": _issue_severity(issue)}
                 for issue in issues
             ],
             "fixes_applied": fixes_applied,
+            "skill_portability": skill_portability_issues,
         }
         print(json.dumps(payload, indent=2))
         if has_errors:
             sys.exit(2)
-        elif has_issues:
+        elif has_issues or skill_portability_issues:
             sys.exit(1)
         sys.exit(0)
 
@@ -155,24 +172,33 @@ def main() -> None:
             print("No issues found. Config looks good!")
         else:
             print("No issues remain after fixes.")
-        sys.exit(0)
+    else:
+        print(f"Found {len(issues)} issue(s):\n")
+        for i, issue in enumerate(issues, 1):
+            print(f"  {i}. {issue}")
+        print()
+        if not apply_fixes:
+            fix_suggestions = linter.suggest_fixes(source_data, project_dir)
+            auto_fixable_count = sum(1 for f in fix_suggestions if f.auto_fixable)
+            if auto_fixable_count:
+                print(f"  {auto_fixable_count} issue(s) can be auto-fixed. Run /sync-lint --fix to apply.")
+        print("Fix these issues before syncing to prevent unexpected behavior.")
 
-    print(f"Found {len(issues)} issue(s):\n")
-    for i, issue in enumerate(issues, 1):
-        print(f"  {i}. {issue}")
-
-    print()
-    if not apply_fixes:
-        fix_suggestions = linter.suggest_fixes(source_data, project_dir)
-        auto_fixable_count = sum(1 for f in fix_suggestions if f.auto_fixable)
-        if auto_fixable_count:
-            print(f"  {auto_fixable_count} issue(s) can be auto-fixed. Run /sync-lint --fix to apply.")
-
-    print("Fix these issues before syncing to prevent unexpected behavior.")
+    # Skill portability report
+    if check_skills:
+        if skill_portability_issues:
+            print()
+            print(linter.format_skill_portability_report(skill_portability_issues))
+        elif source_data.get("skills"):
+            print("\nSkill portability: All skills look portable.")
+        else:
+            print("\nSkill portability: No skills found to check.")
 
     if has_errors:
         sys.exit(2)
-    sys.exit(1)
+    if has_issues or skill_portability_issues:
+        sys.exit(1)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

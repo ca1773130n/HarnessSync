@@ -333,6 +333,11 @@ class CompatibilityReporter:
                     ...
                 },
                 "label": str,              # "excellent" | "good" | "fair" | "poor"
+                "item_counts": {           # per config_type item breakdown
+                    "rules": {"synced": int, "adapted": int, "skipped": int, "failed": int},
+                    ...
+                },
+                "summary_clauses": list[str],  # human-readable phrases like "3 skills unsupported"
             }
         """
         scores: dict = {}
@@ -346,6 +351,7 @@ class CompatibilityReporter:
                 "rules": 2.0, "mcp": 1.5, "skills": 1.5,
                 "agents": 1.0, "commands": 1.0, "settings": 1.0,
             }
+            item_counts: dict[str, dict] = {}
 
             weighted_sum = 0.0
             weight_total = 0.0
@@ -361,6 +367,12 @@ class CompatibilityReporter:
                 # Score: synced=100pts, adapted=70pts, skipped=0pts, failed=0pts
                 raw_score = (result.synced * 100 + result.adapted * 70) / total
                 category_scores[config_type] = round(raw_score, 1)
+                item_counts[config_type] = {
+                    "synced": result.synced,
+                    "adapted": result.adapted,
+                    "skipped": result.skipped,
+                    "failed": result.failed,
+                }
 
                 w = category_weights.get(config_type, 1.0)
                 weighted_sum += raw_score * w
@@ -376,16 +388,42 @@ class CompatibilityReporter:
             else:
                 label = "poor"
 
+            # Build human-readable summary clauses for actionable display
+            # e.g. "3 skills unsupported", "1 MCP server approximated"
+            summary_clauses: list[str] = []
+            _noun_map = {
+                "rules": "rule", "skills": "skill", "agents": "agent",
+                "commands": "command", "mcp": "MCP server", "settings": "setting",
+            }
+            for cat, counts in item_counts.items():
+                noun = _noun_map.get(cat, cat)
+                noun_pl = noun + "s" if not noun.endswith("s") else noun
+                if counts["failed"] > 0:
+                    n = counts["failed"]
+                    summary_clauses.append(f"{n} {noun if n == 1 else noun_pl} failed")
+                if counts["skipped"] > 0:
+                    n = counts["skipped"]
+                    summary_clauses.append(f"{n} {noun if n == 1 else noun_pl} unsupported")
+                if counts["adapted"] > 0:
+                    n = counts["adapted"]
+                    summary_clauses.append(f"{n} {noun if n == 1 else noun_pl} approximated")
+
             scores[target_name] = {
                 "overall": overall,
                 "by_category": category_scores,
                 "label": label,
+                "item_counts": item_counts,
+                "summary_clauses": summary_clauses,
             }
 
         return scores
 
     def format_fidelity_scores(self, scores: dict) -> str:
         """Format fidelity scores for user output.
+
+        Produces a compact per-target headline (e.g. "Gemini: 87% fidelity
+        (3 skills unsupported, 1 MCP server approximated)") followed by a
+        per-category breakdown.
 
         Args:
             scores: Dict from calculate_fidelity_score().
@@ -402,11 +440,24 @@ class CompatibilityReporter:
             label = data["label"]
             bar_len = int(overall / 5)  # 20 chars = 100%
             bar = "█" * bar_len + "░" * (20 - bar_len)
-            lines.append(f"\n{target.upper()}: {overall:.0f}/100 [{label}]")
+
+            # Build a compact headline with issue summary
+            clauses = data.get("summary_clauses", [])
+            issue_suffix = f" ({', '.join(clauses)})" if clauses else ""
+            lines.append(f"\n{target.upper()}: {overall:.0f}% fidelity [{label}]{issue_suffix}")
             lines.append(f"  [{bar}]")
             for cat, score in sorted(data["by_category"].items()):
+                counts = data.get("item_counts", {}).get(cat, {})
                 indicator = "✓" if score >= 90 else ("~" if score >= 60 else "✗")
-                lines.append(f"  {indicator} {cat:<10} {score:.0f}%")
+                detail_parts: list[str] = []
+                if counts.get("adapted"):
+                    detail_parts.append(f"{counts['adapted']} approx")
+                if counts.get("skipped"):
+                    detail_parts.append(f"{counts['skipped']} skipped")
+                if counts.get("failed"):
+                    detail_parts.append(f"{counts['failed']} failed")
+                detail = f"  [{', '.join(detail_parts)}]" if detail_parts else ""
+                lines.append(f"  {indicator} {cat:<10} {score:.0f}%{detail}")
 
         lines.append("")
         lines.append("Score guide: 100=direct sync  70=adapted  0=skipped/failed")
@@ -468,6 +519,56 @@ class CompatibilityReporter:
             },
         }
 
+        # Native alternatives to suggest when a CC feature can't be fully mapped.
+        # Maps (target, feature) -> suggestion text describing the closest native equivalent.
+        _NATIVE_ALTERNATIVES: dict[tuple[str, str], str] = {
+            ("cursor", "skills"): (
+                "Use Cursor Rules (.cursor/rules/*.mdc with alwaysApply: false) as "
+                "on-demand context snippets — similar to invocable skills"
+            ),
+            ("cursor", "agents"): (
+                "Use Cursor Agent mode with .cursor/rules/agents/*.mdc files; "
+                "Cursor's built-in composer agents cover most use cases"
+            ),
+            ("aider", "skills"): (
+                "Add skill SKILL.md files to `read:` list in .aider.conf.yml so "
+                "Aider auto-loads them as read-only context on startup"
+            ),
+            ("aider", "agents"): (
+                "Describe agent personas in CONVENTIONS.md so Aider absorbs them "
+                "as persistent project context"
+            ),
+            ("aider", "commands"): (
+                "Define command workflows as shell aliases or scripts referenced in "
+                ".aider.conf.yml under `auto-commits: false` + pre-commit hooks"
+            ),
+            ("aider", "mcp"): (
+                "Aider lacks native MCP support — use aider's `--read` flag to "
+                "include MCP server output files as context, or pipe tool output "
+                "through shell before passing to aider"
+            ),
+            ("windsurf", "skills"): (
+                "Add skills as Windsurf Memories or Cascade rules in "
+                ".windsurfrules for persistent context injection"
+            ),
+            ("windsurf", "agents"): (
+                "Use Windsurf Cascade flows as the closest native agent equivalent; "
+                "document agent personas in .windsurfrules"
+            ),
+            ("windsurf", "commands"): (
+                "Define Windsurf Cascade triggers as the nearest command equivalent — "
+                "or use VS Code tasks (.vscode/tasks.json) for shell-based commands"
+            ),
+            ("codex", "skills"): (
+                "Include skill content directly in AGENTS.md system prompt sections "
+                "so Codex has access as conversation context"
+            ),
+            ("codex", "agents"): (
+                "Map Claude Code agents to Codex AGENTS.md role definitions; "
+                "Codex treats the full AGENTS.md as persistent instruction context"
+            ),
+        }
+
         counts = {
             "skills": len(source_data.get("skills", {})),
             "agents": len(source_data.get("agents", {})),
@@ -488,14 +589,16 @@ class CompatibilityReporter:
                 count = counts.get(feature, 0)
                 if count == 0:
                     continue  # Nothing to lose
+                alternative = _NATIVE_ALTERNATIVES.get((target, feature))
+                alt_line = f"\n    → Native alternative: {alternative}" if alternative else ""
                 if level == "none":
                     target_lines.append(
-                        f"  ✗ {feature}: NO equivalent — {count} item(s) will not sync"
+                        f"  ✗ {feature}: NO equivalent — {count} item(s) will not sync{alt_line}"
                     )
                     any_gap = True
                 elif level == "partial":
                     target_lines.append(
-                        f"  ~ {feature}: partial support — {count} item(s) may lose fidelity"
+                        f"  ~ {feature}: partial support — {count} item(s) may lose fidelity{alt_line}"
                     )
                     any_gap = True
 

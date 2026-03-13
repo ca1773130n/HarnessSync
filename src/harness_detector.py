@@ -99,18 +99,141 @@ def detect_new_harnesses(already_configured: list[str]) -> list[str]:
         if _check_config_dir(canonical):
             found.add(canonical)
 
+    # Package manager scan (Homebrew, npm, pip) — catches tools not yet in PATH
+    for canonical in _detect_via_package_managers(configured_set | found):
+        found.add(canonical)
+
+    return sorted(found)
+
+
+# Homebrew formula / cask names per canonical harness name
+_HOMEBREW_FORMULAS: dict[str, list[str]] = {
+    "aider": ["aider"],
+    "gemini": ["gemini-cli", "google-gemini-cli"],
+    "codex": ["openai-codex"],
+    "cursor": ["cursor"],
+    "windsurf": ["windsurf"],
+    "opencode": ["opencode"],
+    "continue": ["continue"],
+    "cline": ["cline"],
+}
+
+# npm package names per canonical harness name
+_NPM_PACKAGES: dict[str, list[str]] = {
+    "gemini": ["@google/gemini-cli", "gemini-cli"],
+    "codex": ["@openai/codex"],
+    "opencode": ["opencode"],
+    "cline": ["cline"],
+    "cursor": ["cursor-cli"],
+    "continue": ["@continuedev/continue"],
+}
+
+# pip package names per canonical harness name
+_PIP_PACKAGES: dict[str, list[str]] = {
+    "aider": ["aider-chat"],
+    "opencode": ["opencode"],
+    "gemini": ["google-genai-cli"],
+}
+
+
+def _detect_via_package_managers(already_found: set[str]) -> list[str]:
+    """Detect AI coding tools installed via Homebrew, npm, or pip.
+
+    Checks package manager list outputs (brew list, npm list -g, pip list)
+    for known AI harness package names. Only probes package managers that
+    are themselves installed (checked via shutil.which first).
+
+    Args:
+        already_found: Set of canonical harness names already detected by
+                       PATH / config-dir scans (to avoid duplicates).
+
+    Returns:
+        Sorted list of newly detected canonical harness names.
+    """
+    found: set[str] = set()
+
+    # --- Homebrew ---
+    if shutil.which("brew"):
+        try:
+            proc = subprocess.run(
+                ["brew", "list", "--formula", "--full-name"],
+                capture_output=True, text=True, timeout=10,
+            )
+            brew_installed = set(proc.stdout.splitlines())
+            # Also check casks
+            cask_proc = subprocess.run(
+                ["brew", "list", "--cask"],
+                capture_output=True, text=True, timeout=10,
+            )
+            brew_installed |= set(cask_proc.stdout.splitlines())
+
+            for canonical, formulas in _HOMEBREW_FORMULAS.items():
+                if canonical in already_found or canonical in found:
+                    continue
+                if any(f in brew_installed for f in formulas):
+                    found.add(canonical)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+    # --- npm (global packages) ---
+    npm_exe = shutil.which("npm")
+    if npm_exe:
+        try:
+            proc = subprocess.run(
+                [npm_exe, "list", "-g", "--depth=0", "--json"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if proc.returncode == 0 or proc.stdout.strip():
+                import json as _json
+                try:
+                    npm_data = _json.loads(proc.stdout)
+                    npm_deps = npm_data.get("dependencies", {})
+                    for canonical, pkgs in _NPM_PACKAGES.items():
+                        if canonical in already_found or canonical in found:
+                            continue
+                        if any(p in npm_deps for p in pkgs):
+                            found.add(canonical)
+                except (_json.JSONDecodeError, AttributeError):
+                    pass
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+    # --- pip (user and system) ---
+    pip_exe = shutil.which("pip") or shutil.which("pip3")
+    if pip_exe:
+        try:
+            proc = subprocess.run(
+                [pip_exe, "list", "--format=columns"],
+                capture_output=True, text=True, timeout=15,
+            )
+            # Extract package names (first column, lowercase)
+            pip_installed: set[str] = set()
+            for line in proc.stdout.splitlines()[2:]:  # Skip header rows
+                parts = line.split()
+                if parts:
+                    pip_installed.add(parts[0].lower())
+
+            for canonical, pkgs in _PIP_PACKAGES.items():
+                if canonical in already_found or canonical in found:
+                    continue
+                if any(p.lower() in pip_installed for p in pkgs):
+                    found.add(canonical)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
     return sorted(found)
 
 
 def scan_all() -> dict[str, dict]:
-    """Scan PATH and config directories for all known AI coding CLIs.
+    """Scan PATH, config directories, and package managers for all known AI coding CLIs.
 
     Returns:
         Dict mapping canonical harness name -> detection info dict:
         {
-            "in_path": bool,       # found via PATH scan
-            "config_dir": bool,    # found via config directory scan
-            "executable": str|None # executable path if found in PATH
+            "in_path": bool,        # found via PATH scan
+            "config_dir": bool,     # found via config directory scan
+            "executable": str|None, # executable path if found in PATH
+            "via_pkg_mgr": bool,    # found via Homebrew/npm/pip (not yet in PATH)
         }
     """
     result: dict[str, dict] = {}
@@ -134,7 +257,21 @@ def scan_all() -> dict[str, dict]:
                 "in_path": in_path,
                 "config_dir": config_dir,
                 "executable": path_found.get(canonical),
+                "via_pkg_mgr": False,
             }
+
+    # Package manager scan — adds entries not yet detected by PATH/config-dir
+    pkg_mgr_found = _detect_via_package_managers(set(result.keys()))
+    for canonical in pkg_mgr_found:
+        if canonical not in result:
+            result[canonical] = {
+                "in_path": False,
+                "config_dir": False,
+                "executable": None,
+                "via_pkg_mgr": True,
+            }
+        else:
+            result[canonical]["via_pkg_mgr"] = True
 
     return result
 

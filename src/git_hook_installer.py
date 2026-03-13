@@ -510,3 +510,187 @@ def is_gate_hook_installed(project_dir: Path) -> bool:
     if not hook_path.exists():
         return False
     return GATE_HOOK_MARKER in hook_path.read_text(encoding="utf-8")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Post-checkout Auto-Sync Hook (Item 11 — Git Branch-Aware Auto-Sync)
+#
+# Installs a git post-checkout hook that automatically runs HarnessSync
+# whenever the user switches branches (git checkout, git switch) or pulls
+# a team member's config changes (git pull). This removes the need to
+# remember to run /sync after updating CLAUDE.md — the most common cause
+# of config drift.
+#
+# The hook is non-blocking: sync runs in the background so it never delays
+# the git checkout. Branch-profile activation is handled by the sync command
+# itself (via branch_aware_sync.py).
+# ──────────────────────────────────────────────────────────────────────────────
+
+POST_CHECKOUT_HOOK_MARKER = "# harnesssync-post-checkout-v1"
+
+POST_CHECKOUT_HOOK_TEMPLATE = """\
+#!/bin/sh
+# HarnessSync post-checkout hook
+# Automatically syncs config when switching branches or pulling team config changes.
+# Installed by: /sync-git-hook install --post-checkout
+# Remove with:  /sync-git-hook uninstall --post-checkout
+
+HARNESSSYNC_POST_CHECKOUT_MARKER="# harnesssync-post-checkout-v1"
+$HARNESSSYNC_POST_CHECKOUT_MARKER
+
+# $3 is 1 for branch checkouts, 0 for file checkouts — only sync on branch change
+CHECKOUT_TYPE="$3"
+if [ "$CHECKOUT_TYPE" != "1" ]; then
+    exit 0
+fi
+
+# Find HarnessSync plugin root
+if [ -n "$CLAUDE_PLUGIN_ROOT" ]; then
+    HS_ROOT="$CLAUDE_PLUGIN_ROOT"
+elif [ -f "$HOME/.claude/plugins/harness-sync/src/commands/sync.py" ]; then
+    HS_ROOT="$HOME/.claude/plugins/harness-sync"
+else
+    # Not installed — skip silently
+    exit 0
+fi
+
+PY=$(command -v python3 || command -v python)
+if [ -z "$PY" ]; then
+    exit 0
+fi
+
+# Check if any HarnessSync-managed source files changed between branches.
+# If no relevant files changed, skip the sync to avoid noise.
+PREV_HEAD="$1"
+NEW_HEAD="$2"
+
+changed=$(git diff --name-only "$PREV_HEAD" "$NEW_HEAD" 2>/dev/null)
+triggers=0
+for pattern in CLAUDE.md .claude/ .mcp.json .harness-sync/; do
+    if echo "$changed" | grep -q "^$pattern"; then
+        triggers=1
+        break
+    fi
+done
+
+if [ "$triggers" -eq 0 ]; then
+    exit 0
+fi
+
+# Run sync in background (non-blocking)
+"$PY" "$HS_ROOT/src/commands/sync.py" --scope all >/dev/null 2>&1 &
+
+exit 0
+"""
+
+
+def install_post_checkout_hook(project_dir: Path) -> tuple[bool, str]:
+    """Install git post-checkout hook that auto-syncs on branch switch.
+
+    The hook fires after ``git checkout`` / ``git switch`` (branch checkouts
+    only, not file-level checkouts) and runs HarnessSync in the background
+    when CLAUDE.md or related config files differ between the old and new
+    branch. This removes the need to remember to run /sync after pulling
+    team config changes.
+
+    If a post-checkout hook already exists in the repository, the
+    HarnessSync block is appended rather than replacing the existing hook,
+    preserving any other scripts already registered.
+
+    Args:
+        project_dir: Starting directory for git repo discovery.
+
+    Returns:
+        Tuple of (success: bool, message: str).
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False, "No git repository found"
+
+    hook_path = git_dir / "hooks" / "post-checkout"
+
+    # If hook already contains our marker, it's already installed
+    if hook_path.exists() and POST_CHECKOUT_HOOK_MARKER in hook_path.read_text(encoding="utf-8"):
+        return True, f"Post-checkout hook already installed at {hook_path}"
+
+    if hook_path.exists():
+        # Append to existing hook
+        existing = hook_path.read_text(encoding="utf-8")
+        new_content = existing.rstrip() + "\n\n" + POST_CHECKOUT_HOOK_TEMPLATE
+    else:
+        new_content = POST_CHECKOUT_HOOK_TEMPLATE
+
+    try:
+        hook_path.write_text(new_content, encoding="utf-8")
+        _make_executable(hook_path)
+        return True, f"Post-checkout hook installed at {hook_path}"
+    except OSError as e:
+        return False, f"Failed to install post-checkout hook: {e}"
+
+
+def uninstall_post_checkout_hook(project_dir: Path) -> tuple[bool, str]:
+    """Remove the HarnessSync block from the git post-checkout hook.
+
+    Removes only the HarnessSync-managed block. If the hook has other
+    content, it is preserved. If the hook becomes empty after removal,
+    the hook file is deleted.
+
+    Args:
+        project_dir: Starting directory for git repo discovery.
+
+    Returns:
+        Tuple of (success: bool, message: str).
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False, "No git repository found"
+
+    hook_path = git_dir / "hooks" / "post-checkout"
+    if not hook_path.exists():
+        return True, "Post-checkout hook not installed"
+
+    content = hook_path.read_text(encoding="utf-8")
+    if POST_CHECKOUT_HOOK_MARKER not in content:
+        return True, "HarnessSync post-checkout hook block not found"
+
+    # Remove the HarnessSync block (from shebang/marker to the trailing blank line)
+    lines = content.splitlines(keepends=True)
+    out: list[str] = []
+    in_block = False
+    for line in lines:
+        if POST_CHECKOUT_HOOK_MARKER in line:
+            in_block = True
+        if not in_block:
+            out.append(line)
+        elif line.strip() == "exit 0" and in_block:
+            # End of our block
+            in_block = False
+
+    remaining = "".join(out).strip()
+    if not remaining or remaining == "#!/bin/sh":
+        hook_path.unlink()
+        return True, f"Post-checkout hook removed (file deleted)"
+
+    try:
+        hook_path.write_text(remaining + "\n", encoding="utf-8")
+        return True, f"HarnessSync block removed from {hook_path}"
+    except OSError as e:
+        return False, f"Failed to update post-checkout hook: {e}"
+
+
+def is_post_checkout_hook_installed(project_dir: Path) -> bool:
+    """Check if the HarnessSync post-checkout hook is installed.
+
+    Args:
+        project_dir: Project directory.
+
+    Returns:
+        True if the HarnessSync post-checkout hook block is present.
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False
+    hook_path = git_dir / "hooks" / "post-checkout"
+    if not hook_path.exists():
+        return False
+    return POST_CHECKOUT_HOOK_MARKER in hook_path.read_text(encoding="utf-8")

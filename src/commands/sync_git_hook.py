@@ -6,20 +6,25 @@ from __future__ import annotations
 Install or uninstall git hooks that auto-sync config when CLAUDE.md,
 .claude/, or .mcp.json changes.
 
-Post-commit hook: syncs in background after commit (non-blocking)
-Pre-commit hook:  syncs synchronously and stages updated target files
-                  (AGENTS.md, GEMINI.md, etc.) in the same commit
-Gate hook:        blocks commits when harness configs are stale
-                  (Claude Code config changed but targets not synced yet)
+Post-commit hook:   syncs in background after commit (non-blocking)
+Pre-commit hook:    syncs synchronously and stages updated target files
+                    (AGENTS.md, GEMINI.md, etc.) in the same commit
+Gate hook:          blocks commits when harness configs are stale
+                    (Claude Code config changed but targets not synced yet)
+Post-checkout hook: auto-syncs when switching branches or pulling team
+                    config changes (removes need to remember /sync after
+                    git checkout or git pull)
 
 Usage:
-    /sync-git-hook                          # show status
-    /sync-git-hook install                  # install post-commit hook
-    /sync-git-hook install --pre-commit     # install pre-commit sync + auto-stage
-    /sync-git-hook install --gate           # install pre-commit gate (blocking)
-    /sync-git-hook uninstall                # remove post-commit hook
-    /sync-git-hook uninstall --pre-commit   # remove pre-commit hook
-    /sync-git-hook uninstall --gate         # remove gate hook
+    /sync-git-hook                            # show status
+    /sync-git-hook install                    # install post-commit hook
+    /sync-git-hook install --pre-commit       # install pre-commit sync + auto-stage
+    /sync-git-hook install --gate             # install pre-commit gate (blocking)
+    /sync-git-hook install --post-checkout    # install post-checkout branch-sync hook
+    /sync-git-hook uninstall                  # remove post-commit hook
+    /sync-git-hook uninstall --pre-commit     # remove pre-commit hook
+    /sync-git-hook uninstall --gate           # remove gate hook
+    /sync-git-hook uninstall --post-checkout  # remove post-checkout hook
 """
 
 import os
@@ -41,6 +46,9 @@ from src.git_hook_installer import (
     install_gate_hook,
     uninstall_gate_hook,
     is_gate_hook_installed,
+    install_post_checkout_hook,
+    uninstall_post_checkout_hook,
+    is_post_checkout_hook_installed,
 )
 
 
@@ -73,6 +81,15 @@ def main() -> None:
         action="store_true",
         help="Install/remove pre-commit gate that blocks commits when sync is stale",
     )
+    parser.add_argument(
+        "--post-checkout",
+        action="store_true",
+        dest="post_checkout",
+        help=(
+            "Install/remove post-checkout hook that auto-syncs when switching branches "
+            "or pulling team config changes (non-blocking, background sync)"
+        ),
+    )
     parser.add_argument("--project-dir", type=str, default=None)
 
     try:
@@ -83,28 +100,34 @@ def main() -> None:
     project_dir = Path(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
     pre_commit = args.pre_commit
     gate = getattr(args, 'gate', False)
+    post_checkout = getattr(args, 'post_checkout', False)
 
     if args.action == "status":
         post_installed = is_hook_installed(project_dir)
         pre_installed = is_pre_commit_hook_installed(project_dir)
         gate_installed = is_gate_hook_installed(project_dir)
+        post_checkout_installed = is_post_checkout_hook_installed(project_dir)
 
         print("HarnessSync Git Hook Status")
         print("=" * 40)
         print(f"  post-commit:      {'installed' if post_installed else 'not installed'}")
         print(f"  pre-commit:       {'installed' if pre_installed else 'not installed'}")
         print(f"  pre-commit gate:  {'installed' if gate_installed else 'not installed'}")
+        print(f"  post-checkout:    {'installed' if post_checkout_installed else 'not installed'}")
         print()
         if post_installed:
-            print("Post-commit: auto-syncs in background after each commit.")
+            print("Post-commit:    auto-syncs in background after each commit.")
         if pre_installed:
-            print("Pre-commit:  syncs and stages target files before each commit.")
+            print("Pre-commit:     syncs and stages target files before each commit.")
         if gate_installed:
-            print("Gate:        blocks commits when harness configs are stale.")
-        if not post_installed and not pre_installed and not gate_installed:
+            print("Gate:           blocks commits when harness configs are stale.")
+        if post_checkout_installed:
+            print("Post-checkout:  auto-syncs when switching branches or pulling team changes.")
+        if not any([post_installed, pre_installed, gate_installed, post_checkout_installed]):
             print("Run /sync-git-hook install to enable post-commit auto-sync.")
             print("Run /sync-git-hook install --pre-commit to enable pre-commit sync + auto-stage.")
             print("Run /sync-git-hook install --gate to enable the stale-sync commit gate.")
+            print("Run /sync-git-hook install --post-checkout to enable branch-switch auto-sync.")
 
     elif args.action == "install":
         if gate:
@@ -129,6 +152,18 @@ def main() -> None:
             else:
                 print(f"Error: {message}", file=sys.stderr)
                 sys.exit(1)
+        elif post_checkout:
+            success, message = install_post_checkout_hook(project_dir)
+            if success:
+                print(f"OK: {message}")
+                print()
+                print("HarnessSync will now auto-sync in the background whenever you")
+                print("switch branches (git checkout / git switch), but only when")
+                print("CLAUDE.md, .claude/, or .mcp.json differs between branches.")
+                print("This eliminates 'forgot to /sync after git pull' config drift.")
+            else:
+                print(f"Error: {message}", file=sys.stderr)
+                sys.exit(1)
         else:
             success, message = install_hook(project_dir)
             if success:
@@ -145,6 +180,8 @@ def main() -> None:
             success, message = uninstall_gate_hook(project_dir)
         elif pre_commit:
             success, message = uninstall_pre_commit_hook(project_dir)
+        elif post_checkout:
+            success, message = uninstall_post_checkout_hook(project_dir)
         else:
             success, message = uninstall_hook(project_dir)
 

@@ -3122,3 +3122,89 @@ _2026-03-13T07:52:07.870Z_
 - The rule_annotation_suggester.py detection patterns are heuristic and will have false positives (e.g., a rule that mentions 'cursor position' will not trigger the cursor signal due to the negative lookahead, but new patterns need similar care)
 
 ---
+## Iteration 48
+_2026-03-13T08:13:03.731Z_
+
+### Items Attempted
+
+- **Bootstrap from Existing Harness** — pass
+- **Named Sync Profiles** — pass
+- **Team Config Git Sync** — pass
+- **Cursor Rules Adapter** — pass
+- **Aider Config Adapter** — pass
+- **Windsurf Rules Adapter** — pass
+- **Real-Time Drift Alerts** — pass
+- **Category-Selective Sync** — pass
+- **Global + Project Config Layering** — pass
+- **MCP Server Auto-Discovery** — pass
+- **Harness Version Compatibility Checker** — pass
+- **Portable Config Bundle Export** — pass
+- **Cross-Harness Prompt Tester** — pass
+- **Config Full-Text Search** — pass
+- **AI-Powered Config Improvement Suggestions** — pass
+- **Config Change Journal** — pass
+- **Capability Gap Warnings at Sync Time** — pass
+- **First-Run Onboarding Wizard** — pass
+- **Pre-Commit Sync Guard** — pass
+- **Curated Config Starter Templates** — pass
+- **Sync Event Webhooks** — pass
+- **Cross-Workspace Config Sync** — pass
+- **Harness Benchmark Comparison** — pass
+- **Secure Env Var Propagation** — pass
+- **Rules Conflict Detector** — pass
+- **PR-Level Config Diff Annotations** — pass
+- **Community Skills Marketplace** — pass
+- **Config Minifier for Harness Token Limits** — pass
+- **Offline-Safe Sync with Queue** — pass
+- **Config Coverage Score** — pass
+- **Harness-Optimized Skill Variants** — pass
+- **Rollback Point Preview** — pass
+- **IDE Extension Config Bridge** — pass
+- **Rule & Skill Usage Analytics** — pass
+- **Natural Language Config Editing** — pass
+- **Config Freshness Indicator** — pass
+- **Shadow Mode New Harness Testing** — pass
+
+### Decisions Made
+
+- Added windsurf (.windsurfrules), opencode (AGENTS.md), and cline (.cline/rules.md, .clinerules) to sync_import._DEFAULT_FILES — these were clear gaps since Windsurf and Cline are in the adapter registry but were not importable as sources
+- Added also .cursorrules (legacy Cursor rules file) and .aider.conf.yml (Aider config) to their respective _DEFAULT_FILES entries for completeness
+- Updated sync_import argparser choices from ['cursor','aider','codex','gemini'] to include windsurf, opencode, cline — ensures CLI-level validation matches the actual supported set
+- Added public detect_installed_version() wrapper in harness_version_compat.py that falls back to checking application manifests (package.json in .app bundles) for GUI-only tools like Cursor and Windsurf where the CLI binary is not on PATH
+- Added detect_all_installed_versions() that scans CLI binaries on PATH and returns only harnesses that are actually installed — used by setup_wizard and status displays
+- Added static_coverage_score() to CompatibilityReporter — computes 0-100 per target from a static capability matrix without needing to run a sync, enabling /sync-status to show coverage before any sync has happened
+- Added format_static_coverage() companion method that renders coverage scores as an ASCII bar chart aligned with the existing sync output style
+- Integrated static_coverage_score() display into _show_default_status() in sync_status.py — coverage scores now appear prominently in /sync-status output
+- Added _scan_mcp_home_directory() to McpAutoDiscovery — scans ~/.mcp/ for locally installed MCP server scripts and Node.js/Python packages, extending discovery beyond npm global and pip packages
+- Added format_pending() to OfflineQueue — structured table output for /sync-status --show-queue showing target, age, retry count, and estimated next-retry time; more useful than format_summary() for debugging stuck queues
+- Added clear_exhausted() to OfflineQueue — removes entries that have exceeded MAX_RETRY_ATTEMPTS, keeping the queue file tidy; entries that can never succeed should not pollute the list
+- Added get_next_retry_time() to OfflineQueue — exposes per-entry backoff timestamps for status displays
+- Added 'account' and 'harness_env' fields to ProfileManager.apply_to_kwargs() — profiles can now specify which Claude Code account to use (work vs personal) and which environment-tagged rules to include; critical for consultants with client separation
+- Added VALID_PROFILE_KEYS set to ProfileManager for documentation of all recognized profile keys
+- Updated format_list() to display account and harness_env when set in a profile
+- Added 'consultant-client' built-in profile template for consultant/contractor workflows with separate client accounts
+- Added suggest_rule_improvements() to config_health.py — heuristic analysis that detects duplicate rules (Jaccard similarity >= 70%), vague language patterns ('make sure', 'if possible'), overly long rules (>300 chars), outdated version references, and placeholder rules
+- Added format_rule_improvement_suggestions() companion formatter grouping suggestions by type with severity indicators
+- Added detect_installed_harnesses() static method to SetupWizard — more robust detection than HarnessReadinessChecker that also checks config directories as fallback and shows version numbers in output
+- Updated run_guided() to use detect_installed_harnesses() instead of HarnessReadinessChecker — shows version info next to each detected harness and extends the target list to include cline, continue, zed, neovim
+
+### Patterns Discovered
+
+- The codebase follows a consistent module-per-feature pattern with clear separation between data structures, business logic, and formatting — each module exports both a computation function and a format_* companion
+- Commands in src/commands/ are thin CLI shrapnel that delegate to src/ modules — good pattern that keeps business logic testable without the CLI layer
+- The compatibility_reporter.py static capability matrix pattern (target -> section -> support level) is the right abstraction for pre-sync coverage estimation without needing to actually run adapters
+- The OfflineQueue retry pattern (MAX_RETRY_ATTEMPTS + exponential backoff with next_retry_at) was already well implemented; the missing pieces were user-facing formatting and explicit exhausted-entry cleanup
+- Profile inheritance via 'extends' key (recursive resolution up to depth 5) is a solid pattern that the new account/harness_env fields integrate cleanly with
+- The Jaccard similarity approach for duplicate rule detection is appropriately lightweight — no NLP required for catching near-exact rewrites of the same rule
+- Boolean 'already_configured' flag on DiscoveredMcpServer is good for deduplication but the discovery report should distinguish 'already configured at user level' from 'already configured at project level'
+
+### Takeaways
+
+- Many features listed in the 30-item spec were already implemented — the codebase is much more complete than the iteration prompt implies; future iterations should focus on depth/quality improvements rather than new modules
+- The _detect_installed_version() private function was solid but not publicly accessible — adding a public wrapper with application-manifest fallback was the right fix for GUI-only tools like Cursor
+- sync_import._DEFAULT_FILES was missing windsurf despite the WindsurfAdapter being fully implemented — a common oversight when adding new adapters without updating the import tooling
+- The static capability matrix in static_coverage_score() will need maintenance as harness capabilities evolve — it should ideally be driven by the same data as CAPABILITY_MATRIX in sync_matrix.py to avoid divergence
+- The profile_manager 'account' field bridges the gap between named profiles (sync configuration) and multi-account setup (credential management) — this is the missing link for consultant use cases
+- suggest_rule_improvements() is intentionally heuristic-only — LLM-powered suggestions would be more accurate but would add a dependency and latency; the heuristic approach catches the most common config quality issues without network calls
+
+---

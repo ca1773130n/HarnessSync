@@ -215,6 +215,20 @@ def main():
         help="Skip these harness targets (comma-separated): codex,gemini,cursor,cline,..."
     )
     parser.add_argument(
+        "--only-for",
+        type=str,
+        default=None,
+        metavar="TARGET:SECTIONS",
+        action="append",
+        dest="only_for",
+        help=(
+            "Sync only specific sections to a specific target. "
+            "Format: TARGET:section1,section2 (e.g. 'gemini:skills,rules'). "
+            "Repeat for multiple targets. Sections not listed are skipped for that target. "
+            "Example: /sync --only-for gemini:skills --only-for codex:rules,mcp"
+        ),
+    )
+    parser.add_argument(
         "--html-report",
         type=str,
         default=None,
@@ -349,6 +363,36 @@ def main():
         cli_only_targets = {t.strip() for t in args.only_targets.split(",") if t.strip()}
     if getattr(args, 'skip_targets', None):
         cli_skip_targets = {t.strip() for t in args.skip_targets.split(",") if t.strip()}
+
+    # Parse --only-for TARGET:sections into per-target section overrides
+    # e.g. --only-for gemini:skills,rules --only-for codex:rules,mcp
+    # Stored as {target: set_of_sections} and passed to orchestrator.
+    cli_per_target_only: dict[str, set[str]] = {}
+    for only_for_entry in (getattr(args, "only_for", None) or []):
+        if ":" not in only_for_entry:
+            print(
+                f"Warning: --only-for '{only_for_entry}' ignored — expected format TARGET:sections",
+                file=sys.stderr,
+            )
+            continue
+        tgt, _, secs_str = only_for_entry.partition(":")
+        tgt = tgt.strip()
+        secs = {s.strip() for s in secs_str.split(",") if s.strip()} & valid_sections
+        if not secs:
+            print(
+                f"Warning: --only-for '{only_for_entry}' has no valid sections; "
+                f"valid: {', '.join(sorted(valid_sections))}",
+                file=sys.stderr,
+            )
+            continue
+        if tgt in cli_per_target_only:
+            cli_per_target_only[tgt] |= secs
+        else:
+            cli_per_target_only[tgt] = secs
+    if cli_per_target_only:
+        # Inform user so they can verify the mapping
+        for tgt, secs in sorted(cli_per_target_only.items()):
+            print(f"[only-for] {tgt}: syncing only {', '.join(sorted(secs))}")
 
     # Apply named profile (overrides --scope/--only/--skip if profile specifies them)
     _profile_targets = None
@@ -516,6 +560,7 @@ def main():
                     cli_only_targets=cli_only_targets,
                     cli_skip_targets=cli_skip_targets,
                     harness_env=harness_env,
+                    cli_per_target_only=cli_per_target_only if cli_per_target_only else None,
                 )
                 results = orchestrator.sync_all()
                 elapsed = time.time() - start_time
@@ -536,6 +581,7 @@ def main():
                     cli_only_targets=cli_only_targets,
                     cli_skip_targets=cli_skip_targets,
                     harness_env=harness_env,
+                    cli_per_target_only=cli_per_target_only if cli_per_target_only else None,
                 )
 
                 # Check for multi-account setup
