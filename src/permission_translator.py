@@ -388,3 +388,198 @@ def _tool_to_gemini_pattern(tool_name: str) -> str:
         return tool_name
     # Built-in tools — lower-case, snake_case form
     return tool_name.lower().replace(" ", "_")
+
+
+# ---------------------------------------------------------------------------
+# Cross-harness Permissions Audit Report (Item 27)
+# ---------------------------------------------------------------------------
+
+def generate_audit_report(
+    settings: dict,
+    targets: list[str] | None = None,
+) -> str:
+    """Generate a cross-harness permissions audit report.
+
+    Produces a Markdown table showing what each configured harness is allowed
+    to do, flags dangerous permission inconsistencies (e.g. shell execution
+    allowed in one harness but blocked in another), and lists items that
+    could not be translated natively.
+
+    Args:
+        settings: Claude Code settings dict (keys: allowedTools, deniedTools,
+                  approvalMode, permissions).
+        targets:  Harnesses to include (default: all known).
+
+    Returns:
+        Multi-line Markdown string with the audit report.
+    """
+    if targets is None:
+        targets = list(_APPROVAL_MODE_MAP.keys()) + ["cursor", "aider", "windsurf"]
+
+    translator = PermissionTranslator()
+    report = translator.translate(settings, targets)
+
+    # Gather per-target capability summary
+    target_caps: dict[str, dict] = {}
+    for target in targets:
+        translations = report.for_target(target)
+        shell_allowed = _infer_shell_allowed(settings, target, translations)
+        network_allowed = _infer_network_allowed(settings, target, translations)
+        file_read = _infer_file_access(settings, target, translations, "read")
+        file_write = _infer_file_access(settings, target, translations, "write")
+        approval = _infer_approval_label(settings, target, translations)
+        gaps = [t for t in translations if t.fidelity in ("comment_only", "dropped")]
+        target_caps[target] = {
+            "shell": shell_allowed,
+            "network": network_allowed,
+            "file_read": file_read,
+            "file_write": file_write,
+            "approval": approval,
+            "gap_count": len(gaps),
+            "gap_items": [t.setting for t in gaps],
+        }
+
+    lines: list[str] = []
+    lines.append("# HarnessSync Permissions Audit Report\n")
+    lines.append(
+        "Cross-harness permissions matrix — shows what each AI harness is allowed "
+        "to do based on your Claude Code settings.\n"
+    )
+
+    # Matrix table
+    col_targets = targets[:8]  # cap width
+    header = f"| Capability       | " + " | ".join(f"{t:<10}" for t in col_targets) + " |"
+    sep    = f"|:-----------------|-" + "-|-".join("-" * 12 for _ in col_targets) + "-|"
+    lines.append(header)
+    lines.append(sep)
+
+    def _row(label: str, key: str) -> str:
+        cells = [_bool_cell(target_caps[t][key]) for t in col_targets]
+        return f"| {label:<17}| " + " | ".join(f"{c:<10}" for c in cells) + " |"
+
+    lines.append(_row("Shell execution",  "shell"))
+    lines.append(_row("Network access",   "network"))
+    lines.append(_row("File read",        "file_read"))
+    lines.append(_row("File write",       "file_write"))
+
+    # Approval mode row
+    approval_cells = [target_caps[t]["approval"] for t in col_targets]
+    lines.append(
+        f"| {'Approval mode':<17}| "
+        + " | ".join(f"{c:<10}" for c in approval_cells)
+        + " |"
+    )
+
+    lines.append("")
+
+    # Dangerous inconsistencies
+    inconsistencies: list[str] = []
+    ref_target = col_targets[0] if col_targets else None
+    for cap_key, cap_label in (
+        ("shell",      "Shell execution"),
+        ("network",    "Network access"),
+        ("file_write", "File write"),
+    ):
+        values = {t: target_caps[t][cap_key] for t in col_targets}
+        unique_vals = set(values.values())
+        if len(unique_vals) > 1:
+            allowed_in  = [t for t, v in values.items() if v is True]
+            blocked_in  = [t for t, v in values.items() if v is False]
+            if allowed_in and blocked_in:
+                inconsistencies.append(
+                    f"- **{cap_label}**: allowed in `{'`, `'.join(allowed_in)}` "
+                    f"but blocked in `{'`, `'.join(blocked_in)}`"
+                )
+
+    if inconsistencies:
+        lines.append("## ⚠ Dangerous Inconsistencies\n")
+        lines.extend(inconsistencies)
+        lines.append(
+            "\nInconsistencies can cause the same AI task to succeed in one harness "
+            "and silently fail (or behave dangerously) in another.\n"
+        )
+    else:
+        lines.append("## ✓ No Dangerous Inconsistencies\n")
+        lines.append(
+            "All harnesses have consistent permissions for high-risk capabilities.\n"
+        )
+
+    # Translation gaps
+    all_gaps: dict[str, list[str]] = {
+        t: target_caps[t]["gap_items"]
+        for t in col_targets
+        if target_caps[t]["gap_items"]
+    }
+    if all_gaps:
+        lines.append("## Translation Gaps\n")
+        lines.append(
+            "The following settings could not be mapped natively and were "
+            "embedded as comments or dropped:\n"
+        )
+        for target, items in sorted(all_gaps.items()):
+            lines.append(f"- **{target}**: {', '.join(items)}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _bool_cell(value: bool | None) -> str:
+    if value is True:
+        return "✓ yes"
+    if value is False:
+        return "✗ no"
+    return "~ partial"
+
+
+def _infer_shell_allowed(
+    settings: dict,
+    target: str,
+    translations: list[PermissionTranslation],
+) -> bool | None:
+    """Infer whether shell execution is permitted for a harness."""
+    denied = settings.get("deniedTools", [])
+    if "Bash" in denied or "bash" in denied:
+        return False
+    allowed = settings.get("allowedTools", [])
+    if allowed and "Bash" not in allowed and "bash" not in allowed:
+        return False
+    if target in ("aider", "continue", "zed", "neovim"):
+        return None  # No native shell permission model
+    return True
+
+
+def _infer_network_allowed(
+    settings: dict,
+    target: str,
+    translations: list[PermissionTranslation],
+) -> bool | None:
+    denied = settings.get("deniedTools", [])
+    if "WebFetch" in denied or "WebSearch" in denied:
+        return False
+    return True
+
+
+def _infer_file_access(
+    settings: dict,
+    target: str,
+    translations: list[PermissionTranslation],
+    direction: str,
+) -> bool | None:
+    """Infer file read or write permission."""
+    denied = settings.get("deniedTools", [])
+    if direction == "read" and ("Read" in denied or "Glob" in denied):
+        return False
+    if direction == "write" and ("Write" in denied or "Edit" in denied):
+        return False
+    return True
+
+
+def _infer_approval_label(
+    settings: dict,
+    target: str,
+    translations: list[PermissionTranslation],
+) -> str:
+    """Return a short approval mode label for a target."""
+    approval_mode = settings.get("approvalMode", settings.get("approval_mode", "suggest"))
+    mapping = _APPROVAL_MODE_MAP.get(target, {})
+    return mapping.get(str(approval_mode), approval_mode[:8])

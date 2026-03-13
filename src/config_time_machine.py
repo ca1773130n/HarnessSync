@@ -457,3 +457,80 @@ class ConfigTimeMachine:
         lines.append("")
         lines.append("Tip: Use /sync-restore --from-snapshot <name> to restore.")
         return "\n".join(lines)
+
+    def auto_snapshot_before_sync(
+        self,
+        cc_home: Path | None = None,
+        max_auto_snapshots: int = 50,
+    ) -> SnapshotEntry:
+        """Take an automatic timestamped snapshot immediately before a sync run.
+
+        Called by the orchestrator at the start of every sync so users can
+        roll back to any previous state with a single command, not just the
+        most recent one. Old auto-snapshots are pruned once the count exceeds
+        ``max_auto_snapshots`` to avoid unbounded disk growth.
+
+        Args:
+            cc_home: Claude Code config directory (default: ~/.claude).
+            max_auto_snapshots: Maximum number of auto-snapshots to retain.
+                                Oldest are deleted when the limit is exceeded.
+
+        Returns:
+            SnapshotEntry for the snapshot that was just saved.
+        """
+        timestamp = datetime.now(timezone.utc)
+        # Build a sortable, filesystem-safe name: auto-YYYYMMDD-HHMMSS
+        name = "auto-" + timestamp.strftime("%Y%m%d-%H%M%S")
+        entry = self.take_snapshot(name, cc_home=cc_home)
+        self._prune_auto_snapshots(max_auto_snapshots)
+        return entry
+
+    def _prune_auto_snapshots(self, keep: int) -> None:
+        """Delete oldest auto-* snapshots beyond the keep limit."""
+        if not _SNAPSHOT_DIR.exists():
+            return
+        auto_files = sorted(
+            [f for f in _SNAPSHOT_DIR.glob("auto-*.json")],
+            key=lambda p: p.stat().st_mtime,
+        )
+        excess = auto_files[: max(0, len(auto_files) - keep)]
+        for f in excess:
+            try:
+                f.unlink()
+            except OSError:
+                pass
+
+    def restore_auto_snapshot(
+        self,
+        index: int = 0,
+        dest_dir: Path | None = None,
+    ) -> dict[str, Path]:
+        """Restore a specific auto-snapshot by reverse-chronological index.
+
+        Unlike ``restore_snapshot()`` which requires an exact name, this lets
+        users say "go back 3 syncs" without knowing the exact timestamp.
+
+        Args:
+            index: 0 = most recent auto-snapshot, 1 = second most recent, etc.
+            dest_dir: Destination directory. If None, creates a temp dir.
+
+        Returns:
+            Dict mapping original file path -> restored path.
+            Empty dict if no auto-snapshots exist or index is out of range.
+        """
+        if not _SNAPSHOT_DIR.exists():
+            return {}
+        auto_files = sorted(
+            [f for f in _SNAPSHOT_DIR.glob("auto-*.json")],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if index >= len(auto_files):
+            return {}
+        snap_name = auto_files[index].stem
+        return self.restore_snapshot(snap_name, dest_dir=dest_dir)
+
+    def list_auto_snapshots(self) -> list[SnapshotEntry]:
+        """Return all auto-* snapshots ordered newest first."""
+        all_snaps = self.list_snapshots()
+        return [s for s in all_snaps if s.name.startswith("auto-")]

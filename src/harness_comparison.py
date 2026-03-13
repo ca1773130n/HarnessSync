@@ -631,3 +631,196 @@ class BehavioralEquivalenceReport:
             lines.append("Run /sync to resync, or check sync tag filtering with /sync-matrix.")
 
         return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Live Latency Benchmark (Item 14)
+# ──────────────────────────────────────────────────────────────────────────────
+
+import subprocess
+import time
+from dataclasses import dataclass as _dc, field as _field
+
+
+@_dc
+class HarnessLatencyResult:
+    """Latency measurement for a single harness CLI invocation.
+
+    Attributes:
+        target:      Harness name.
+        prompt:      The prompt that was sent.
+        latency_ms:  Wall-clock time in milliseconds, or -1 on error.
+        returncode:  CLI exit code, or -1 if the process could not start.
+        stdout_len:  Number of characters in stdout (proxy for output richness).
+        error:       Error message if the run failed.
+        timed_out:   True if the process was killed due to timeout.
+    """
+
+    target: str
+    prompt: str
+    latency_ms: float = -1.0
+    returncode: int = -1
+    stdout_len: int = 0
+    error: str = ""
+    timed_out: bool = False
+
+
+@_dc
+class LatencyBenchmarkReport:
+    """Aggregated results of a live latency benchmark run."""
+
+    targets: list[str] = _field(default_factory=list)
+    prompts: list[str] = _field(default_factory=list)
+    results: list[HarnessLatencyResult] = _field(default_factory=list)
+
+    def by_target(self, target: str) -> list[HarnessLatencyResult]:
+        return [r for r in self.results if r.target == target]
+
+    def mean_latency_ms(self, target: str) -> float:
+        """Return mean latency over successful runs, or -1 if none succeeded."""
+        runs = [r for r in self.by_target(target) if r.latency_ms >= 0 and not r.timed_out]
+        if not runs:
+            return -1.0
+        return sum(r.latency_ms for r in runs) / len(runs)
+
+    def format(self) -> str:
+        """Return a human-readable benchmark report table."""
+        lines = ["Live Harness Latency Benchmark", "=" * 55, ""]
+
+        if not self.results:
+            lines.append("No results — no harness CLIs responded within the timeout.")
+            return "\n".join(lines)
+
+        # Per-target summary
+        lines.append(f"  {'Harness':<14} {'Mean (ms)':<12} {'Runs':<6} {'Errors'}")
+        lines.append("  " + "-" * 45)
+
+        for target in self.targets:
+            runs = self.by_target(target)
+            success = [r for r in runs if r.latency_ms >= 0 and not r.timed_out]
+            errors  = [r for r in runs if r.error or r.timed_out]
+            mean_ms = self.mean_latency_ms(target)
+            mean_str = f"{mean_ms:.0f}" if mean_ms >= 0 else "n/a"
+            lines.append(
+                f"  {target:<14} {mean_str:<12} {len(success):<6} {len(errors)}"
+            )
+
+        lines.append("")
+        lines.append("Note: latency measures CLI startup + first-token time on a simple prompt.")
+        lines.append("Results depend heavily on model size and hardware.")
+        return "\n".join(lines)
+
+
+# Default simple prompts for the benchmark — chosen to be fast and deterministic
+_DEFAULT_BENCHMARK_PROMPTS = [
+    "Reply with the single word: pong",
+    "What is 2 + 2? Reply with just the number.",
+]
+
+# CLI invocation templates per harness target
+# Each value is a list of argv tokens; {prompt} is substituted.
+_HARNESS_CLI_TEMPLATES: dict[str, list[str]] = {
+    "codex":    ["codex", "--quiet", "{prompt}"],
+    "gemini":   ["gemini", "--model", "gemini-2.0-flash", "-p", "{prompt}"],
+    "opencode": ["opencode", "ask", "{prompt}"],
+    "aider":    ["aider", "--message", "{prompt}", "--yes-always", "--no-auto-commits"],
+}
+
+
+def run_live_latency_benchmark(
+    targets: list[str] | None = None,
+    prompts: list[str] | None = None,
+    timeout_seconds: float = 30.0,
+) -> LatencyBenchmarkReport:
+    """Run a live latency benchmark across installed harness CLIs.
+
+    Invokes each harness CLI with a standard short prompt and measures
+    wall-clock time to completion. Results are purely informational —
+    they help users understand startup and first-response latency across
+    their configured harnesses.
+
+    Args:
+        targets: Harness names to benchmark (default: all with known CLI templates).
+        prompts: Prompts to run (default: _DEFAULT_BENCHMARK_PROMPTS).
+        timeout_seconds: Per-prompt timeout in seconds (default: 30).
+
+    Returns:
+        LatencyBenchmarkReport with per-harness, per-prompt results.
+    """
+    if targets is None:
+        targets = list(_HARNESS_CLI_TEMPLATES.keys())
+    if prompts is None:
+        prompts = _DEFAULT_BENCHMARK_PROMPTS
+
+    report = LatencyBenchmarkReport(targets=targets, prompts=prompts)
+
+    for target in targets:
+        template = _HARNESS_CLI_TEMPLATES.get(target)
+        if not template:
+            report.results.append(HarnessLatencyResult(
+                target=target,
+                prompt="",
+                error=f"No CLI template for '{target}'",
+            ))
+            continue
+
+        for prompt in prompts:
+            argv = [tok.replace("{prompt}", prompt) for tok in template]
+            t0 = time.monotonic()
+            result = _run_harness_cli(argv, timeout_seconds)
+            elapsed_ms = (time.monotonic() - t0) * 1000.0
+
+            if result["timed_out"]:
+                report.results.append(HarnessLatencyResult(
+                    target=target,
+                    prompt=prompt,
+                    timed_out=True,
+                    error=f"Timed out after {timeout_seconds}s",
+                ))
+            elif result["error"]:
+                report.results.append(HarnessLatencyResult(
+                    target=target,
+                    prompt=prompt,
+                    error=result["error"],
+                ))
+            else:
+                report.results.append(HarnessLatencyResult(
+                    target=target,
+                    prompt=prompt,
+                    latency_ms=elapsed_ms,
+                    returncode=result["returncode"],
+                    stdout_len=len(result["stdout"]),
+                ))
+
+    return report
+
+
+def _run_harness_cli(
+    argv: list[str],
+    timeout: float,
+) -> dict:
+    """Run a harness CLI subprocess and return timing/output info."""
+    try:
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return {
+            "returncode": proc.returncode,
+            "stdout": proc.stdout,
+            "timed_out": False,
+            "error": "",
+        }
+    except subprocess.TimeoutExpired:
+        return {"returncode": -1, "stdout": "", "timed_out": True, "error": "timeout"}
+    except FileNotFoundError:
+        return {
+            "returncode": -1,
+            "stdout": "",
+            "timed_out": False,
+            "error": f"CLI not found: {argv[0]}",
+        }
+    except Exception as exc:
+        return {"returncode": -1, "stdout": "", "timed_out": False, "error": str(exc)}

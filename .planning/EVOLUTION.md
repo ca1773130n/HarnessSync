@@ -2675,3 +2675,61 @@ _2026-03-13T06:10:31.249Z_
 - Behavioral equivalence testing as a static probe-coverage check is more reliable than runtime execution tests for config-sync correctness
 
 ---
+## Iteration 41
+_2026-03-13T06:23:17.388Z_
+
+### Items Attempted
+
+- **Interactive Conflict Resolution Wizard** — pass
+- **Live Capability Gap Dashboard** — pass
+- **Git Commit Sync Trigger** — pass
+- **Team Config Server** — pass
+- **MCP Server Config Sync** — pass
+- **Harness Version Pinning & Compatibility Warnings** — pass
+- **Aider Adapter** — pass
+- **Cursor Rules Adapter** — pass
+- **Sync Analytics & Insights** — pass
+- **Rule Tagging & Per-Harness Filtering** — pass
+- **Config Drift Alerts & Staleness Notifications** — pass
+- **One-Click New Harness Onboarding** — pass
+- **Visual Sync History & Point-in-Time Restore** — pass
+- **MCP Marketplace Config Sync** — pass
+- **Environment Variable & Secrets Sync Safety Layer** — pass
+- **Harness Performance Benchmark Integration** — pass
+- **GitHub Actions / CI Sync Action** — pass
+- **Pre-Sync Config Linter with Harness-Aware Rules** — pass
+- **Project-Scoped Sync Profiles** — pass
+- **Natural Language Rule Authoring Assistant** — pass
+- **VS Code / Windsurf Extension Config Sync** — pass
+- **Dependency-Aware Rule Ordering** — pass
+- **Sync Impact Scoring** — pass
+- **Multi-Workspace Sync Orchestrator** — pass
+- **Skill Usage Heatmap** — pass
+- **Offline Sync Queue with Retry** — pass
+
+### Decisions Made
+
+- Item 26 (Offline Queue Retry): Added MAX_RETRY_ATTEMPTS=5 cap, exponential backoff starting at 60s doubling per attempt capped at 3600s, per-entry retry_count/next_retry_at/last_error fields. Chose last-write-wins deduplication to preserve existing entry semantics while adding backoff. Exhausted entries are silently dropped rather than kept to avoid unbounded queue growth.
+- Item 23 (Sync Impact Score): Added impact_score property (0-10) computed from warning count, removed MCP servers (weighted 3pts each as highest-impact), new MCP servers, and rule line counts. Added should_auto_approve property (score <= 3) to enable automated approval in low-risk cases. Added score bar and auto-approve note to format() output.
+- Item 22 (Dependency-Aware Rule Ordering): Implemented dependency detection via regex patterns matching 'requires', 'depends on', 'after X', 'see the X section' etc. Added fuzzy heading matching with 4-char minimum to avoid spurious matches. validate_rule_order() checks that prerequisites appear before dependents for top_wins harnesses. Kept detection heuristic rather than DSL to avoid requiring users to annotate rules.
+- Item 2 (Dashboard Capability Gaps): Added capability gap section to _render_dashboard() using existing GapTracker infrastructure. Wrapped in try/except to fail gracefully when no gaps are tracked. Groups gaps by target for compact single-row display per harness.
+- Item 9 (Weekly Digest): Added generate_weekly_digest() to harness_adoption.py reusing UsageAttributionAnalyzer. Surfaces primary harness, per-harness invocation table, synced-but-unused harnesses, and low-coverage active harnesses. Returns plain text suitable for printing or logging.
+- Item 25 (Skill Usage Heatmap): Added render_skill_usage_heatmap_html() and write_skill_usage_heatmap() to html_report.py as a complement to the existing fidelity heatmap. Uses 4-tier color scale (grey/light-green/green/dark-green) based on invocation count ranges. Added column/row totals for quick summary scanning. Kept it separate from the fidelity heatmap to avoid coupling different data types.
+
+### Patterns Discovered
+
+- The codebase consistently uses try/except Exception: pass to make dashboard/reporting code robust against missing data — good pattern for observability features that should never crash the main flow.
+- Many features are already implemented but at a surface level — depth improvements (retry backoff, numeric scoring, dependency analysis) are the primary value-add at this stage of the project.
+- The GapTracker in compatibility_reporter.py is a natural integration point for dashboard features — already tracks cross-harness feature gaps but wasn't surfaced in the main dashboard.
+- The html_report.py fidelity heatmap and the new usage heatmap share _escape() and datetime imports but differ in data semantics — co-locating them in the same module is correct since both are HTML output functions.
+- Exponential backoff with a hardcoded cap is simpler and more predictable than jitter-based approaches for this use case — sync retries are low-frequency operations where jitter adds complexity without benefit.
+
+### Takeaways
+
+- Most major features from the product-ideation list are already implemented in skeleton form. Future iterations should focus on integration depth — connecting existing modules to each other (e.g., wiring generate_weekly_digest into a /sync-digest command).
+- The deepeval library is broken on Python 3.9 due to use of PEP 604 union syntax (X | None) — the test suite needs a conftest.py that excludes deepeval or a Python version upgrade to 3.10+.
+- The offline_queue had no retry backoff — this is a significant correctness gap for the stated use case of remote/offline targets, since without backoff every replay attempt would immediately fail for still-unavailable targets.
+- Rule dependency detection using regex heuristics works well for common patterns ('requires X', 'after X', 'see the X section') but will miss unusual phrasings — a future improvement could support explicit YAML frontmatter dependency declarations in CLAUDE.md sections.
+- The sync_impact_predictor already had sophisticated per-harness conflict detection but lacked a rollup numeric score — adding impact_score makes it actionable for automated pipelines that need a threshold to decide whether to prompt for review.
+
+---
