@@ -1115,6 +1115,192 @@ def _health_label(score: int) -> str:
     return "critical"
 
 
+# ---------------------------------------------------------------------------
+# CLAUDE.md Portability Score (item 16)
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate Claude Code-specific constructs that won't translate
+# cleanly to other harnesses.
+_CLAUDE_ONLY_PATTERNS: list[tuple[re.Pattern, str, str]] = [
+    (
+        re.compile(r"mcp__\w+__\w+", re.IGNORECASE),
+        "MCP tool reference",
+        "MCP tool references are Claude Code-only — add a fallback comment for other harnesses",
+    ),
+    (
+        re.compile(r"\bAgent\s+tool\b", re.IGNORECASE),
+        "Agent tool",
+        "The Agent tool is Claude Code-specific — describe the intent as plain text for portability",
+    ),
+    (
+        re.compile(r"\bTodoWrite\b|\bTodoRead\b"),
+        "TodoWrite/TodoRead tool",
+        "TodoWrite/TodoRead are Claude Code-only tools — omit or wrap with <!-- harness:only=claude -->",
+    ),
+    (
+        re.compile(r"/[a-z][\w-]+\b(?:\s+--\w+)?"),
+        "Slash command reference",
+        "Slash command references may not exist in other harnesses — use descriptive text instead",
+    ),
+    (
+        re.compile(r"\.claude/\w+"),
+        "~/.claude/ path reference",
+        ".claude/ path is Claude Code-specific — use <!-- harness:only=claude --> to exclude from sync",
+    ),
+    (
+        re.compile(r"\bClaude Code\b"),
+        "Claude Code product name",
+        "'Claude Code' references are harness-specific — consider generalizing to 'the AI assistant'",
+    ),
+    (
+        re.compile(r"<!-- harness:only=\w+ -->", re.IGNORECASE),
+        "harness:only annotation",
+        None,  # None means this is a portability-improving annotation — reward it
+    ),
+    (
+        re.compile(r"<!-- harness:exclude -->", re.IGNORECASE),
+        "harness:exclude annotation",
+        None,  # portability-improving annotation
+    ),
+]
+
+# Deduction per unmitigated Claude-specific pattern hit (out of 100)
+_PATTERN_DEDUCTION = 8
+# Bonus for using portability annotations (capped)
+_ANNOTATION_BONUS = 5
+
+
+class PortabilityIssue:
+    """A single portability issue found in CLAUDE.md content."""
+
+    def __init__(self, line_no: int, line: str, pattern_name: str, suggestion: str):
+        self.line_no = line_no
+        self.line = line.rstrip()
+        self.pattern_name = pattern_name
+        self.suggestion = suggestion
+
+    def format(self) -> str:
+        preview = self.line[:80] + ("…" if len(self.line) > 80 else "")
+        return f"  Line {self.line_no}: [{self.pattern_name}] {self.suggestion}\n    → {preview}"
+
+
+class PortabilityScoreResult:
+    """Result of ClaudeMdPortabilityScorer.score()."""
+
+    def __init__(self, score: int, issues: list[PortabilityIssue], annotation_count: int):
+        self.score = score                    # 0-100
+        self.issues = issues
+        self.annotation_count = annotation_count
+
+    @property
+    def label(self) -> str:
+        if self.score >= 85:
+            return "excellent"
+        if self.score >= 70:
+            return "good"
+        if self.score >= 50:
+            return "fair"
+        if self.score >= 30:
+            return "poor"
+        return "critical"
+
+    def format(self) -> str:
+        lines = [
+            f"CLAUDE.md Portability Score: {self.score}/100 ({self.label})",
+            "",
+        ]
+        if not self.issues:
+            lines.append("No portability issues found — config is fully portable.")
+        else:
+            lines.append(f"Found {len(self.issues)} portability issue(s):")
+            lines.append("")
+            for issue in self.issues:
+                lines.append(issue.format())
+                lines.append("")
+        if self.annotation_count > 0:
+            lines.append(
+                f"Note: {self.annotation_count} harness annotation(s) found — "
+                "+bonus points for explicitly controlling sync targets."
+            )
+        if self.score < 100:
+            lines.append("")
+            lines.append(
+                "Tip: Wrap Claude Code-specific sections with "
+                "<!-- harness:only=claude --> to exclude them from sync."
+            )
+        return "\n".join(lines)
+
+
+class ClaudeMdPortabilityScorer:
+    """Score CLAUDE.md content on cross-harness portability (0–100).
+
+    Scans the content line by line for Claude Code-specific constructs that
+    won't translate to other harnesses, and returns a score with specific
+    actionable suggestions per line.
+
+    A score of 100 means the config is fully portable. Each unmitigated
+    Claude-specific pattern deducts points; using harness annotations earns
+    a bonus for explicitly handling the harness difference.
+
+    Usage::
+
+        scorer = ClaudeMdPortabilityScorer()
+        result = scorer.score(claude_md_content)
+        print(result.format())
+    """
+
+    def score(self, content: str) -> PortabilityScoreResult:
+        """Score CLAUDE.md content portability.
+
+        Args:
+            content: Full text of CLAUDE.md.
+
+        Returns:
+            PortabilityScoreResult with 0-100 score, issues list, and
+            annotation count.
+        """
+        issues: list[PortabilityIssue] = []
+        annotation_count = 0
+        seen_suggestions: set[str] = set()  # deduplicate same suggestion per file
+
+        for line_no, line in enumerate(content.splitlines(), start=1):
+            for pattern, name, suggestion in _CLAUDE_ONLY_PATTERNS:
+                if not pattern.search(line):
+                    continue
+                if suggestion is None:
+                    # This is a portability annotation — count as bonus
+                    annotation_count += 1
+                else:
+                    # Deduplicate: same suggestion only reported once per file
+                    key = (name, suggestion)
+                    if key not in seen_suggestions:
+                        seen_suggestions.add(key)
+                        issues.append(
+                            PortabilityIssue(line_no, line, name, suggestion)
+                        )
+
+        raw_score = 100 - len(issues) * _PATTERN_DEDUCTION
+        bonus = min(annotation_count * _ANNOTATION_BONUS, 15)
+        score = max(0, min(100, raw_score + bonus))
+
+        return PortabilityScoreResult(score=score, issues=issues, annotation_count=annotation_count)
+
+    def score_file(self, path: Path) -> PortabilityScoreResult:
+        """Convenience wrapper that reads a file and scores it.
+
+        Args:
+            path: Path to CLAUDE.md or similar file.
+
+        Returns:
+            PortabilityScoreResult.
+        """
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return PortabilityScoreResult(score=0, issues=[], annotation_count=0)
+        return self.score(content)
+
+
 def generate_fix_suggestions(scores: list) -> list[str]:
     """Generate prioritized, actionable fix suggestions from a list of health scores.
 

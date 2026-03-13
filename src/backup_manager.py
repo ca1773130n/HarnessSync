@@ -465,6 +465,131 @@ class BackupManager:
         snapshots.sort(key=lambda s: s["mtime"], reverse=True)
         return snapshots
 
+    def restore_by_date(
+        self,
+        date_str: str,
+        target_name: str | None = None,
+        dry_run: bool = False,
+    ) -> dict:
+        """Restore the snapshot closest to a given date for one or all targets.
+
+        Implements the `/sync-restore YYYY-MM-DD` use case: find the most
+        recent snapshot taken *on or before* the given date and restore it.
+
+        Args:
+            date_str: Date string in YYYY-MM-DD format (e.g. '2026-03-10').
+                      Also accepts YYYYMMDD without separators.
+            target_name: Harness to restore (e.g. 'codex'). If None,
+                         restores the closest snapshot for ALL targets.
+            dry_run: If True, log what would be restored without touching disk.
+
+        Returns:
+            Dict with keys:
+            - 'restored': list of target names that were restored
+            - 'skipped': list of (target, reason) tuples for targets not restored
+            - 'errors': list of (target, error_message) tuples for failures
+        """
+        import re as _re_local
+
+        # Normalise date string → 'YYYYMMDD'
+        norm = date_str.replace("-", "").replace("/", "").strip()
+        if not _re_local.fullmatch(r"\d{8}", norm):
+            return {
+                "restored": [],
+                "skipped": [],
+                "errors": [(target_name or "*", f"Invalid date format '{date_str}' — use YYYY-MM-DD")],
+            }
+
+        cutoff_ts = norm  # 'YYYYMMDD' — we compare lexicographically
+
+        snapshots = self.list_snapshots(target_name)
+
+        # Enrich snapshots with the authoritative timestamp from metadata JSON,
+        # because list_snapshots() derives timestamp from the dir name which can
+        # be mangled when the original file name contains underscores.
+        import json as _json_local
+        for snap in snapshots:
+            meta_file: Path = snap["path"] / ".harnesssync-snapshot.json"
+            if meta_file.exists():
+                try:
+                    meta = _json_local.loads(meta_file.read_text(encoding="utf-8"))
+                    ts_from_meta = meta.get("timestamp", "")
+                    if ts_from_meta:
+                        snap["timestamp"] = ts_from_meta
+                except (OSError, ValueError):
+                    pass
+
+        # Group by target, keeping only snapshots on or before the cutoff date
+        by_target: dict[str, list[dict]] = {}
+        for snap in snapshots:
+            # timestamp field is 'YYYYMMDD_HHMMSS' — first 8 chars = YYYYMMDD
+            snap_date = snap["timestamp"][:8]
+            if snap_date <= cutoff_ts:
+                by_target.setdefault(snap["target"], []).append(snap)
+
+        if not by_target:
+            targets_checked = target_name or "all targets"
+            return {
+                "restored": [],
+                "skipped": [(targets_checked, f"No snapshot found on or before {date_str}")],
+                "errors": [],
+            }
+
+        restored: list[str] = []
+        skipped: list[tuple[str, str]] = []
+        errors: list[tuple[str, str]] = []
+
+        for tname, snaps in by_target.items():
+            # Pick the most recent snapshot before/on the cutoff
+            snaps.sort(key=lambda s: s["timestamp"], reverse=True)
+            best = snaps[0]
+
+            if dry_run:
+                self.logger.info(
+                    f"[dry-run] Would restore {tname} from snapshot "
+                    f"'{best['name']}' (taken {best['timestamp']})"
+                )
+                restored.append(tname)
+                continue
+
+            backup_dir: Path = best["path"]
+            source_info = best.get("label") or best["timestamp"]
+            try:
+                # Find the original target path from backup metadata
+                meta_file = backup_dir / ".harnesssync-snapshot.json"
+                if meta_file.exists():
+                    import json
+                    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                    original_path_str = meta.get("source")
+                    if original_path_str:
+                        original_path = Path(original_path_str)
+                        self.rollback([(backup_dir, original_path)])
+                        restored.append(tname)
+                        self.logger.info(
+                            f"Restored {tname} from snapshot '{best['name']}' "
+                            f"(taken {source_info})"
+                        )
+                        continue
+
+                # Fallback: restore all non-metadata files from backup dir
+                content_files = [
+                    f for f in backup_dir.iterdir()
+                    if f.name != ".harnesssync-snapshot.json"
+                ]
+                if content_files:
+                    self.rollback(
+                        [(backup_dir, f.parent / f.name) for f in content_files]
+                    )
+                    restored.append(tname)
+                else:
+                    skipped.append((tname, "Backup directory is empty"))
+
+            except Exception as exc:  # noqa: BLE001
+                errors.append((tname, str(exc)))
+                self.logger.error(f"restore_by_date failed for {tname}: {exc}")
+
+        return {"restored": restored, "skipped": skipped, "errors": errors}
+
     def cleanup_old_backups(self, target_name: str, keep_count: int = 10):
         """
         Remove old backups beyond retention policy.

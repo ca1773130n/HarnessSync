@@ -236,6 +236,108 @@ def suggest_skill_workaround(target: str, skill_name: str) -> str:
     return f"Skill '{skill_name}' gap in {target}: {base}"
 
 
+# ---------------------------------------------------------------------------
+# Portable Skill Design Guide (item 12)
+# ---------------------------------------------------------------------------
+
+# Design tips keyed by common anti-pattern category
+_PORTABLE_DESIGN_TIPS: list[tuple[str, str]] = [
+    (
+        "claude_tool_refs",
+        "Avoid referencing Claude Code-specific tool names (e.g., 'Agent tool', "
+        "'TodoWrite', 'mcp__*') inside skill descriptions. Replace with task-level "
+        "descriptions so other harnesses can interpret them: "
+        "'orchestrate a multi-step task' instead of 'use the Agent tool'.",
+    ),
+    (
+        "slash_commands",
+        "Don't rely on slash command names in skill descriptions. Other harnesses "
+        "may not have the same commands. Describe the desired behavior instead of "
+        "citing a specific command like '/sync' or '/commit'.",
+    ),
+    (
+        "file_paths",
+        "Avoid hardcoding ~/.claude/ paths in skill instructions. Use environment "
+        "variables or project-relative paths so the skill works across harnesses "
+        "and machines.",
+    ),
+    (
+        "mcp_tool_names",
+        "MCP tool names (mcp__plugin_*) are Claude Code-specific. For skills that "
+        "use external data, describe the data source generically and let each "
+        "harness use its available tool to fetch it.",
+    ),
+    (
+        "harness_annotations",
+        "Use harness annotations to include harness-specific instructions inline: "
+        "<!-- harness:only=claude --> ... <!-- /harness:claude --> wraps content "
+        "that only Claude Code should see. Other harnesses receive the generic version.",
+    ),
+    (
+        "self_contained",
+        "Write skills to be self-contained: include all context the AI needs "
+        "without assuming access to other Claude Code features. A skill that "
+        "works as a standalone system-prompt snippet will work in any harness.",
+    ),
+    (
+        "avoid_multi_agent",
+        "Multi-agent orchestration patterns (spawning sub-agents, tool chaining) "
+        "are Claude Code-specific. If the skill requires orchestration, add a "
+        "<!-- harness:only=claude --> section and provide a simplified single-agent "
+        "fallback for other harnesses.",
+    ),
+]
+
+
+def format_portable_design_guide(gap_report: "SkillGapReport | None" = None) -> str:
+    """Return a plain-English guide for designing portable skills.
+
+    When a SkillGapReport is provided, the guide is personalized to the
+    specific gaps found (e.g., targets where skills are missing). Otherwise
+    a general guide is returned.
+
+    Args:
+        gap_report: Optional SkillGapReport from SkillGapAnalyzer.analyze().
+
+    Returns:
+        Multi-line guide string with actionable tips.
+    """
+    lines = [
+        "## Portable Skill Design Guide",
+        "",
+        "Skills written exclusively for Claude Code often perform poorly in other "
+        "harnesses because they reference Claude-specific tools, commands, or paths.",
+        "",
+        "Follow these guidelines to write skills that sync cleanly to all targets:",
+        "",
+    ]
+
+    for i, (_, tip) in enumerate(_PORTABLE_DESIGN_TIPS, start=1):
+        lines.append(f"{i}. {tip}")
+        lines.append("")
+
+    if gap_report and gap_report.total_gaps > 0:
+        lines.append("─" * 60)
+        lines.append("")
+        lines.append(
+            f"Your skill gap report shows {gap_report.total_gaps} gap(s) across "
+            f"{len([g for g in gap_report.gaps if g.missing_in])} skill(s). "
+            "Applying the tips above — especially self-contained skill design and "
+            "harness annotations — will reduce these gaps without requiring separate "
+            "per-harness skill files."
+        )
+
+    if gap_report and gap_report.total_orphans > 0:
+        lines.append("")
+        lines.append(
+            f"Note: {gap_report.total_orphans} orphaned skill copy(ies) were found "
+            "in target harnesses without a corresponding Claude Code source. "
+            "Run /sync-import to propose merging them back into a canonical skill."
+        )
+
+    return "\n".join(lines)
+
+
 class SkillGapAnalyzer:
     """Analyzes skill coverage gaps across sync targets.
 

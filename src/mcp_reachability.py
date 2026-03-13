@@ -407,6 +407,156 @@ def format_transport_compat_warnings(issues: list[TransportCompatIssue]) -> list
     ]
 
 
+# ---------------------------------------------------------------------------
+# Pre-Sync MCP Validator (item 20)
+# ---------------------------------------------------------------------------
+
+# Harnesses that support MCP; syncing to others is pointless
+_MCP_CAPABLE_TARGETS: frozenset[str] = frozenset(
+    {"codex", "gemini", "opencode", "cursor", "cline", "continue", "zed", "neovim", "windsurf"}
+)
+
+# Status constants
+_STATUS_OK = "ok"
+_STATUS_WARN = "warn"
+_STATUS_BLOCK = "block"
+
+
+class PreSyncValidationResult:
+    """Result of a pre-sync MCP validation check.
+
+    Attributes:
+        status: 'ok' | 'warn' | 'block'
+            - ok: all servers reachable, sync can proceed normally
+            - warn: some servers unreachable but sync can still proceed
+            - block: critical failure that should halt sync
+        warnings: Non-fatal issues (unreachable optional servers)
+        errors: Fatal issues that should block sync
+        reachable_servers: Subset of servers that passed validation
+        unreachable_servers: Servers that failed validation
+    """
+
+    def __init__(
+        self,
+        status: str,
+        warnings: list[str],
+        errors: list[str],
+        reachable_servers: dict[str, dict],
+        unreachable_servers: list[McpReachabilityResult],
+    ):
+        self.status = status
+        self.warnings = warnings
+        self.errors = errors
+        self.reachable_servers = reachable_servers
+        self.unreachable_servers = unreachable_servers
+
+    @property
+    def ok(self) -> bool:
+        return self.status in (_STATUS_OK, _STATUS_WARN)
+
+    def format_summary(self) -> str:
+        total = len(self.reachable_servers) + len(self.unreachable_servers)
+        lines = [
+            f"MCP Pre-Sync Validation: {self.status.upper()} "
+            f"({len(self.reachable_servers)}/{total} servers reachable)"
+        ]
+        for err in self.errors:
+            lines.append(f"  ✗ BLOCK: {err}")
+        for warn in self.warnings:
+            lines.append(f"  ⚠ WARN: {warn}")
+        if not self.errors and not self.warnings:
+            lines.append("  ✓ All MCP servers verified — safe to sync.")
+        return "\n".join(lines)
+
+
+def pre_sync_validate(
+    mcp_servers: dict[str, dict],
+    target: str,
+    timeout: float = 3.0,
+    block_on_unreachable: bool = False,
+) -> PreSyncValidationResult:
+    """Validate MCP server availability before syncing to a target harness.
+
+    Checks each configured MCP server and determines whether the target
+    harness supports MCP at all. Returns a structured result with warnings
+    for unreachable servers (rather than silently writing broken configs).
+
+    Args:
+        mcp_servers: Dict mapping server name → server config dict.
+        target: Target harness name (e.g. 'codex', 'gemini').
+        timeout: TCP socket timeout for URL-based servers (default: 3.0s).
+        block_on_unreachable: If True, any unreachable server escalates to
+                               a BLOCK status (useful in CI/CD pipelines).
+
+    Returns:
+        PreSyncValidationResult with status, warnings, errors, and filtered
+        server dicts for use in the sync operation.
+    """
+    warnings: list[str] = []
+    errors: list[str] = []
+
+    # Check if target supports MCP at all
+    if target not in _MCP_CAPABLE_TARGETS:
+        return PreSyncValidationResult(
+            status=_STATUS_WARN,
+            warnings=[
+                f"Target '{target}' does not support MCP — "
+                "MCP server config will be omitted from sync."
+            ],
+            errors=[],
+            reachable_servers={},
+            unreachable_servers=[],
+        )
+
+    if not mcp_servers:
+        return PreSyncValidationResult(
+            status=_STATUS_OK,
+            warnings=[],
+            errors=[],
+            reachable_servers={},
+            unreachable_servers=[],
+        )
+
+    checker = McpReachabilityChecker(timeout=timeout)
+    results = checker.check_all(mcp_servers)
+
+    reachable: dict[str, dict] = {}
+    unreachable: list[McpReachabilityResult] = []
+
+    for result in results:
+        if result.reachable:
+            reachable[result.name] = mcp_servers[result.name]
+        else:
+            unreachable.append(result)
+            hint = _get_install_hint(
+                mcp_servers.get(result.name, {}).get("command", "")
+            )
+            msg = (
+                f"MCP server '{result.name}' is not reachable: {result.reason}."
+            )
+            if hint:
+                msg += f" Install hint: {hint}"
+            if block_on_unreachable:
+                errors.append(msg)
+            else:
+                warnings.append(msg)
+
+    if errors:
+        status = _STATUS_BLOCK
+    elif warnings:
+        status = _STATUS_WARN
+    else:
+        status = _STATUS_OK
+
+    return PreSyncValidationResult(
+        status=status,
+        warnings=warnings,
+        errors=errors,
+        reachable_servers=reachable,
+        unreachable_servers=unreachable,
+    )
+
+
 def filter_unreachable_servers(
     mcp_servers: dict[str, dict],
     timeout: float = 3.0,

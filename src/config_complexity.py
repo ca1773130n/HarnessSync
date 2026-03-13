@@ -320,10 +320,182 @@ class ConfigComplexityScorer:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# CLAUDE.md Content Quality Analyzer (item 28)
+# Sync Complexity Risky Section Analyzer (item 27)
 # ──────────────────────────────────────────────────────────────────────────────
 
 import re as _re
+from dataclasses import dataclass as _dc
+
+
+@_dc
+class RiskySection:
+    """A config section flagged as risky or expensive to sync."""
+    section_type: str       # e.g. "mcp_nested", "ambiguous_permission", "non_portable_tool"
+    location: str           # Human-readable location hint (e.g. "line 42", "MCP server 'my-tool'")
+    risk_level: str         # "high" | "medium" | "low"
+    explanation: str        # Plain-English explanation of why this is risky
+    mitigation: str         # Concrete recommendation
+
+
+# Patterns that flag non-portable tool references in rule text
+_NON_PORTABLE_TOOL_RE = _re.compile(
+    r"\b(mcp__\w+__\w+|TodoWrite|TodoRead|WebFetch|WebSearch|Bash\s+tool|Read\s+tool|Edit\s+tool)\b"
+)
+
+# Patterns that flag deeply nested MCP config JSON fragments
+_NESTED_MCP_RE = _re.compile(
+    r'(?s)"mcpServers"\s*:\s*\{[^}]*\{[^}]*\{',  # 3+ levels of nesting
+)
+
+# Patterns for ambiguous permission grants in rules text
+_AMBIGUOUS_PERM_RE = _re.compile(
+    r"\b(allow\s+all|full\s+access|unrestricted|bypass|skip.*verification|no.*limit)\b",
+    _re.IGNORECASE,
+)
+
+# Patterns for internal-only hostnames / private IPs in rules
+_INTERNAL_HOST_RE = _re.compile(
+    r"\b(?:localhost|127\.0\.0\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|"
+    r"172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|\.internal\b|\.corp\b|\.local\b)",
+    _re.IGNORECASE,
+)
+
+
+def analyze_risky_sections(
+    rules_content: str,
+    mcp_config_json: str | None = None,
+) -> list[RiskySection]:
+    """Identify config sections that are expensive or risky to sync.
+
+    Checks for:
+    - Non-portable tool references in rules (Claude Code-specific API names)
+    - Deeply nested MCP server configurations
+    - Ambiguous permission grants that may silently expand in other harnesses
+    - Internal hostnames / private IPs that won't be reachable on other machines
+
+    Args:
+        rules_content: Full text of CLAUDE.md / rules content.
+        mcp_config_json: Optional raw JSON string of MCP server config block,
+                         checked for nesting depth issues.
+
+    Returns:
+        List of RiskySection items, ordered high → medium → low risk.
+    """
+    risky: list[RiskySection] = []
+
+    # --- Non-portable tool references in rules ---
+    for match in _NON_PORTABLE_TOOL_RE.finditer(rules_content):
+        line_no = rules_content[: match.start()].count("\n") + 1
+        tool = match.group(1)
+        risky.append(RiskySection(
+            section_type="non_portable_tool",
+            location=f"line {line_no}",
+            risk_level="high",
+            explanation=(
+                f"Tool reference '{tool}' is Claude Code-specific and will be inert "
+                "or confusing in other harnesses."
+            ),
+            mitigation=(
+                "Wrap with <!-- harness:only=claude --> or replace with a "
+                "descriptive plain-English instruction."
+            ),
+        ))
+
+    # --- Ambiguous permission grants ---
+    for match in _AMBIGUOUS_PERM_RE.finditer(rules_content):
+        line_no = rules_content[: match.start()].count("\n") + 1
+        phrase = match.group(0)
+        risky.append(RiskySection(
+            section_type="ambiguous_permission",
+            location=f"line {line_no}",
+            risk_level="high",
+            explanation=(
+                f"'{phrase}' is an ambiguous permission grant. Different harnesses "
+                "interpret broad permissions differently — some may silently ignore "
+                "it, others may expand it beyond what you intended."
+            ),
+            mitigation=(
+                "Replace with a specific, scoped permission (e.g., 'allow read access "
+                "to project files') to make intent unambiguous across harnesses."
+            ),
+        ))
+
+    # --- Internal hostnames / private IPs ---
+    for match in _INTERNAL_HOST_RE.finditer(rules_content):
+        line_no = rules_content[: match.start()].count("\n") + 1
+        host = match.group(0)
+        risky.append(RiskySection(
+            section_type="internal_hostname",
+            location=f"line {line_no}",
+            risk_level="medium",
+            explanation=(
+                f"Internal hostname or IP '{host}' will not be reachable on other "
+                "machines or harness environments."
+            ),
+            mitigation=(
+                "Wrap with <!-- harness:only=claude --> or replace with an "
+                "environment variable reference (e.g. $INTERNAL_API_URL)."
+            ),
+        ))
+
+    # --- Deeply nested MCP config ---
+    if mcp_config_json and _NESTED_MCP_RE.search(mcp_config_json):
+        risky.append(RiskySection(
+            section_type="mcp_nested",
+            location="MCP server config",
+            risk_level="medium",
+            explanation=(
+                "MCP server config has deeply nested objects (3+ levels). "
+                "Some harness adapters flatten nested configs, which can silently "
+                "drop sub-keys that configure authentication or transport settings."
+            ),
+            mitigation=(
+                "Simplify nested MCP config or explicitly test the synced output "
+                "with /sync --dry-run to verify the nested structure is preserved."
+            ),
+        ))
+
+    # Sort: high first, then medium, then low
+    _order = {"high": 0, "medium": 1, "low": 2}
+    risky.sort(key=lambda r: _order.get(r.risk_level, 3))
+    return risky
+
+
+def format_risky_sections_report(sections: list[RiskySection]) -> str:
+    """Format risky sections as a human-readable report.
+
+    Args:
+        sections: Output of analyze_risky_sections().
+
+    Returns:
+        Multi-line report string.
+    """
+    if not sections:
+        return "Sync Complexity: No risky sections detected — config is safe to sync."
+
+    lines = [
+        f"Sync Complexity: {len(sections)} risky section(s) detected",
+        "",
+    ]
+    for s in sections:
+        icon = {"high": "✗", "medium": "⚠", "low": "·"}.get(s.risk_level, "·")
+        lines.append(f"{icon} [{s.risk_level.upper()}] {s.section_type} @ {s.location}")
+        lines.append(f"  Why: {s.explanation}")
+        lines.append(f"  Fix: {s.mitigation}")
+        lines.append("")
+
+    high_count = sum(1 for s in sections if s.risk_level == "high")
+    if high_count:
+        lines.append(
+            f"Recommendation: Resolve {high_count} high-risk section(s) before syncing "
+            "to avoid silent failures in target harnesses."
+        )
+    return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CLAUDE.md Content Quality Analyzer (item 28)
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass

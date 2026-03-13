@@ -4306,3 +4306,71 @@ _2026-03-13T12:40:08.490Z_
 - SyncConflictWizard.union strategy (deduplicated merge) is the most valuable for CI because it preserves both sync improvements and manual additions without requiring human input
 
 ---
+## Iteration 65
+_2026-03-13T12:56:45.487Z_
+
+### Items Attempted
+
+- **Sync Conflict Resolution Wizard** — pass
+- **Live Capability Matrix Dashboard** — pass
+- **New Harness Auto-Discovery & Onboarding** — pass
+- **Skill Portability Score** — pass
+- **MCP Server Compatibility Bridge** — pass
+- **Team Shared Sync Profiles** — pass
+- **Git Commit-Triggered Sync** — pass
+- **Sync Usage Analytics & Insights** — pass
+- **Config Lint on Write** — pass
+- **Cross-Harness Rule Simulation** — pass
+- **Sync Rollback Timeline** — pass
+- **Cross-Harness Benchmark Comparison** — pass
+- **Env Var & Secret Scanner** — pass
+- **Aider Harness Adapter** — pass
+- **Cursor Rules Adapter** — pass
+- **Windsurf / Cascade Adapter** — pass
+- **Project vs Global Scope Visualizer** — pass
+- **Sync PR Review Bot** — pass
+- **Continuous Harness Health Monitor** — pass
+- **Import From Target Harness** — pass
+- **Skill Marketplace Export** — pass
+- **Natural Language Config Authoring** — pass
+- **Sync Webhook Integration** — pass
+- **Versioned Config Snapshots** — pass
+- **Harness-Agnostic Skill Format (HSF)** — pass
+- **Context Window Budget Sync** — pass
+- **Monorepo Per-Package Sync** — pass
+- **Sync Token Cost Estimator** — pass
+- **Config Deprecation Notifier** — pass
+- **Sync Undo/Redo Stack** — pass
+- **Rule Effectiveness Feedback Loop** — pass
+
+### Decisions Made
+
+- Implemented HarnessUndoStack with per-harness JSON files under ~/.harnesssync/undo_stacks/<harness>/ — choosing flat JSON over SQLite for portability and human-readability
+- Capped undo/redo stack at MAX_STACK_DEPTH=20 entries and automatically clear redo when pushing new entries, matching standard UX conventions that users intuitively expect
+- SyncUndoManager facade pattern lets the orchestrator push snapshots via a single entry point without needing to know about per-harness stack internals
+- RuleSimulator uses static HarnessProfile dataclasses rather than querying live adapters — this makes it offline-capable and avoids circular imports with the adapter registry
+- FILE_SUBSTITUTIONS dict in rule_simulator translates 'CLAUDE.md' to target-specific filenames rather than stripping it — preserves the intent while making it accurate per-harness
+- ContextBudgetSync uses a '## Context Budget' CLAUDE.md section with simple key:value parsing, avoiding frontmatter YAML to maintain CLAUDE.md's Markdown-first design
+- Cursor and Windsurf get 'comment_only' format for budget config because they have no programmatic budget setting — annotating with comments preserves the information without inventing fake config keys
+- format_visual_timeline() was added to existing ConfigTimeMachine class rather than a new module — it is logically a rendering method of the timeline operation already in that class
+- Commit annotate hook uses 'git commit --amend --no-verify' to avoid re-triggering hooks in a loop — the --no-verify flag is safe here because the amend is for annotation only, not code changes
+- Chose to annotate with 'HarnessSync: synced N target(s)' rather than a verbose diff to keep commit messages clean and parseable by CI tools
+
+### Patterns Discovered
+
+- The codebase uses a consistent (success: bool, message: str) return tuple for all install/uninstall hook operations — new commit_annotate functions follow this exact pattern
+- All new modules use 'from __future__ import annotations' for forward reference compatibility with Python 3.9 TypedDict and dataclass fields
+- TypedDict is preferred over plain dicts for structured persistence data (StackEntry) to provide type hints without adding a dataclass overhead for JSON round-trips
+- The test file structure mirrors previous iteration test files: grouped by feature with a header comment, using descriptive function names that serve as documentation
+- Harness profiles are modeled as static dataclasses rather than being loaded from config — good for correctness since harness capabilities change rarely and shouldn't be user-configurable
+- The _BUDGET_KV_RE regex uses re.MULTILINE to scan the Context Budget section line-by-line, which is more robust than trying to parse the entire section as YAML/TOML
+
+### Takeaways
+
+- The codebase already implements most of the 30 product-ideation items from prior iterations — items 1-9, 13-25, 27-29 all had existing implementations. Only items 7 (annotation variant), 10, 11 (visual), 26, and 30 needed new code.
+- git_hook_installer.py has grown to ~1000 lines with 5+ hook types — it may benefit from splitting into a package (git_hooks/) in a future iteration
+- The HarnessProfile static registry in rule_simulator.py will need updating when new harnesses are added — consider making it auto-populated from the AdapterRegistry to avoid drift
+- The CLAUDE.md '## Context Budget' section approach is elegant but requires users to know this section exists — the /sync-author NL config command could be extended to generate it
+- Per-harness undo stacks store full file content which could become large for projects with many rules — consider storing diffs instead of full snapshots in a future iteration for efficiency
+
+---

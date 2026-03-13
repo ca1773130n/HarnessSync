@@ -637,6 +637,175 @@ class BehavioralEquivalenceReport:
 # Live Latency Benchmark (Item 14)
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ---------------------------------------------------------------------------
+# Task-Based Harness Performance Ranking (item 25)
+# ---------------------------------------------------------------------------
+
+# Task categories and which harness features matter for each.
+# Scores are multipliers: higher = this feature matters more for this task.
+_TASK_FEATURE_WEIGHTS: dict[str, dict[str, float]] = {
+    "code_generation": {
+        "rules": 1.0, "skills": 0.8, "agents": 0.6, "commands": 0.4, "mcp": 0.5, "settings": 0.3,
+    },
+    "code_review": {
+        "rules": 1.0, "skills": 0.5, "agents": 0.8, "commands": 0.3, "mcp": 0.4, "settings": 0.2,
+    },
+    "debugging": {
+        "rules": 1.0, "skills": 0.6, "agents": 0.9, "commands": 0.5, "mcp": 0.7, "settings": 0.3,
+    },
+    "writing_docs": {
+        "rules": 1.0, "skills": 0.7, "agents": 0.3, "commands": 0.4, "mcp": 0.2, "settings": 0.2,
+    },
+    "refactoring": {
+        "rules": 1.0, "skills": 0.9, "agents": 0.8, "commands": 0.6, "mcp": 0.4, "settings": 0.3,
+    },
+    "data_science": {
+        "rules": 0.8, "skills": 0.5, "agents": 0.4, "commands": 0.3, "mcp": 0.9, "settings": 0.4,
+    },
+    "infra_ops": {
+        "rules": 0.8, "skills": 0.5, "agents": 0.6, "commands": 0.4, "mcp": 0.9, "settings": 0.5,
+    },
+    "multi_agent": {
+        "rules": 0.7, "skills": 0.8, "agents": 1.0, "commands": 0.5, "mcp": 0.8, "settings": 0.4,
+    },
+    "general": {
+        "rules": 1.0, "skills": 0.6, "agents": 0.5, "commands": 0.4, "mcp": 0.5, "settings": 0.3,
+    },
+}
+
+# Human-readable rationale per (task, harness) where the harness excels
+_TASK_HARNESS_RATIONALE: dict[str, dict[str, str]] = {
+    "code_generation": {
+        "codex": "Strong rules and agent support; AGENTS.md well-suited for code tasks",
+        "gemini": "Full rules + partial skills; good for structured code generation",
+        "cursor": "IDE integration means real-time rule application during editing",
+        "opencode": "Full rules + MCP support; clean code-gen workflow",
+    },
+    "code_review": {
+        "codex": "Agent translation enables multi-step review workflows",
+        "gemini": "Full rules fidelity; structured review prompts translate well",
+        "cursor": "IDE context gives harness direct file access for review",
+    },
+    "debugging": {
+        "codex": "Agent support + full MCP access enables deep debugging workflows",
+        "opencode": "Full rules + MCP; can attach debug MCP servers",
+        "gemini": "Good rules fidelity; useful for structured debugging prompts",
+    },
+    "refactoring": {
+        "codex": "Agent support makes multi-file refactoring plans viable",
+        "gemini": "Skills translation handles refactoring recipes well",
+        "cursor": "IDE integration makes refactoring instructions contextual",
+    },
+    "multi_agent": {
+        "codex": "Best agent support; AGENTS.md translates subagent descriptions",
+    },
+    "data_science": {
+        "opencode": "Full MCP support connects to database/notebook MCP servers",
+        "codex": "MCP support + agents enable data pipeline orchestration",
+        "gemini": "Rules + MCP; accessible for notebook-style workflows",
+    },
+}
+
+
+@dataclass
+class HarnessTaskRanking:
+    """Ranking of a single harness for a specific task category."""
+    target: str
+    task_category: str
+    score: float          # 0.0–1.0 weighted feature coverage score
+    rank: int             # 1 = best
+    rationale: str        # Human-readable explanation
+
+
+@dataclass
+class TaskPerformanceSummary:
+    """Summary of harness rankings for a specific task.
+
+    Attributes:
+        task_category: The task category analyzed.
+        rankings: Harnesses ranked best to worst for this task.
+    """
+    task_category: str
+    rankings: list[HarnessTaskRanking]
+
+    @property
+    def best_harness(self) -> str | None:
+        return self.rankings[0].target if self.rankings else None
+
+    def format(self) -> str:
+        if not self.rankings:
+            return f"No harness data available for task: {self.task_category}"
+        lines = [
+            f"Harness Rankings for '{self.task_category}'",
+            "=" * 50,
+            "",
+        ]
+        for r in self.rankings:
+            bar_len = int(r.score * 20)
+            bar = "█" * bar_len + "░" * (20 - bar_len)
+            lines.append(f"#{r.rank} {r.target:<12} [{bar}] {r.score:.0%}")
+            if r.rationale:
+                lines.append(f"   {r.rationale}")
+            lines.append("")
+        lines.append(
+            f"Recommendation: Use '{self.best_harness}' for {self.task_category} tasks "
+            "on this project."
+        )
+        return "\n".join(lines)
+
+
+def rank_harnesses_for_task(
+    task_category: str,
+    installed_harnesses: list[str] | None = None,
+) -> TaskPerformanceSummary:
+    """Rank configured harnesses by their suitability for a task category.
+
+    Uses the static feature-support matrix to compute a weighted score for
+    each harness based on which features matter most for the given task type.
+    No live harness invocations are required — this is a static analysis.
+
+    Args:
+        task_category: One of the supported task categories, e.g. "code_review",
+                       "debugging", "refactoring", "multi_agent". Falls back to
+                       "general" if the category is not recognized.
+        installed_harnesses: Harnesses to consider. Defaults to all harnesses in
+                             the feature support matrix.
+
+    Returns:
+        TaskPerformanceSummary with harnesses ranked best to worst.
+    """
+    weights = _TASK_FEATURE_WEIGHTS.get(task_category, _TASK_FEATURE_WEIGHTS["general"])
+    targets = installed_harnesses or list(
+        next(iter(_FEATURE_SUPPORT.values())).keys()
+    )
+
+    scored: list[tuple[str, float]] = []
+    for target in targets:
+        total_weight = sum(weights.values())
+        weighted_score = 0.0
+        for feature, weight in weights.items():
+            support = _FEATURE_SUPPORT.get(feature, {}).get(target, "none")
+            fidelity = _FIDELITY_SCORE.get(support, 0.0)
+            weighted_score += fidelity * weight
+        normalized = weighted_score / total_weight if total_weight else 0.0
+        scored.append((target, normalized))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    task_rationale = _TASK_HARNESS_RATIONALE.get(task_category, {})
+    rankings = [
+        HarnessTaskRanking(
+            target=target,
+            task_category=task_category,
+            score=score,
+            rank=rank,
+            rationale=task_rationale.get(target, ""),
+        )
+        for rank, (target, score) in enumerate(scored, start=1)
+    ]
+    return TaskPerformanceSummary(task_category=task_category, rankings=rankings)
+
+
 import subprocess
 import time
 from dataclasses import dataclass as _dc, field as _field
