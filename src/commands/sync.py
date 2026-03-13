@@ -274,11 +274,41 @@ def main():
         dest="no_changelog",
         help="Skip writing the auto-generated sync changelog entry",
     )
+    parser.add_argument(
+        "--enable-global-dry-run",
+        action="store_true",
+        dest="enable_global_dry_run",
+        help=(
+            "Persistently enable global dry-run mode: all future syncs will preview "
+            "changes without writing files until disabled. "
+            "Useful for auditing and CI pipelines."
+        ),
+    )
+    parser.add_argument(
+        "--disable-global-dry-run",
+        action="store_true",
+        dest="disable_global_dry_run",
+        help="Disable persistent global dry-run mode, restoring normal sync behavior.",
+    )
 
     try:
         args = parser.parse_args(tokens)
     except SystemExit:
         return
+
+    # --- GLOBAL DRY-RUN TOGGLE ---
+    state_mgr_early = StateManager()
+    if getattr(args, "enable_global_dry_run", False):
+        state_mgr_early.set_global_dry_run(True)
+        print("Global dry-run mode ENABLED. All syncs will preview without writing.")
+        print("Disable with: /sync --disable-global-dry-run")
+        return
+    if getattr(args, "disable_global_dry_run", False):
+        state_mgr_early.set_global_dry_run(False)
+        print("Global dry-run mode DISABLED. Syncs will write files normally.")
+        return
+    if state_mgr_early.get_global_dry_run():
+        print("[global dry-run mode active — pass --disable-global-dry-run to write files]")
 
     # --- PROFILE MANAGEMENT ---
     from src.profile_manager import ProfileManager

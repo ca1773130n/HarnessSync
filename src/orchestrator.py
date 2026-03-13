@@ -77,6 +77,10 @@ class SyncOrchestrator:
         self.harness_env: str | None = harness_env or _os.environ.get("HARNESS_ENV") or None
         self.logger = Logger()
         self.state_manager = StateManager()
+        # Apply persistent global dry-run mode if not already enabled by caller
+        if not dry_run and self.state_manager.get_global_dry_run():
+            self.dry_run = True
+            self.logger.info("Global dry-run mode is active (set via /sync --enable-global-dry-run)")
         self.account_config = None
         # Per-project config target overrides (populated by _apply_project_config)
         self._project_skip_targets: set[str] = set()
@@ -296,6 +300,21 @@ class SyncOrchestrator:
         adapter_data['mcp'] = adapter_data.pop('mcp_servers', {})
         # Pass scoped MCP data for v2.0 scope-aware adapters
         adapter_data['mcp_scoped'] = source_data.get('mcp_servers_scoped', {})
+
+        # --- MODEL ROUTING HINTS: parse Claude Code settings for model preferences ---
+        _model_routing_hints = None
+        try:
+            from src.model_routing import ModelRoutingAdapter, extract_routing_hints_from_settings_file
+            _mr_adapter = ModelRoutingAdapter()
+            _settings_raw = source_data.get('settings', {})
+            if isinstance(_settings_raw, dict) and _settings_raw:
+                _model_routing_hints = _mr_adapter.read_from_settings(_settings_raw)
+            elif self.cc_home:
+                _settings_path = (self.cc_home or Path.home() / ".claude") / "settings.json"
+                if _settings_path.exists():
+                    _model_routing_hints = extract_routing_hints_from_settings_file(_settings_path)
+        except Exception:
+            pass  # Model routing extraction is best-effort
 
         # --- PRE-SYNC: SYNC IMPACT PREDICTION ---
         # Predict behavioral impact of pending changes (informational, never blocks)
@@ -576,6 +595,37 @@ class SyncOrchestrator:
                         )
                 except Exception:
                     pass  # Aliasing is best-effort
+
+                # --- MCP DEPENDENCY ORDERING: reorder servers for safe startup ---
+                try:
+                    from src.mcp_dependency_resolver import MCPDependencyResolver
+                    _mcp_data = target_data.get('mcp')
+                    if isinstance(_mcp_data, dict) and len(_mcp_data) > 1:
+                        _dep_resolver = MCPDependencyResolver()
+                        _ordered_mcp = _dep_resolver.apply_ordering_to_dict(_mcp_data)
+                        target_data['mcp'] = _ordered_mcp
+                        _cycle_warnings = _dep_resolver.check_cycles(_mcp_data)
+                        for _cw in _cycle_warnings:
+                            self.logger.warn(
+                                f"{target}: MCP dependency cycle detected for '{_cw}' "
+                                "— startup order may be incorrect"
+                            )
+                except Exception:
+                    pass  # Dependency ordering is best-effort
+
+                # --- MODEL ROUTING: merge translated model preferences into settings ---
+                try:
+                    if _model_routing_hints and not _model_routing_hints.is_empty:
+                        from src.model_routing import ModelRoutingAdapter as _MRA
+                        _translated = _MRA().translate_for_target(_model_routing_hints, target)
+                        if _translated and _translated.default_model:
+                            _settings = target_data.get('settings')
+                            if isinstance(_settings, dict):
+                                # Only inject if no model already configured
+                                if 'model' not in _settings:
+                                    _settings['model'] = _translated.default_model
+                except Exception:
+                    pass  # Model routing merge is best-effort
 
                 # Step 4: filter skills per YAML frontmatter sync: tag
                 try:

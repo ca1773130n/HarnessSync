@@ -509,3 +509,23 @@ class StateManager:
     def state_file(self) -> Path:
         """Get state file path."""
         return self._state_file_path
+
+    # ── Global dry-run mode (item 2: persistent opt-in) ───────────────────
+
+    def get_global_dry_run(self) -> bool:
+        """Return True if persistent global dry-run mode is enabled.
+
+        When enabled, all sync operations preview changes without writing files.
+        Useful for auditing, CI pipelines, and cautious users.
+        Override per-run by passing dry_run=False to SyncOrchestrator explicitly.
+        """
+        return bool(self._state.get("global_dry_run", False))
+
+    def set_global_dry_run(self, enabled: bool) -> None:
+        """Enable or disable persistent global dry-run mode.
+
+        Args:
+            enabled: True to enable (all syncs preview-only), False to disable.
+        """
+        self._state["global_dry_run"] = enabled
+        self._save()

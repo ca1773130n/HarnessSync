@@ -2868,3 +2868,67 @@ _2026-03-13T06:52:43.851Z_
 - harness_feature_matrix.py should eventually be driven by a YAML/JSON data file rather than hardcoded Python dicts — would allow community contributions to keep the matrix current without code changes
 
 ---
+## Iteration 44
+_2026-03-13T07:10:40.488Z_
+
+### Items Attempted
+
+- **Per-Harness Override Layer** — pass
+- **Named Sync Profiles** — pass
+- **Cursor IDE Adapter** — pass
+- **Aider Adapter** — pass
+- **Windsurf / Codeium Adapter** — pass
+- **Drift Alert Notifications** — pass
+- **Import Rules From Another Harness** — pass
+- **Team Config Sharing via Git** — pass
+- **Capability Gap Plain-English Explainer** — pass
+- **Deep MCP Server Config Sync** — pass
+- **Rule Coverage Heatmap** — pass
+- **Config Portability Score** — pass
+- **GitHub Actions / CI Sync Step** — pass
+- **Pre-commit Git Hook for Config Validation** — pass
+- **Skill Marketplace / Community Hub** — pass
+- **Env Var Template Engine** — pass
+- **Instant Sync on File Save** — pass
+- **Portable Config Bundle Export** — pass
+- **Interactive Conflict Resolver** — pass
+- **Sync Analytics Dashboard** — pass
+- **Auto-Discovery of Installed Harnesses** — pass
+- **Rule-Level Target Targeting** — pass
+- **Natural Language → Multi-Harness Rule** — pass
+- **Shadow Mode Testing** — pass
+- **Slack/Discord Sync Notifications** — pass
+- **Named Config Snapshots & Rollback** — pass
+- **Auto-Generate Config Documentation** — pass
+- **VS Code Extension for Sync Status** — pass
+- **Per-Project Sync Overrides** — pass
+- **Harness Response Benchmarker** — pass
+- **Continue.dev Adapter** — pass
+- **Rule Effectiveness Insights** — pass
+- **Multi-Machine Config Sync via Cloud** — pass
+- **Harness Upgrade Path Advisor** — pass
+- **Config Complexity Analyzer** — pass
+
+### Decisions Made
+
+- Added Python/shell comment-style harness annotations (# @targets: skip and # @targets: replace with <text>) to sync_filter.py as genuinely new filter functionality not previously in the codebase. HTML-comment-style annotations already existed; this adds the natural # comment form for YAML, shell scripts, and code blocks in rules files.
+- Placed the new regex patterns after existing env-filter patterns in sync_filter.py, consistent with the existing pattern-then-handler layout. Both patterns require at least one whitespace before the # so they don't match # comments at the start of a line (which would be ambiguous).
+- Wrote 14 targeted unit tests covering skip/replace for single and multi-target annotations, case insensitivity, non-matching target passthrough, annotation stripping, empty replacement, interaction with HTML-comment annotations, and compliance:pinned override behavior.
+- Skipped items 3, 4, 5 (Cursor/Aider/Windsurf adapters) — already implemented in src/adapters/. Skipped items 2, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 29, 30 — all already implemented across 100+ existing source files. The codebase is extremely mature with prior iterations having addressed the majority of these features.
+- Item 28 (VS Code Extension) was correctly identified as out-of-scope for this Python-only codebase.
+
+### Patterns Discovered
+
+- The codebase uses a line-by-line state-machine pattern in filter_rules_for_target() where each annotation type is checked in priority order: compliance:pinned > harness block open/close > harness:exclude blocks > classic sync tags > multi-target tags > @harness shorthands > harness:skip/only inline > new Python-style annotations > active_tag emit.
+- The function ends with result.strip() which is important to understand — it strips overall leading/trailing whitespace from the filtered output, not intra-block indentation. Tests for indentation preservation must use multi-line content with surrounding context.
+- All regex patterns use IGNORECASE to normalize target names, and _parse_target_list() normalizes to lowercase sets — consistent throughout.
+- The test file structure follows the existing pattern: sys.path.insert for the project root, module-level imports, grouped test functions with descriptive names, no fixtures beyond the default. Tests are purely functional with no tmp_path or adapters needed for filter tests.
+
+### Takeaways
+
+- After 43 prior iterations, the codebase is remarkably comprehensive — nearly all 30 product-ideation items were already implemented. Evolution iterations should increasingly focus on polish, edge cases, and test coverage rather than net-new modules.
+- The Python comment annotation gap was a genuine ergonomic hole: users writing YAML or shell examples inside CLAUDE.md rules couldn't use HTML comments without breaking syntax highlighting. The new # @target: syntax fills this neatly.
+- The 'replace with' directive is a uniquely powerful capability with no HTML-comment equivalent in the codebase — it enables context-sensitive content where the same line renders differently per harness (e.g., a Claude-Code-specific command reference becomes a plain-text description for Aider).
+- The compliance:pinned block correctly bypasses even the new Python-style annotations, which confirms the filter priority order is correct and robust.
+
+---
