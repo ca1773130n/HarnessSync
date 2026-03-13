@@ -305,6 +305,27 @@ class MatrixQueryResult:
                 for e in self.entries}
 
 
+# ── Per-cell hover notes for the HTML report ────────────────────────────────
+# Keyed by (feature, harness). Displayed as tooltip in export_html_report().
+
+_FEATURE_NOTES: dict[tuple[str, str], str] = {
+    ("skills", "gemini"):   "Inlined into GEMINI.md — no dedicated skill runtime",
+    ("skills", "aider"):    "No skill system — content appended to CONVENTIONS.md",
+    ("agents", "gemini"):   "Inlined into GEMINI.md — no sub-agent dispatch",
+    ("commands", "gemini"): "Summarized as prose in GEMINI.md — not executable",
+    ("commands", "aider"):  "Translated to shell aliases in CONVENTIONS.md",
+    ("hooks", "codex"):     "Mapped to closest Codex lifecycle hooks — subset only",
+    ("hooks", "cursor"):    "No hook runtime — converted to .mdc guardrails",
+    ("hooks", "aider"):     "No hook system — converted to --before/after-apply flags",
+    ("plugins", "codex"):   "No plugin API — rules inlined into AGENTS.md",
+    ("plugins", "gemini"):  "No plugin API — rules inlined into GEMINI.md",
+    ("plugins", "aider"):   "No plugin system — rules added to CONVENTIONS.md",
+    ("mcp", "aider"):       "Aider cannot execute MCP servers — tools unavailable",
+    ("env_vars", "codex"):  "Forwarded via config.toml [env] section",
+    ("env_vars", "cursor"): "No env forwarding — must set in OS/shell manually",
+}
+
+
 # ── HarnessFeatureMatrix ────────────────────────────────────────────────────
 
 class HarnessFeatureMatrix:
@@ -922,3 +943,120 @@ class HarnessFeatureMatrix:
             )
 
         return "\n".join(lines)
+
+    def export_html_report(self, output_path: "Path | str | None" = None) -> str:
+        """Generate a self-contained HTML capability gap matrix report.
+
+        Produces a single HTML file with embedded CSS and an interactive table
+        showing support levels per (feature, harness) cell with color coding:
+          - native      → green
+          - partial     → yellow
+          - adapter     → orange
+          - unsupported → red
+
+        Args:
+            output_path: If provided, write the HTML to this file path.
+                         Returns the HTML string in both cases.
+
+        Returns:
+            HTML string of the full report.
+        """
+        import html as _html
+        from datetime import datetime as _dt
+
+        def _esc(t: str) -> str:
+            return _html.escape(str(t))
+
+        level_styles = {
+            "native":      "background:#2ea043;color:#fff;",
+            "partial":     "background:#d29922;color:#fff;",
+            "adapter":     "background:#e0823d;color:#fff;",
+            "unsupported": "background:#cf2222;color:#fff;",
+        }
+        level_labels = {
+            "native":      "Native",
+            "partial":     "Partial",
+            "adapter":     "Adapter",
+            "unsupported": "None",
+        }
+
+        # Build table header
+        header_cells = "".join(f"<th>{_esc(h)}</th>" for h in ALL_HARNESSES)
+        header = f"<tr><th>Feature</th>{header_cells}</tr>"
+
+        # Build table rows
+        rows_html = []
+        for feat in ALL_FEATURES:
+            cells = ""
+            for harness in ALL_HARNESSES:
+                level = _FEATURE_MATRIX.get(feat, {}).get(harness, "unsupported")
+                style = level_styles.get(level, "")
+                label = level_labels.get(level, level)
+                note = _FEATURE_NOTES.get((feat, harness), "")
+                title_attr = f' title="{_esc(note)}"' if note else ""
+                cells += f'<td style="{style}"{title_attr}>{_esc(label)}</td>'
+            score = self.coverage_score(harness)  # noqa: F821 — reuse last harness for demo
+            rows_html.append(f"<tr><td><strong>{_esc(feat)}</strong></td>{cells}</tr>")
+
+        # Build coverage score row
+        score_cells = "".join(
+            f"<td><strong>{self.coverage_score(h)}</strong></td>"
+            for h in ALL_HARNESSES
+        )
+        score_row = f"<tr style='background:#161b22'><td><em>Coverage</em></td>{score_cells}</tr>"
+
+        rows_str = "\n".join(rows_html) + "\n" + score_row
+        generated_at = _dt.now().strftime("%Y-%m-%d %H:%M")
+
+        html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>HarnessSync — Capability Gap Matrix</title>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+           background:#0d1117; color:#c9d1d9; margin:0; padding:20px; }}
+    h1 {{ color:#58a6ff; border-bottom:1px solid #30363d; padding-bottom:10px; }}
+    p.subtitle {{ color:#8b949e; font-size:0.9em; }}
+    table {{ border-collapse:collapse; width:100%; margin-top:20px; font-size:0.85em; }}
+    th {{ background:#1f2937; color:#79c0ff; padding:8px 12px; text-align:center;
+          border:1px solid #30363d; white-space:nowrap; }}
+    td {{ padding:6px 10px; text-align:center; border:1px solid #30363d; }}
+    tr:hover td {{ filter:brightness(1.15); }}
+    .legend {{ display:flex; gap:16px; margin:12px 0; flex-wrap:wrap; }}
+    .legend-item {{ display:flex; align-items:center; gap:6px; font-size:0.85em; }}
+    .legend-swatch {{ width:14px; height:14px; border-radius:3px; }}
+  </style>
+</head>
+<body>
+  <h1>HarnessSync — Live Capability Gap Matrix</h1>
+  <p class="subtitle">Generated: {_esc(generated_at)} &nbsp;|&nbsp;
+     Hover cells for notes &nbsp;|&nbsp;
+     Coverage score = native×100 + partial×50 (out of 100)</p>
+  <div class="legend">
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:#2ea043"></div> Native
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:#d29922"></div> Partial
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:#e0823d"></div> Adapter
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:#cf2222"></div> Unsupported
+    </div>
+  </div>
+  <table>
+    <thead>{header}</thead>
+    <tbody>{rows_str}</tbody>
+  </table>
+</body>
+</html>
+"""
+
+        if output_path is not None:
+            from pathlib import Path as _Path
+            _Path(output_path).write_text(html_content, encoding="utf-8")
+
+        return html_content

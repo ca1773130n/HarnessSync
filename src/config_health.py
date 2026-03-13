@@ -1009,6 +1009,15 @@ class SyncHealthTracker:
         avg = sum(s.score for s in scores) // len(scores)
         avg_label = _health_label(avg)
         lines.append(f"Overall: {avg}/100 ({avg_label})")
+
+        # Actionable fix suggestions (item 16)
+        suggestions = generate_fix_suggestions(scores)
+        if suggestions:
+            lines.append("")
+            lines.append("Fix suggestions (highest impact first):")
+            for sug in suggestions[:5]:
+                lines.append(f"  → {sug}")
+
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
@@ -1044,3 +1053,75 @@ def _health_label(score: int) -> str:
     if score >= 35:
         return "poor"
     return "critical"
+
+
+def generate_fix_suggestions(scores: list) -> list[str]:
+    """Generate prioritized, actionable fix suggestions from a list of health scores.
+
+    Analyzes the lowest-scoring dimensions across all harnesses and returns
+    a ranked list of specific commands the user can run to improve scores.
+    Each suggestion includes the expected score improvement.
+
+    Args:
+        scores: List of HarnessHealthScore objects from SyncHealthTracker.
+
+    Returns:
+        List of actionable suggestion strings, highest-impact first.
+    """
+    suggestions: list[tuple[int, str]] = []  # (impact, message)
+
+    for hs in scores:
+        score = hs.score
+        target = hs.target
+
+        # Low freshness — stale sync
+        if score < 60:
+            freshness_component = getattr(hs, "_freshness", None)
+            if freshness_component is not None and freshness_component < 0.5:
+                suggestions.append((
+                    30,
+                    f"Run `/sync` to re-sync {target} (last sync is stale — +15-30pts expected)",
+                ))
+
+        # Drift detected
+        if hasattr(hs, "_drift") and hs._drift < 0.8:  # type: ignore[attr-defined]
+            suggestions.append((
+                25,
+                f"Run `/sync-restore {target}` or `/sync-merge` to resolve manual edits in {target} (+10-25pts)",
+            ))
+
+        # MCP servers unreachable
+        if hasattr(hs, "_mcp") and hs._mcp < 0.5:  # type: ignore[attr-defined]
+            suggestions.append((
+                20,
+                f"Check MCP server connectivity for {target} — run `/sync-mcp-health` (+5-20pts)",
+            ))
+
+        # Skills coverage low (aider, cursor, zed)
+        if score < 50:
+            suggestions.append((
+                15,
+                f"{target} has low coverage ({score}/100) — use Claude Code for skill-heavy tasks",
+            ))
+
+    # Generic suggestions when overall score is low
+    overall = sum(s.score for s in scores) // max(1, len(scores))
+    if overall < 70:
+        suggestions.append((
+            10,
+            "Run `/sync-lint` to check CLAUDE.md for authoring issues that reduce fidelity",
+        ))
+    if overall < 50:
+        suggestions.append((
+            10,
+            "Run `/sync-env-matrix` to audit missing environment variables across harnesses",
+        ))
+
+    # Sort by impact descending, deduplicate
+    seen: set[str] = set()
+    result: list[str] = []
+    for _, msg in sorted(suggestions, key=lambda x: -x[0]):
+        if msg not in seen:
+            seen.add(msg)
+            result.append(msg)
+    return result

@@ -470,8 +470,37 @@ class DriftWatcher:
 
 
 def _default_alert_callback(alert: DriftAlert) -> None:
-    """Default alert handler: print to stdout."""
+    """Default alert handler: print to stdout with terminal bell."""
     print(alert.format())
+    _ring_terminal_bell()
+
+
+def _ring_terminal_bell() -> None:
+    """Emit a terminal bell character (\x07) to the controlling TTY.
+
+    This triggers the terminal emulator's audio or visual bell, giving
+    immediate tactile feedback when drift is detected — even if the user
+    is not watching this terminal window.
+
+    Writes directly to /dev/tty so the bell fires even when stdout is
+    redirected.  Silently suppressed if /dev/tty is unavailable (e.g.
+    inside a CI runner or non-interactive shell).
+    """
+    import sys as _sys
+
+    try:
+        # Prefer direct TTY write so the bell fires even with piped stdout
+        with open("/dev/tty", "w") as tty:
+            tty.write("\x07")
+            tty.flush()
+    except OSError:
+        # Fallback: write to stderr if stdout/stderr is a real TTY
+        if hasattr(_sys.stderr, "isatty") and _sys.stderr.isatty():
+            try:
+                _sys.stderr.write("\x07")
+                _sys.stderr.flush()
+            except OSError:
+                pass
 
 
 def send_os_notification(title: str, body: str) -> bool:

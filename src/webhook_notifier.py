@@ -329,47 +329,6 @@ class WebhookNotifier:
         """Return HMAC-SHA256 hex digest of the payload body."""
         return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
-    def _send_webhook(self, webhook: dict, payload: dict) -> WebhookResult:
-        """Send HTTP POST with JSON payload to a webhook URL.
-
-        Args:
-            webhook: Webhook config dict.
-            payload: Event payload dict.
-
-        Returns:
-            WebhookResult with success status and HTTP code.
-        """
-        name = webhook.get("name", "unnamed")
-        url = webhook.get("url", "")
-        if not url:
-            return WebhookResult(name=name, kind="webhook", success=False, error="no URL configured")
-
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "HarnessSync/1.0",
-        }
-
-        # Merge custom headers
-        for k, v in webhook.get("headers", {}).items():
-            headers[k] = str(v)
-
-        # HMAC signature
-        secret = webhook.get("secret")
-        if secret:
-            sig = self._sign_payload(body, secret)
-            headers["X-HarnessSync-Signature"] = f"sha256={sig}"
-
-        try:
-            req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                code = resp.getcode()
-                return WebhookResult(name=name, kind="webhook", success=200 <= code < 300, status_code=code)
-        except urllib.error.HTTPError as e:
-            return WebhookResult(name=name, kind="webhook", success=False, status_code=e.code, error=str(e))
-        except Exception as e:
-            return WebhookResult(name=name, kind="webhook", success=False, error=str(e))
-
     def notify_drift_event(
         self,
         target: str,
@@ -479,3 +438,177 @@ class WebhookNotifier:
             return WebhookResult(name=name, kind="script", success=False, error="script timed out (30s)")
         except Exception as e:
             return WebhookResult(name=name, kind="script", success=False, error=str(e))
+
+    def notify_teams(
+        self,
+        results: dict,
+        webhook_url: str,
+        project_dir: Path | None = None,
+        dry_run: bool = False,
+    ) -> WebhookResult:
+        """Post a sync event notification to Microsoft Teams via Incoming Webhook.
+
+        Uses the Teams Incoming Webhook format (Adaptive Card payload) which
+        differs from Slack's Block Kit.  The card shows sync status, affected
+        targets, and a summary of synced/failed item counts.
+
+        Configuration: add the Teams webhook URL as an ``ms-teams`` webhook
+        entry with ``format: "teams"`` in webhooks.json, or call this method
+        directly.
+
+        Args:
+            results: Sync results dict from ``SyncOrchestrator.sync_all()``.
+            webhook_url: MS Teams incoming webhook URL
+                         (https://....webhook.office.com/...).
+            project_dir: Project directory that was synced.
+            dry_run: True if this was a preview run.
+
+        Returns:
+            WebhookResult indicating success or failure.
+        """
+        payload = self._build_payload(results, project_dir=project_dir, dry_run=dry_run)
+        teams_body = _build_teams_payload(payload)
+        body = json.dumps(teams_body, ensure_ascii=False).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "HarnessSync/1.0",
+        }
+        try:
+            req = urllib.request.Request(webhook_url, data=body, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                code = resp.getcode()
+                return WebhookResult(
+                    name="ms-teams", kind="webhook", success=200 <= code < 300, status_code=code
+                )
+        except urllib.error.HTTPError as e:
+            return WebhookResult(name="ms-teams", kind="webhook", success=False, status_code=e.code, error=str(e))
+        except Exception as e:
+            return WebhookResult(name="ms-teams", kind="webhook", success=False, error=str(e))
+
+    def _send_webhook(self, webhook: dict, payload: dict) -> WebhookResult:
+        # Delegate to Teams-specific formatter when format="teams"
+        if webhook.get("format") == "teams":
+            url = webhook.get("url", "")
+            if not url:
+                return WebhookResult(name=webhook.get("name", "teams"), kind="webhook", success=False, error="no URL")
+            teams_body = _build_teams_payload(payload)
+            body = json.dumps(teams_body, ensure_ascii=False).encode("utf-8")
+            headers = {"Content-Type": "application/json", "User-Agent": "HarnessSync/1.0"}
+            try:
+                req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    code = resp.getcode()
+                    return WebhookResult(
+                        name=webhook.get("name", "teams"), kind="webhook",
+                        success=200 <= code < 300, status_code=code,
+                    )
+            except urllib.error.HTTPError as e:
+                return WebhookResult(
+                    name=webhook.get("name", "teams"), kind="webhook",
+                    success=False, status_code=e.code, error=str(e),
+                )
+            except Exception as e:
+                return WebhookResult(
+                    name=webhook.get("name", "teams"), kind="webhook", success=False, error=str(e)
+                )
+        # Standard JSON webhook (original implementation)
+        name = webhook.get("name", "unnamed")
+        url = webhook.get("url", "")
+        if not url:
+            return WebhookResult(name=name, kind="webhook", success=False, error="no URL configured")
+
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "HarnessSync/1.0",
+        }
+        for k, v in webhook.get("headers", {}).items():
+            headers[k] = str(v)
+        secret = webhook.get("secret")
+        if secret:
+            sig = self._sign_payload(body, secret)
+            headers["X-HarnessSync-Signature"] = f"sha256={sig}"
+        try:
+            req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                code = resp.getcode()
+                return WebhookResult(name=name, kind="webhook", success=200 <= code < 300, status_code=code)
+        except urllib.error.HTTPError as e:
+            return WebhookResult(name=name, kind="webhook", success=False, status_code=e.code, error=str(e))
+        except Exception as e:
+            return WebhookResult(name=name, kind="webhook", success=False, error=str(e))
+
+
+def _build_teams_payload(payload: dict) -> dict:
+    """Build a Microsoft Teams Incoming Webhook Adaptive Card payload.
+
+    Formats a HarnessSync sync event as an MS Teams card with status color,
+    target list, and item counts. The Adaptive Card format is the current
+    MS Teams standard for Incoming Webhooks (replaces MessageCard).
+
+    Args:
+        payload: Standard HarnessSync event payload dict.
+
+    Returns:
+        MS Teams-compatible JSON body dict ready for HTTP POST.
+    """
+    status = payload.get("status", "unknown")
+    targets = ", ".join(payload.get("targets", [])) or "none"
+    totals = payload.get("totals", {})
+    synced = totals.get("synced", 0)
+    failed = totals.get("failed", 0)
+    project = payload.get("project", "")
+    ts = payload.get("timestamp", "")
+    dry_run = payload.get("dry_run", False)
+
+    # Color strip: green=success, yellow=partial, red=failed
+    color_map = {"success": "Good", "partial": "Warning", "failed": "Attention"}
+    color = color_map.get(status, "Accent")
+
+    title = "HarnessSync — Config Synced" if not dry_run else "HarnessSync — Dry Run"
+    subtitle = f"Status: **{status.upper()}**" + (" (dry run)" if dry_run else "")
+
+    body_facts = [
+        {"title": "Targets", "value": targets},
+        {"title": "Items synced", "value": str(synced)},
+        {"title": "Failures", "value": str(failed)},
+        {"title": "Project", "value": project or "(unknown)"},
+        {"title": "Timestamp", "value": ts},
+    ]
+
+    return {
+        "type": "message",
+        "attachments": [
+            {
+                "contentType": "application/vnd.microsoft.card.adaptive",
+                "content": {
+                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                    "type": "AdaptiveCard",
+                    "version": "1.4",
+                    "msteams": {"width": "Full"},
+                    "body": [
+                        {
+                            "type": "TextBlock",
+                            "text": title,
+                            "weight": "Bolder",
+                            "size": "Medium",
+                            "color": color,
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": subtitle,
+                            "isSubtle": True,
+                            "wrap": True,
+                        },
+                        {
+                            "type": "FactSet",
+                            "facts": [
+                                {"title": f["title"], "value": f["value"]}
+                                for f in body_facts
+                            ],
+                        },
+                    ],
+                },
+            }
+        ],
+    }

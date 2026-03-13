@@ -995,3 +995,247 @@ class MultiProjectDashboard:
         lines.append("  ✓=synced  ⚠=drifted  ○=never synced  —=no CLAUDE.md")
 
         return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Skill Usage Analytics (item 12)
+# ─────────────────────────────────────────────────────────────────────────────
+
+import json as _json
+import re as _re
+from collections import defaultdict as _defaultdict
+
+
+_SKILL_INVOCATION_LOG = Path.home() / ".claude" / "harnesssync_skill_usage.json"
+
+# Pattern to match skill invocations in harness-specific log formats
+_SKILL_CALL_PATTERNS: list[_re.Pattern] = [
+    _re.compile(r"/(?P<skill>[a-z][a-z0-9_-]{1,40})\b", _re.IGNORECASE),  # slash-commands
+    _re.compile(r"Skill\s+tool\s+invocation[^:]*:\s+(?P<skill>[a-z][a-z0-9_-]+)", _re.IGNORECASE),
+]
+
+
+class SkillUsageRecord:
+    """Tracks invocation counts for a single skill across harnesses."""
+
+    def __init__(self, name: str):
+        self.name = name
+        self.total: int = 0
+        self.by_harness: dict[str, int] = {}
+        self.last_used: str = ""  # ISO timestamp
+
+    def record(self, harness: str, timestamp: str = "") -> None:
+        self.total += 1
+        self.by_harness[harness] = self.by_harness.get(harness, 0) + 1
+        if timestamp > self.last_used:
+            self.last_used = timestamp
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "total": self.total,
+            "by_harness": self.by_harness,
+            "last_used": self.last_used,
+        }
+
+
+class SkillUsageAnalytics:
+    """Tracks and reports which skills are actually invoked across harnesses.
+
+    Parses the HarnessSync changelog and any available harness history files
+    to count skill invocations, then surfaces a ``most_used`` / ``never_used``
+    breakdown.  Helps users prune dead skills and understand which workflows
+    are genuinely cross-harness.
+
+    Usage::
+
+        analytics = SkillUsageAnalytics(project_dir=Path("."))
+        analytics.record_invocation("commit", harness="codex")
+        report = analytics.build_report()
+        print(analytics.format_report(report))
+    """
+
+    def __init__(self, project_dir: Path | None = None):
+        self.project_dir = project_dir or Path.cwd()
+        self._records: dict[str, SkillUsageRecord] = {}
+        self._load_persisted()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def record_invocation(self, skill_name: str, harness: str = "claude-code", timestamp: str = "") -> None:
+        """Record a single skill invocation.
+
+        Args:
+            skill_name: Name of the skill or command invoked.
+            harness: Which harness triggered the invocation.
+            timestamp: Optional ISO 8601 timestamp (defaults to now).
+        """
+        if not timestamp:
+            from datetime import datetime as _dt
+            timestamp = _dt.now().isoformat(timespec="seconds")
+
+        if skill_name not in self._records:
+            self._records[skill_name] = SkillUsageRecord(skill_name)
+        self._records[skill_name].record(harness, timestamp)
+        self._persist()
+
+    def scan_changelog(self) -> int:
+        """Parse the sync changelog and changelog.md to extract skill invocations.
+
+        Returns:
+            Number of new invocation records discovered.
+        """
+        changelog = self.project_dir / ".harness-sync" / "changelog.md"
+        if not changelog.exists():
+            return 0
+
+        found = 0
+        content = changelog.read_text(encoding="utf-8", errors="replace")
+        for pat in _SKILL_CALL_PATTERNS:
+            for match in pat.finditer(content):
+                skill = match.group("skill").lower()
+                if _is_known_skill(skill, self.project_dir):
+                    self.record_invocation(skill, harness="claude-code")
+                    found += 1
+        return found
+
+    def build_report(
+        self,
+        known_skills: list[str] | None = None,
+        top_n: int = 10,
+    ) -> dict:
+        """Build a usage report dict.
+
+        Args:
+            known_skills: All skill names that exist in the project. Skills in
+                          this list but absent from usage records are flagged as
+                          ``never_used``.
+            top_n: Number of top skills to include in ``most_used``.
+
+        Returns:
+            Dict with keys: ``most_used``, ``never_used``, ``by_harness``,
+            ``total_invocations``, ``unique_skills_used``.
+        """
+        if known_skills is None:
+            known_skills = _discover_skill_names(self.project_dir)
+
+        all_used = sorted(self._records.values(), key=lambda r: r.total, reverse=True)
+        most_used = [r.to_dict() for r in all_used[:top_n]]
+        used_names = {r.name for r in all_used}
+        never_used = sorted(s for s in known_skills if s not in used_names)
+
+        by_harness: dict[str, int] = _defaultdict(int)
+        total = 0
+        for rec in self._records.values():
+            total += rec.total
+            for harness, count in rec.by_harness.items():
+                by_harness[harness] += count
+
+        return {
+            "most_used": most_used,
+            "never_used": never_used,
+            "by_harness": dict(by_harness),
+            "total_invocations": total,
+            "unique_skills_used": len(used_names),
+        }
+
+    def format_report(self, report: dict | None = None) -> str:
+        """Format usage report as a human-readable string.
+
+        Args:
+            report: Pre-built report dict. If None, calls ``build_report()``.
+
+        Returns:
+            Multi-line formatted string.
+        """
+        if report is None:
+            report = self.build_report()
+
+        lines = [
+            "Skill Usage Analytics",
+            "=" * 50,
+            f"Total invocations: {report['total_invocations']}",
+            f"Unique skills used: {report['unique_skills_used']}",
+            "",
+        ]
+
+        by_harness = report.get("by_harness", {})
+        if by_harness:
+            lines.append("Invocations by harness:")
+            for harness, count in sorted(by_harness.items(), key=lambda x: -x[1]):
+                lines.append(f"  {harness:<20} {count}")
+            lines.append("")
+
+        most_used = report.get("most_used", [])
+        if most_used:
+            lines.append("Most used skills:")
+            for entry in most_used:
+                harnesses = ", ".join(
+                    f"{h}:{c}" for h, c in sorted(entry["by_harness"].items(), key=lambda x: -x[1])
+                )
+                lines.append(f"  {entry['name']:<28} {entry['total']:>4}x  [{harnesses}]")
+            lines.append("")
+
+        never_used = report.get("never_used", [])
+        if never_used:
+            lines.append(f"Never used ({len(never_used)} skills):")
+            lines.append("  " + ", ".join(never_used[:20]))
+            if len(never_used) > 20:
+                lines.append(f"  ... and {len(never_used) - 20} more")
+            lines.append("")
+
+        lines.append("Tip: Remove never-used skills to reduce harness config size.")
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def _persist(self) -> None:
+        try:
+            _SKILL_INVOCATION_LOG.parent.mkdir(parents=True, exist_ok=True)
+            data = {name: rec.to_dict() for name, rec in self._records.items()}
+            _SKILL_INVOCATION_LOG.write_text(
+                _json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+    def _load_persisted(self) -> None:
+        if not _SKILL_INVOCATION_LOG.exists():
+            return
+        try:
+            data = _json.loads(_SKILL_INVOCATION_LOG.read_text(encoding="utf-8"))
+            for name, entry in data.items():
+                rec = SkillUsageRecord(name)
+                rec.total = entry.get("total", 0)
+                rec.by_harness = entry.get("by_harness", {})
+                rec.last_used = entry.get("last_used", "")
+                self._records[name] = rec
+        except Exception:
+            pass
+
+
+def _is_known_skill(name: str, project_dir: Path) -> bool:
+    """Return True if the name matches a known skill in the project."""
+    skills_dir = Path.home() / ".claude" / "skills"
+    project_skills = project_dir / ".claude" / "skills"
+    for base in (skills_dir, project_skills):
+        if (base / name).is_dir() or (base / f"{name}.md").is_file():
+            return True
+    return False
+
+
+def _discover_skill_names(project_dir: Path) -> list[str]:
+    """Return skill names from ~/.claude/skills and .claude/skills."""
+    names: list[str] = []
+    for base in (Path.home() / ".claude" / "skills", project_dir / ".claude" / "skills"):
+        if not base.is_dir():
+            continue
+        for entry in base.iterdir():
+            if entry.is_dir() or (entry.is_file() and entry.suffix == ".md"):
+                names.append(entry.stem if entry.is_file() else entry.name)
+    return sorted(set(names))

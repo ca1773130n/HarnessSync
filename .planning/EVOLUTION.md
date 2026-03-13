@@ -3346,3 +3346,67 @@ _2026-03-13T08:53:03.617Z_
 - Shannon entropy-based secret detection was already well-implemented; adding more patterns there would yield diminishing returns compared to adding the missing higher-level workflow integrations (bulk snapshot, pre-sync check, drift webhook)
 
 ---
+## Iteration 51
+_2026-03-13T09:09:41.848Z_
+
+### Items Attempted
+
+- **Interactive Conflict Resolution** — pass
+- **Dotfiles Repo Auto-Commit** — pass
+- **Live Capability Gap Matrix** — pass
+- **Config Bundle Export/Import** — pass
+- **Auto-Detect Newly Installed Harnesses** — pass
+- **Team Config Layer (Shared + Personal)** — pass
+- **MCP Server Cross-Harness Compatibility Check** — pass
+- **Scheduled Sync with Desktop Notifications** — pass
+- **GitHub Actions Sync Action** — pass
+- **Skill Usage Analytics Dashboard** — pass
+- **Harness Update Compatibility Alerts** — pass
+- **Per-Project Sync Profiles** — pass
+- **Reverse Sync: Import from Other Harnesses** — pass
+- **Secret Detection and Masking** — pass
+- **Sync Changelog Generator** — pass
+- **Workspace Snapshot and Time Travel** — pass
+- **Plugin/Extension Ecosystem Bridge** — pass
+- **Natural Language Rule Translator** — pass
+- **Sync Health Score** — pass
+- **Multi-Machine Sync via iCloud/Dropbox** — pass
+- **Context Window Budget Advisor** — pass
+- **Zero-to-Synced Onboarding Wizard** — pass
+- **Skill Dependency and Conflict Visualizer** — pass
+- **PR Sync Report as GitHub Comment** — pass
+- **Environment Variable Mapping Editor** — pass
+- **Branch-Switch Sync Trigger** — pass
+- **Config Linter with Sync-Aware Suggestions** — pass
+- **Sync Metrics via Prometheus/StatsD** — pass
+- **Harness Config Sandbox Testing** — pass
+- **Community Config Snippets Marketplace** — pass
+- **Weekly Config Drift Digest** — pass
+- **Model Routing Hints Layer** — pass
+
+### Decisions Made
+
+- DotfilesAutoCommitter: added to dotfile_integration.py as a new class rather than a separate file, since it's a natural extension of the existing dotfile integration concept. Uses subprocess git commands directly (stdlib only, matching project's no-external-dependencies policy).
+- MCP transport compatibility check: added check_harness_transport_compat() to mcp_reachability.py rather than a new file, since transport validation is a natural companion to reachability checking. Defined _HARNESS_TRANSPORT_SUPPORT as a module-level constant so it's easy to update when harness support changes.
+- ScheduledSyncManager: added to desktop_notifier.py since it's fundamentally about notification-aware scheduled syncs. Generates both launchd plist (macOS) and systemd unit+timer (Linux) from templates. Added Path import that was missing.
+- validate_configs_after_update: added to harness_version_compat.py alongside detect_harness_updates() since they form a natural before/after pair. Reuses existing DEPRECATED_FIELDS and VERSIONED_FEATURES constants to detect breaking changes and new features without maintaining separate data.
+- SyncMetricsExporter: created as a new sync_metrics.py module since Prometheus/StatsD is a distinct concern. Supports both backends from one class, uses JSON for cross-process persistence, and provides a record_sync_results() convenience function for the orchestrator pattern.
+- SyncHealthTracker: added to config_health.py alongside existing ConfigHealthChecker since both deal with health scoring. Uses a separate _health_label() function to avoid conflicting with the existing _label() function. Stores history as JSON in ~/.claude/harnesssync_health_history.json.
+
+### Patterns Discovered
+
+- The codebase consistently uses stdlib-only (no external deps) which is a hard constraint — every new file must respect this.
+- New classes follow a consistent dataclass-for-results pattern: every operation returns a result object with a .format() method for human-readable output.
+- Transport-level assumptions were implicit in adapters (e.g. Gemini not writing stdio MCP servers) but never surfaced as user-facing warnings — the new transport compat check makes this explicit.
+- The DEPRECATED_FIELDS and VERSIONED_FEATURES dicts in harness_version_compat.py use different value types (tuple vs dict), which is inconsistent. New code had to handle this carefully.
+- History/trend tracking is a recurring pattern — config_snapshot, config_time_machine, and now sync health all maintain historical records. A shared persistence utility would reduce duplication.
+
+### Takeaways
+
+- Most of the 30 items were already implemented in some form — the codebase is very dense (~4200+ lines in src/). Future iterations should focus on integration/wiring rather than adding new modules.
+- The orchestrator (orchestrator.py) is the natural integration point for all the new capabilities — metrics recording, transport compat warnings, update alerts, and auto-commit should all be wired in there.
+- The scheduled sync feature is the most impactful missing piece for users who don't use PostToolUse hooks — the launchd/systemd integration makes it production-ready.
+- Prometheus metrics persistence across restarts is important for counter accuracy — using a JSON file is the right stdlib-only approach but has race conditions under concurrent sync runs.
+- The sparkline rendering in SyncHealthTracker.format() makes trend data immediately legible without external dependencies.
+
+---
