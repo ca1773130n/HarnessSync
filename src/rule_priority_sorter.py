@@ -129,6 +129,168 @@ def rebuild_content(blocks: list[RuleBlock]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Dependency detection
+# ---------------------------------------------------------------------------
+
+# Phrase patterns that suggest rule B depends on rule A being applied first.
+# Matches phrases like "after X is applied", "requires X", "depends on X",
+# "building on X", "assuming X", "given that X", "once X is set".
+_DEP_EXPLICIT_RE = re.compile(
+    r"\b(?:after|requires?|depends? on|building on|assuming|given that|once)\b"
+    r"\s+['\"]?([A-Za-z][A-Za-z0-9 _\-]{2,40})['\"]?",
+    re.IGNORECASE,
+)
+
+# Reference patterns: rule body mentions another section heading by name
+# e.g. "see the Language Detection section", "as defined in Formatting"
+_DEP_REFERENCE_RE = re.compile(
+    r"\b(?:see|as defined in|per|according to|from|in)\b"
+    r"\s+(?:the\s+)?['\"]?([A-Za-z][A-Za-z0-9 _\-]{2,40})['\"]?\s+(?:section|rule|block)?",
+    re.IGNORECASE,
+)
+
+
+def detect_rule_dependencies(blocks: list[RuleBlock]) -> dict[str, list[str]]:
+    """Detect dependency edges between rule blocks.
+
+    Scans each block's body for phrases that imply it depends on another block
+    being applied first. Returns a dependency map where each key is a block
+    heading and each value is the list of headings it should come AFTER.
+
+    Dependency signals detected:
+    - Explicit: "requires X", "depends on X", "after X is applied"
+    - Cross-reference: "see the X section", "as defined in X", "per X"
+
+    Args:
+        blocks: Rule blocks extracted from CLAUDE.md.
+
+    Returns:
+        Dict mapping dependent_heading -> [prerequisite_heading, ...].
+        Only headings that match another block are included.
+    """
+    heading_set = {b.heading.lstrip("#").strip().lower(): b.heading for b in blocks}
+
+    dependencies: dict[str, list[str]] = {}
+
+    for block in blocks:
+        deps: list[str] = []
+        text = block.body
+
+        for pattern in (_DEP_EXPLICIT_RE, _DEP_REFERENCE_RE):
+            for match in pattern.finditer(text):
+                candidate = match.group(1).strip().lower()
+                # Check if candidate fuzzy-matches any known heading
+                resolved = _fuzzy_match_heading(candidate, heading_set)
+                if resolved and resolved != block.heading:
+                    if resolved not in deps:
+                        deps.append(resolved)
+
+        if deps:
+            dependencies[block.heading] = deps
+
+    return dependencies
+
+
+def _fuzzy_match_heading(candidate: str, heading_set: dict[str, str]) -> str | None:
+    """Return the canonical heading if candidate is a substring of a known heading.
+
+    Args:
+        candidate: Lowercased candidate string extracted from rule text.
+        heading_set: Map of lowercased-heading -> canonical-heading.
+
+    Returns:
+        Canonical heading string if matched, else None.
+    """
+    # Exact match first
+    if candidate in heading_set:
+        return heading_set[candidate]
+
+    # Substring match (candidate appears in a heading or vice-versa)
+    for lower_heading, canonical in heading_set.items():
+        clean_heading = lower_heading.lstrip("#").strip()
+        if candidate in clean_heading or clean_heading in candidate:
+            if len(candidate) >= 4:  # Avoid spurious matches on short words
+                return canonical
+
+    return None
+
+
+def validate_rule_order(blocks: list[RuleBlock]) -> list[tuple[str, str, str]]:
+    """Validate that blocks are ordered consistently with their dependencies.
+
+    For ``top_wins`` harnesses (Cursor, Codex), a rule that DEPENDS ON another
+    rule must appear AFTER it in the document (so the prerequisite is applied
+    first). This function checks that the current order respects detected
+    dependencies.
+
+    Args:
+        blocks: Rule blocks in current document order.
+
+    Returns:
+        List of (dependent_heading, prerequisite_heading, violation_description)
+        tuples for each ordering violation. Empty list means order is valid.
+    """
+    deps = detect_rule_dependencies(blocks)
+    index_map = {b.heading: b.index for b in blocks}
+    violations: list[tuple[str, str, str]] = []
+
+    for dependent, prereqs in deps.items():
+        dep_idx = index_map.get(dependent)
+        if dep_idx is None:
+            continue
+        for prereq in prereqs:
+            prereq_idx = index_map.get(prereq)
+            if prereq_idx is None:
+                continue
+            if prereq_idx > dep_idx:
+                violations.append((
+                    dependent,
+                    prereq,
+                    f"'{dependent}' depends on '{prereq}' but appears before it in document",
+                ))
+
+    return violations
+
+
+def format_dependency_report(blocks: list[RuleBlock]) -> str:
+    """Format a human-readable dependency and ordering report.
+
+    Args:
+        blocks: Rule blocks in current document order.
+
+    Returns:
+        Multi-line string listing detected dependencies and any ordering issues.
+    """
+    deps = detect_rule_dependencies(blocks)
+    violations = validate_rule_order(blocks)
+
+    lines: list[str] = ["Rule Dependency Analysis", "=" * 40, ""]
+
+    if not deps:
+        lines.append("  No inter-rule dependencies detected.")
+    else:
+        lines.append("  Detected dependencies (rule → requires):")
+        for dependent, prereqs in sorted(deps.items()):
+            for prereq in prereqs:
+                lines.append(f"    {dependent!r} → {prereq!r}")
+        lines.append("")
+
+    if violations:
+        lines.append("  ⚠ Ordering violations (will affect top_wins harnesses):")
+        for dep, prereq, msg in violations:
+            lines.append(f"    {msg}")
+        lines.append("")
+        lines.append(
+            "  Run /sync --sort-rules to interactively reorder, "
+            "or move the prerequisite rule above the dependent rule."
+        )
+    else:
+        lines.append("  ✓ Rule order is consistent with detected dependencies.")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Priority preview
 # ---------------------------------------------------------------------------
 

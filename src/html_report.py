@@ -465,3 +465,167 @@ def write_skill_heatmap(
     html = render_skill_heatmap_html(skill_names, targets, fidelity_matrix, title)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding="utf-8")
+
+
+def render_skill_usage_heatmap_html(
+    skill_names: list[str],
+    targets: list[str],
+    usage_matrix: dict[str, dict[str, int]],
+    title: str = "Skill Usage Frequency Heatmap",
+) -> str:
+    """Generate a self-contained HTML heatmap of skill invocation frequency.
+
+    Unlike the fidelity heatmap (which shows translation quality), this heatmap
+    shows HOW OFTEN each skill was actually invoked per harness. Cell color
+    intensity scales with invocation count:
+      - Dark green:  high usage (>= 20 invocations)
+      - Medium green: moderate usage (5–19)
+      - Light green:  low usage (1–4)
+      - Grey:         zero usage
+
+    Args:
+        skill_names: List of CC skill names (rows).
+        targets: List of target harness names (columns).
+        usage_matrix: Dict mapping skill_name -> {target -> invocation_count}.
+        title: Page and table title.
+
+    Returns:
+        Self-contained HTML string with embedded CSS and no external deps.
+    """
+
+    def _cell_style(count: int) -> tuple[str, str]:
+        """Return (background, foreground) CSS color for a usage count."""
+        if count == 0:
+            return "#9e9e9e", "#fff"
+        if count < 5:
+            return "#c8e6c9", "#333"
+        if count < 20:
+            return "#4caf50", "#fff"
+        return "#1b5e20", "#fff"
+
+    # Build header row
+    header_cells = "<th>Skill</th>" + "".join(
+        f"<th>{_escape(t)}</th>" for t in targets
+    )
+
+    # Column totals for the summary row
+    col_totals: dict[str, int] = {t: 0 for t in targets}
+    for skill in skill_names:
+        for t in targets:
+            col_totals[t] += usage_matrix.get(skill, {}).get(t, 0)
+
+    # Build data rows
+    body_rows: list[str] = []
+    for skill in skill_names:
+        skill_usage = usage_matrix.get(skill, {})
+        row_total = sum(skill_usage.get(t, 0) for t in targets)
+        cells = [f"<td class='skill-name'>{_escape(skill)}</td>"]
+        for target in targets:
+            count = skill_usage.get(target, 0)
+            bg, fg = _cell_style(count)
+            label = str(count) if count > 0 else "—"
+            cells.append(
+                f"<td style='background:{bg};color:{fg};text-align:center;' "
+                f"title='{_escape(skill)} invoked {count}× in {target}'>"
+                f"{label}</td>"
+            )
+        # Row total
+        cells.append(
+            f"<td style='background:#e3f2fd;color:#0d47a1;text-align:center;"
+            f"font-weight:bold;'>{row_total}</td>"
+        )
+        body_rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    # Footer totals row
+    total_cells = [
+        "<td style='font-weight:bold;background:#fafafa;'>Total</td>"
+    ]
+    for t in targets:
+        total_cells.append(
+            f"<td style='background:#bbdefb;color:#0d47a1;text-align:center;"
+            f"font-weight:bold;'>{col_totals[t]}</td>"
+        )
+    grand_total = sum(col_totals.values())
+    total_cells.append(
+        f"<td style='background:#1565c0;color:#fff;text-align:center;"
+        f"font-weight:bold;'>{grand_total}</td>"
+    )
+    body_rows.append(f"<tr>{''.join(total_cells)}</tr>")
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    total_skills = len(skill_names)
+    active_skills = sum(
+        1 for s in skill_names
+        if any(usage_matrix.get(s, {}).get(t, 0) > 0 for t in targets)
+    )
+
+    legend_items = (
+        "<span style='background:#9e9e9e;color:#fff;padding:2px 8px;border-radius:3px;margin:0 4px;'>0 (unused)</span>"
+        "<span style='background:#c8e6c9;color:#333;padding:2px 8px;border-radius:3px;margin:0 4px;'>1–4</span>"
+        "<span style='background:#4caf50;color:#fff;padding:2px 8px;border-radius:3px;margin:0 4px;'>5–19</span>"
+        "<span style='background:#1b5e20;color:#fff;padding:2px 8px;border-radius:3px;margin:0 4px;'>20+ (hot)</span>"
+    )
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{_escape(title)}</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          margin: 24px; background: #f5f5f5; color: #212121; }}
+  h1 {{ font-size: 1.4em; margin-bottom: 4px; }}
+  .meta {{ font-size: 0.85em; color: #757575; margin-bottom: 16px; }}
+  .summary {{ background: #fff; border-radius: 6px; padding: 12px 16px;
+              margin-bottom: 16px; display: inline-block; box-shadow: 0 1px 3px rgba(0,0,0,.15); }}
+  table {{ border-collapse: collapse; background: #fff;
+           box-shadow: 0 1px 3px rgba(0,0,0,.15); border-radius: 6px; overflow: hidden; }}
+  th {{ background: #263238; color: #fff; padding: 8px 14px;
+        font-size: 0.8em; text-transform: uppercase; letter-spacing: .05em; }}
+  td {{ padding: 7px 14px; font-size: 0.85em; border-bottom: 1px solid #e0e0e0; }}
+  td.skill-name {{ font-family: monospace; background: #fafafa; font-weight: 500; }}
+  tr:last-child td {{ border-bottom: none; }}
+  .legend {{ margin-top: 14px; font-size: 0.8em; }}
+</style>
+</head>
+<body>
+<h1>{_escape(title)}</h1>
+<div class="meta">Generated {now} by HarnessSync</div>
+<div class="summary">
+  <strong>{total_skills}</strong> skills &nbsp;|&nbsp;
+  <strong>{len(targets)}</strong> targets &nbsp;|&nbsp;
+  <strong>{active_skills}</strong> skills with at least 1 invocation &nbsp;|&nbsp;
+  <strong>{grand_total}</strong> total invocations
+</div>
+<table>
+<thead><tr>{header_cells}<th>Total</th></tr></thead>
+<tbody>
+{''.join(body_rows)}
+</tbody>
+</table>
+<div class="legend">Usage legend: {legend_items}</div>
+</body>
+</html>
+"""
+    return html
+
+
+def write_skill_usage_heatmap(
+    skill_names: list[str],
+    targets: list[str],
+    usage_matrix: dict[str, dict[str, int]],
+    output_path: Path,
+    title: str = "Skill Usage Frequency Heatmap",
+) -> None:
+    """Write a skill usage frequency heatmap HTML file.
+
+    Args:
+        skill_names: List of CC skill names.
+        targets: List of target harness names.
+        usage_matrix: Dict mapping skill_name -> {target -> invocation_count}.
+        output_path: Path to write the HTML file.
+        title: Page title.
+    """
+    html = render_skill_usage_heatmap_html(skill_names, targets, usage_matrix, title)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(html, encoding="utf-8")

@@ -116,12 +116,59 @@ class SyncImpactReport:
             and self.removed_rules_lines == 0
         )
 
+    @property
+    def impact_score(self) -> int:
+        """Numeric impact score from 1 (trivial) to 10 (high impact).
+
+        Scoring formula:
+        - Each warning item contributes 2 points (capped)
+        - Each removed MCP server contributes 3 points
+        - Each added MCP server contributes 1 point
+        - Large rule additions (>20 lines) add 2 points
+        - Large rule removals (>10 lines) add 2 points
+        Minimum 1 if any changes exist, 0 if empty.
+        """
+        if self.is_empty:
+            return 0
+
+        score = 1  # Baseline: any change = at least 1
+
+        warnings = sum(1 for i in self.items if i.severity == "warning")
+        score += min(warnings * 2, 4)
+
+        score += min(len(self.removed_mcp_servers) * 3, 3)
+        score += min(len(self.new_mcp_servers), 1)
+
+        if self.new_rules_lines > 20:
+            score += 2
+        elif self.new_rules_lines > 5:
+            score += 1
+
+        if self.removed_rules_lines > 10:
+            score += 2
+        elif self.removed_rules_lines > 2:
+            score += 1
+
+        return min(score, 10)
+
+    @property
+    def should_auto_approve(self) -> bool:
+        """True when impact_score <= 3 — safe to apply without user review."""
+        return self.impact_score <= 3
+
     def format(self) -> str:
         """Format the impact report for terminal display."""
         if self.is_empty:
             return "Sync Impact: No significant changes predicted."
 
         lines = ["Sync Impact Prediction", "=" * 50, ""]
+
+        # Impact score header
+        score = self.impact_score
+        score_bar = "█" * score + "░" * (10 - score)
+        auto_note = " (auto-approve eligible)" if self.should_auto_approve else " (review recommended)"
+        lines.append(f"Impact Score: {score}/10  [{score_bar}]{auto_note}")
+        lines.append("")
 
         # Summary
         summary_parts: list[str] = []

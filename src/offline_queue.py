@@ -36,6 +36,11 @@ from src.utils.paths import ensure_dir
 _QUEUE_DIR = Path.home() / ".harnesssync"
 _QUEUE_FILE = _QUEUE_DIR / "offline_queue.json"
 
+# Retry limits and backoff constants
+MAX_RETRY_ATTEMPTS = 5          # Drop entry after this many consecutive failures
+_BACKOFF_BASE_SECONDS = 60      # First retry: 1 minute
+_BACKOFF_MAX_SECONDS = 3600     # Cap backoff at 1 hour
+
 # Target config directories (to check availability)
 _TARGET_CONFIG_DIRS: dict[str, Path] = {
     "codex":    Path.home() / ".codex",
@@ -131,6 +136,8 @@ class OfflineQueue:
             "reason": reason,
             "queued_at": datetime.now().isoformat(timespec="seconds"),
             "source_snapshot": _serialise_snapshot(source_snapshot),
+            "retry_count": 0,
+            "next_retry_at": None,
         }
 
         # Remove older entry for same key (replace with fresh snapshot)
@@ -174,22 +181,49 @@ class OfflineQueue:
         Iterates the queue, checks availability for each entry, and runs
         SyncOrchestrator for entries whose target is now reachable.
 
+        Entries that fail are kept with an incremented retry_count and a
+        computed next_retry_at timestamp (exponential backoff). Entries that
+        exceed MAX_RETRY_ATTEMPTS are dropped from the queue with an
+        "exhausted" result status.
+
         Args:
             available_check: If False, replay all entries regardless of availability
                              (useful for forced replay via /sync --replay-queue).
 
         Returns:
-            Dict mapping queue_key -> "replayed" | "still_unavailable" | "error: <msg>".
+            Dict mapping queue_key -> "replayed" | "still_unavailable" |
+            "backoff" | "exhausted" | "error: <msg>".
         """
         queue = self._load()
         results: dict[str, str] = {}
         remaining: list[dict] = []
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        now_ts = datetime.now().timestamp()
 
         for entry in queue:
             key = entry.get("key", "?")
             target = entry.get("target", "")
             project_dir_str = entry.get("project_dir") or os.getcwd()
             project_dir = Path(project_dir_str)
+            retry_count = entry.get("retry_count", 0)
+
+            # Enforce max retry limit — silently drop exhausted entries
+            if retry_count >= MAX_RETRY_ATTEMPTS:
+                results[key] = "exhausted"
+                continue  # Drop from queue
+
+            # Skip entries still in backoff window (unless forced)
+            if available_check:
+                next_retry = entry.get("next_retry_at")
+                if next_retry:
+                    try:
+                        next_ts = datetime.fromisoformat(next_retry).timestamp()
+                        if now_ts < next_ts:
+                            results[key] = "backoff"
+                            remaining.append(entry)
+                            continue
+                    except ValueError:
+                        pass  # Malformed timestamp — proceed anyway
 
             if available_check and not is_target_available(target, project_dir):
                 results[key] = "still_unavailable"
@@ -203,7 +237,20 @@ class OfflineQueue:
                 # Entry consumed — do NOT add back to remaining
             except Exception as exc:
                 results[key] = f"error: {exc}"
-                remaining.append(entry)  # Keep for next retry
+                # Increment retry_count and compute next backoff window
+                new_retry_count = retry_count + 1
+                backoff_secs = min(
+                    _BACKOFF_BASE_SECONDS * (2 ** (new_retry_count - 1)),
+                    _BACKOFF_MAX_SECONDS,
+                )
+                from datetime import timedelta
+                next_retry_dt = datetime.now() + timedelta(seconds=backoff_secs)
+                updated_entry = dict(entry)
+                updated_entry["retry_count"] = new_retry_count
+                updated_entry["next_retry_at"] = next_retry_dt.isoformat(timespec="seconds")
+                updated_entry["last_error"] = str(exc)
+                updated_entry["last_attempt_at"] = now_iso
+                remaining.append(updated_entry)
 
         self._save(remaining)
         return results
@@ -231,10 +278,18 @@ class OfflineQueue:
 
         lines = [f"Offline sync queue: {len(entries)} pending entry/entries"]
         for e in entries:
+            retry_count = e.get("retry_count", 0)
+            retries_left = MAX_RETRY_ATTEMPTS - retry_count
+            retry_info = f" [attempt {retry_count + 1}/{MAX_RETRY_ATTEMPTS}]" if retry_count > 0 else ""
+            next_retry = e.get("next_retry_at")
+            backoff_info = f" retry after {next_retry}" if next_retry else ""
+            last_err = e.get("last_error")
+            err_info = f" last_err={last_err!r}" if last_err else ""
             lines.append(
                 f"  - [{e.get('target', '?')}] {e.get('reason', '')} "
                 f"(queued {e.get('queued_at', '?')})"
                 + (f" project={e.get('project_dir', '')}" if e.get('project_dir') else "")
+                + retry_info + backoff_info + err_info
             )
         lines.append("\nRun /sync to replay when targets are available.")
         return "\n".join(lines)

@@ -195,6 +195,31 @@ def _render_dashboard(project_dir: Path, account: str | None) -> str:
         pass
 
     lines.append("")
+
+    # Capability gap summary — which features are missing per target
+    try:
+        from src.compatibility_reporter import GapTracker
+        gap_tracker = GapTracker()
+        all_gaps = gap_tracker.get_gaps()
+        if all_gaps:
+            open_gaps = [g for g in all_gaps if not getattr(g, "resolved", False)]
+            if open_gaps:
+                # Group by target for compact display
+                gap_by_target: dict[str, list[str]] = {}
+                for g in open_gaps:
+                    t = getattr(g, "target", "?")
+                    f = getattr(g, "feature", "?")
+                    gap_by_target.setdefault(t, []).append(f)
+
+                lines.append("  Capability Gaps:")
+                for tgt in sorted(gap_by_target):
+                    features = ", ".join(sorted(gap_by_target[tgt]))
+                    lines.append(f"    {tgt:<14} missing: {features}")
+                lines.append("  Run /sync-gaps for details and upstream issue links.")
+                lines.append("")
+    except Exception:
+        pass
+
     lines.append("  Press Ctrl+C to exit  |  /sync to run sync  |  /sync-status for details")
 
     return "\n".join(lines)

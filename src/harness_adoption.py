@@ -664,6 +664,104 @@ class UsageAttributionAnalyzer:
         return "\n".join(lines)
 
 
+def generate_weekly_digest(
+    project_dir: Path | None = None,
+    targets: list[str] | None = None,
+    state_manager=None,
+) -> str:
+    """Generate a weekly analytics digest across all configured harnesses.
+
+    Summarises per-harness invocation counts found in shell history,
+    highlights the most-used harness, flags harnesses that were synced
+    but never invoked, and surfaces rules coverage gaps.
+
+    Args:
+        project_dir: Project root (used for context).
+        targets: Harnesses to include (default: all known).
+        state_manager: StateManager instance for sync state (created if None).
+
+    Returns:
+        Formatted multi-line digest string ready to print or log.
+    """
+    if state_manager is None:
+        from src.state_manager import StateManager
+        state_manager = StateManager()
+
+    analyzer = UsageAttributionAnalyzer(
+        project_dir=project_dir or Path.cwd(),
+        state_manager=state_manager,
+    )
+    reports = analyzer.analyze(targets=targets)
+
+    total_invocations = sum(r.invocation_count for r in reports)
+    synced_targets = [r for r in reports if r.rules_synced > 0]
+    active_targets = [r for r in reports if r.invocation_count > 0]
+    idle_synced = [r for r in synced_targets if r.invocation_count == 0]
+
+    from datetime import date
+    week_str = date.today().strftime("Week of %Y-%m-%d")
+
+    lines = [
+        f"HarnessSync Weekly Digest — {week_str}",
+        "=" * 54,
+        "",
+    ]
+
+    if total_invocations == 0:
+        lines.append(
+            "No harness invocations detected in shell history this week.\n"
+            "Shell history may be in a non-standard location or harnesses\n"
+            "haven't been used yet."
+        )
+        return "\n".join(lines)
+
+    # Most-used harness
+    primary = max(reports, key=lambda r: r.invocation_count)
+    lines.append(
+        f"Most-used harness: {primary.target} "
+        f"— {primary.invocation_count} invocations "
+        f"({primary.share_of_total * 100:.0f}% of total)"
+    )
+    lines.append("")
+
+    # Per-harness table
+    lines.append(f"{'Harness':<12}  {'Invocations':>12}  {'Coverage':>10}  Last used")
+    lines.append("  " + "-" * 52)
+    for r in reports:
+        last = r.last_invocation or "never"
+        cov = f"{r.rules_coverage_pct * 100:.0f}%"
+        bar_len = int(r.share_of_total * 15)
+        bar = "█" * bar_len + "░" * (15 - bar_len)
+        lines.append(
+            f"  {r.target:<10}  {bar}  {r.invocation_count:>4}  "
+            f"{cov:>7}   {last}"
+        )
+    lines.append("")
+
+    # Insights
+    if idle_synced:
+        names = ", ".join(r.target for r in idle_synced)
+        lines.append(
+            f"Synced but unused: {names}\n"
+            "  → These harnesses have synced config but show zero invocations.\n"
+            "    Consider pruning them with /sync-setup or /sync-gaps to free maintenance burden."
+        )
+        lines.append("")
+
+    low_cov = [r for r in active_targets if r.rules_coverage_pct < 0.7]
+    if low_cov:
+        names = ", ".join(r.target for r in low_cov)
+        lines.append(
+            f"Low rule coverage in active harnesses: {names}\n"
+            "  → Some rules are dropped when syncing to these harnesses.\n"
+            "    Run /sync-matrix to see which rules are lost in translation."
+        )
+        lines.append("")
+
+    lines.append("Run /sync-usage --full for complete attribution details.")
+    return "\n".join(lines)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Multi-Project Sync Dashboard (item 26)
 # ──────────────────────────────────────────────────────────────────────────────
