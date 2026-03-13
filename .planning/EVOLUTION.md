@@ -3758,3 +3758,71 @@ _2026-03-13T10:31:21.558Z_
 - The test suite is thin (28 tests) relative to the codebase size, which means integration-level changes are largely unguarded by automated tests.
 
 ---
+## Iteration 57
+_2026-03-13T10:47:06.719Z_
+
+### Items Attempted
+
+- **Real-Time Capability Gap Alerts** — pass
+- **Team Sync Profiles** — pass
+- **Per-Project Sync Overrides** — pass
+- **Cursor & Windsurf Adapters** — pass
+- **Aider Adapter** — pass
+- **MCP Server Marketplace Sync** — pass
+- **Sync Health Push Notifications** — pass
+- **Rule Translation Quality Score** — pass
+- **Git Pre-Commit Sync Hook** — pass
+- **Harness-Specific Skill Variants** — pass
+- **Config Time Travel** — pass
+- **Reverse Sync: Import from Target** — pass
+- **Interactive Onboarding Wizard** — pass
+- **Skill Dependency Graph** — pass
+- **Tag-Based Selective Sync** — pass
+- **Auto Sync Changelog** — pass
+- **VS Code Copilot Instructions Adapter** — pass
+- **Multi-Machine Config Sync** — pass
+- **Target Version Compatibility Guard** — pass
+- **Secret Leak Scanner** — pass
+- **Sync Coverage Report** — pass
+- **Community Adapter Registry** — pass
+- **Sandbox Simulation Mode** — pass
+- **PR Review Sync Bot** — pass
+- **Cross-Harness Benchmark Comparison** — pass
+- **Ambient Drift Watcher** — pass
+- **Sync-Skip Annotations** — pass
+- **Harness Migration Assistant** — pass
+- **CI/CD Sync Validator** — pass
+- **Smart Rule Deduplication** — pass
+- **Per-Harness Model Pinning** — pass
+- **Immutable Sync Audit Log** — pass
+- **Rule Optimizer for Target Harnesses** — pass
+- **Shareable Sync Bundles** — pass
+- **Sync Impact Estimator** — pass
+
+### Decisions Made
+
+- Item 1 (Capability Gap Alerts): Added CapabilityGapNotifier to skill_gap_analyzer.py as a new class rather than modifying the existing SkillGapAnalyzer. It maintains a JSON state file in .harness-sync/ to track previously-seen skills/MCP servers, compares on each check() call, and fires desktop notifications for newly-detected items that can't fully sync to all targets.
+- Item 7 (Sync Health Push Notifications): Added two new methods to DesktopNotifier — notify_drift_detected() and notify_sync_failed() — rather than repurposing notify_conflict_detected(). The drift watcher was updated to prefer notify_drift_detected() over the generic send_os_notification() so the alert carries richer context (likely_cause, file count).
+- Item 8 (Rule Translation Quality Score): Added confidence_score (int 0-100) as a computed property on TranslationResult rather than storing it as a field, since it's fully derivable from confidence + lost_capabilities. Also added needs_manual_review property (score < 70). Updated format() and format_confidence_summary() to surface the numeric score.
+- Item 10 (Harness-Specific Skill Variants): Added get_skill_variant_path(), translate_skill_with_variant(), list_skill_variants(), and format_variant_summary() to skill_translator.py. The resolution order is: SKILL.<target>.md → SKILL.fallback.md → normal translation. Variant files are returned verbatim (no auto-translation), giving authors explicit control over the degraded experience.
+- Item 21 (Sync Coverage Report): Added generate_sync_coverage_report() as a module-level function in compatibility_reporter.py (not a class method) since it doesn't need instance state from CompatibilityReporter. Uses a static capability matrix and section weights matching the existing static_coverage_score() method for consistency.
+- Item 22 (Community Adapter Registry): Added CommunityAdapterRegistry and AdapterEntry to skill_marketplace.py (alongside existing SkillMarketplace) since they share the same GitHub search infrastructure and utility functions. Added os import since the new class references os.environ.
+- Item 27 (Sync-Skip Annotations): Implemented inline <!-- sync:skip --> annotation parsing in sync_ignore.py with three functions: strip_skip_annotations(), extract_skipped_sections(), and filter_content_by_annotations(). Supports four annotation forms: sync:skip (all), sync:skip target=a,b (specific targets), sync:only target=a,b (inverse), plus preceding-line or in-section placement. The existing SyncIgnore class is unchanged — annotations are a parallel mechanism.
+
+### Patterns Discovered
+
+- The codebase consistently uses @dataclass with field() for result objects — computed properties (like confidence_score) are preferred over stored fields when the value is fully derivable, keeping __init__ clean.
+- New features are almost always added as new module-level functions or new classes rather than modifying existing classes — the existing code is stable and well-tested, so augmentation is safer than modification.
+- The codebase has extensive coverage of features across many files but the integration points (wiring new capabilities into the orchestrator or command layer) are often missing — items are implemented as libraries but not always hooked into the CLI commands.
+- Desktop notifications use a best-effort pattern throughout: every notification path is wrapped in try/except with return False fallback, ensuring notifications never block sync operations.
+- The curated offline fallback pattern (e.g., _CURATED_REGISTRY, _CURATED_ADAPTERS) is used consistently when GitHub API calls might fail — always define a minimal built-in dataset so features degrade gracefully offline.
+
+### Takeaways
+
+- Many of the 30 items in this iteration were already substantially implemented in prior iterations — the main work was filling gaps, extending existing APIs, or adding missing integration points rather than net-new features.
+- The community adapter registry (item 22) is the most architecturally significant addition — it creates a new extensibility path for harnesses that will never be officially supported, reducing maintenance burden on the core team.
+- The sync:skip annotation system (item 27) fills an important gap: users currently must manage .syncignore files for exclusions, but inline annotations are far more discoverable and co-located with the content they control.
+- The numeric confidence score (item 8) makes the existing High/Medium/Low system actionable — users now have a concrete threshold (70) to trigger manual review, not just a vague label.
+- The CapabilityGapNotifier (item 1) uses a state file approach rather than a database to track seen items, keeping dependencies minimal and making the state file human-readable and debuggable.
+
+---

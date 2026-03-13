@@ -399,6 +399,77 @@ class SecretDetector:
 
         return all_detections
 
+    def scan_harness_configs(self, project_dir) -> list[dict]:
+        """Scan all written harness config files for secrets before sync.
+
+        Checks all known harness-specific config file locations for secrets
+        that could be accidentally committed to git. This is especially
+        important for MCP config files (.cursor/mcp.json, opencode.json, etc.)
+        that accept env vars inline.
+
+        CRITICAL: Never logs or displays actual secret values.
+
+        Args:
+            project_dir: Path to project root directory.
+
+        Returns:
+            Merged list of detection dicts from all harness config files.
+        """
+        from pathlib import Path
+
+        project_dir = Path(project_dir)
+
+        # All known harness-specific config files that could contain secrets
+        harness_files = [
+            # Cursor
+            project_dir / ".cursor" / "mcp.json",
+            # OpenCode
+            project_dir / "opencode.json",
+            # Windsurf
+            project_dir / ".codeium" / "windsurf" / "mcp_config.json",
+            # Cline
+            project_dir / ".roo" / "mcp.json",
+            # Continue
+            project_dir / ".continue" / "config.json",
+            # Zed
+            project_dir / ".zed" / "settings.json",
+            # Neovim avante
+            project_dir / ".avante" / "mcp.json",
+            # Gemini settings
+            project_dir / ".gemini" / "settings.json",
+            # Aider config
+            project_dir / ".aider.conf.yml",
+            # Codex config
+            project_dir / ".codex" / "config.toml",
+            # General MCP config
+            project_dir / ".mcp.json",
+        ]
+
+        all_detections: list[dict] = []
+        for path in harness_files:
+            if not path.exists():
+                continue
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            hits = self.scan_content(content, source_label=str(path.relative_to(project_dir)))
+            # Also scan as JSON for MCP env var secrets in .cursor/mcp.json etc.
+            if path.suffix == ".json":
+                try:
+                    import json as _json
+                    data = _json.loads(content)
+                    mcp_servers = data.get("mcpServers", {})
+                    env_hits = self.scan_mcp_env(mcp_servers)
+                    for h in env_hits:
+                        h["source"] = str(path.relative_to(project_dir))
+                    hits.extend(env_hits)
+                except Exception:
+                    pass
+            all_detections.extend(hits)
+
+        return all_detections
+
     def scan_mcp_env(self, mcp_servers: dict) -> list[dict]:
         """
         Extract and scan environment variables from MCP server configs.

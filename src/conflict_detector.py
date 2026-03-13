@@ -1020,6 +1020,7 @@ class ConflictResolutionWizard:
     RESOLUTION_KEEP_SOURCE = "source"   # Use HarnessSync's version
     RESOLUTION_KEEP_TARGET = "keep"     # Preserve manual edits
     RESOLUTION_SKIP = "skip"            # Leave file untouched this sync
+    RESOLUTION_BACKPORT = "backport"    # Copy target edits back to CLAUDE.md source
 
     def __init__(self, detector: "ConflictDetector") -> None:
         self.detector = detector
@@ -1090,6 +1091,7 @@ class ConflictResolutionWizard:
         print("\nFor each conflict, you can:")
         print("  s) Use sync source — let HarnessSync overwrite with the Claude Code version")
         print("  k) Keep target    — preserve your manual edits, skip this file this sync")
+        print("  b) Back-port      — copy your manual edits back to CLAUDE.md as the new source")
         print("  d) Show diff      — display a side-by-side diff before deciding")
         print("  ?) Skip for now   — leave this conflict unresolved (file won't be synced)")
         print()
@@ -1114,8 +1116,10 @@ class ConflictResolutionWizard:
         sources = sum(1 for v in resolutions.values() if v == self.RESOLUTION_KEEP_SOURCE)
         keeps = sum(1 for v in resolutions.values() if v == self.RESOLUTION_KEEP_TARGET)
         skips = sum(1 for v in resolutions.values() if v == self.RESOLUTION_SKIP)
+        backports = sum(1 for v in resolutions.values() if v == self.RESOLUTION_BACKPORT)
         print(f"  Use sync source: {sources}")
         print(f"  Keep target:     {keeps}")
+        print(f"  Back-port:       {backports}")
         print(f"  Skipped:         {skips}")
 
         return resolutions
@@ -1128,13 +1132,14 @@ class ConflictResolutionWizard:
     ) -> str:
         """Prompt the user for a resolution choice for one conflict.
 
-        Returns one of RESOLUTION_KEEP_SOURCE | RESOLUTION_KEEP_TARGET | RESOLUTION_SKIP.
+        Returns one of RESOLUTION_KEEP_SOURCE | RESOLUTION_KEEP_TARGET |
+        RESOLUTION_BACKPORT | RESOLUTION_SKIP.
         """
         file_path = conflict.get("file_path", "")
 
         while True:
             try:
-                raw = input("\n  Choice [s=sync, k=keep, d=diff, ?=skip]: ").strip().lower()
+                raw = input("\n  Choice [s=sync, k=keep, b=back-port, d=diff, ?=skip]: ").strip().lower()
             except (EOFError, KeyboardInterrupt):
                 print("\nCancelled — defaulting to 'skip'.")
                 return self.RESOLUTION_SKIP
@@ -1143,6 +1148,8 @@ class ConflictResolutionWizard:
                 return self.RESOLUTION_KEEP_SOURCE
             elif raw in ("k", "keep"):
                 return self.RESOLUTION_KEEP_TARGET
+            elif raw in ("b", "back-port", "backport", "bp"):
+                return self.RESOLUTION_BACKPORT
             elif raw in ("d", "diff"):
                 try:
                     three_way = self.detector.three_way_diff(conflict, source_content)
@@ -1152,4 +1159,78 @@ class ConflictResolutionWizard:
             elif raw in ("?", "skip"):
                 return self.RESOLUTION_SKIP
             else:
-                print("  Enter 's', 'k', 'd', or '?'.")
+                print("  Enter 's', 'k', 'b', 'd', or '?'.")
+
+    def backport_to_source(
+        self,
+        conflict: dict,
+        claude_md_path: "Path",
+        dry_run: bool = False,
+    ) -> str:
+        """Back-port manual target edits into the CLAUDE.md source file.
+
+        When the user chooses to back-port, this method reads the manually
+        edited target file and replaces the corresponding section in CLAUDE.md,
+        making the manual edits the new authoritative source.
+
+        The replaced section is identified by the HarnessSync managed block
+        markers in CLAUDE.md. If no markers are found, the target content is
+        appended with a back-port comment.
+
+        Args:
+            conflict: Conflict dict with ``file_path`` pointing to the
+                      manually edited target file.
+            claude_md_path: Path to the CLAUDE.md source file.
+            dry_run: If True, return the new content without writing.
+
+        Returns:
+            The new CLAUDE.md content string (whether written or not).
+
+        Raises:
+            OSError: If either file cannot be read or written.
+        """
+        from pathlib import Path as _Path
+        import re as _re
+
+        target_path = _Path(conflict.get("file_path", ""))
+        if not target_path.exists():
+            raise OSError(f"Target file not found: {target_path}")
+        if not claude_md_path.exists():
+            raise OSError(f"CLAUDE.md not found: {claude_md_path}")
+
+        target_content = target_path.read_text(encoding="utf-8")
+        claude_content = claude_md_path.read_text(encoding="utf-8")
+
+        # Try to strip existing HarnessSync managed block from target content
+        managed_re = _re.compile(
+            r"<!--\s*Managed by HarnessSync\s*-->.*?<!--\s*End HarnessSync managed content\s*-->",
+            _re.DOTALL | _re.IGNORECASE,
+        )
+        # Extract the user edits from between managed markers if present
+        inner_match = managed_re.search(target_content)
+        if inner_match:
+            # Keep everything outside the markers (user's manual additions)
+            user_edits = target_content[:inner_match.start()].strip()
+            after_block = target_content[inner_match.end():].strip()
+            if after_block:
+                user_edits = (user_edits + "\n\n" + after_block).strip()
+        else:
+            user_edits = target_content.strip()
+
+        if not user_edits:
+            # Nothing to back-port — target is empty outside managed block
+            return claude_content
+
+        # Insert the back-ported content into CLAUDE.md with a clear marker
+        ts = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z")
+        backport_block = (
+            f"\n\n<!-- Back-ported from {target_path.name} on {ts} -->\n"
+            f"{user_edits}\n"
+            f"<!-- End back-port -->\n"
+        )
+        new_content = claude_content.rstrip() + backport_block
+
+        if not dry_run:
+            claude_md_path.write_text(new_content, encoding="utf-8")
+
+        return new_content

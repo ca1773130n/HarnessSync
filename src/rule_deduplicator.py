@@ -34,6 +34,59 @@ _HARNESS_FILES: dict[str, str] = {
     "aider":     "CONVENTIONS.md",
 }
 
+# Contradiction pattern pairs: (pattern_a, pattern_b, conflict_type, explanation)
+# Each pattern fires when matched in DIFFERENT blocks of the same file or across files.
+_CONTRADICTION_PATTERNS: list[tuple[re.Pattern, re.Pattern, str, str]] = [
+    (
+        re.compile(r"\b(always|never skip|always add|add)\b.{0,40}\bcomment", re.I),
+        re.compile(r"\b(avoid|don.t add|no|minimal|sparse|concise)\b.{0,40}\bcomment", re.I),
+        "comment_policy",
+        "One rule requires comments; another discourages them.",
+    ),
+    (
+        re.compile(r"\buse\b.{0,30}\bTypeScript\b", re.I),
+        re.compile(r"\buse\b.{0,30}\bJavaScript\b(?! with TypeScript)", re.I),
+        "language_choice",
+        "Conflicting language directives: TypeScript vs JavaScript.",
+    ),
+    (
+        re.compile(r"\b(always|prefer|use)\b.{0,30}\bsingle.quot", re.I),
+        re.compile(r"\b(always|prefer|use)\b.{0,30}\bdouble.quot", re.I),
+        "quote_style",
+        "Conflicting quote-style directives.",
+    ),
+    (
+        re.compile(r"\b(always|write|add|include)\b.{0,30}\b(test|tests|unit test)\b", re.I),
+        re.compile(r"\b(skip|no|don.t write|avoid)\b.{0,30}\b(test|tests|unit test)\b", re.I),
+        "test_policy",
+        "Conflicting testing directives: one requires tests, another discourages them.",
+    ),
+    (
+        re.compile(r"\b(never|don.t|avoid)\b.{0,30}\b(console\.log|print|debug)\b", re.I),
+        re.compile(r"\b(always|add|use)\b.{0,30}\b(console\.log|print|debug log)\b", re.I),
+        "logging_policy",
+        "Conflicting log/debug directives.",
+    ),
+    (
+        re.compile(r"\buse\b.{0,30}\b(tabs|tab indent)\b", re.I),
+        re.compile(r"\buse\b.{0,30}\b(spaces|space indent)\b", re.I),
+        "indent_style",
+        "Conflicting indentation directives: tabs vs spaces.",
+    ),
+    (
+        re.compile(r"\b(prefer|use|always)\b.{0,30}\bfunctional\b", re.I),
+        re.compile(r"\b(prefer|use|always)\b.{0,30}\bclass(es|.based)?\b", re.I),
+        "code_style",
+        "Conflicting style: functional vs class-based approach.",
+    ),
+    (
+        re.compile(r"\b(never|don.t|avoid)\b.{0,40}\btype annotation", re.I),
+        re.compile(r"\b(always|add|use|require)\b.{0,40}\btype annotation", re.I),
+        "typing_policy",
+        "Conflicting type annotation policy.",
+    ),
+]
+
 # Similarity threshold: 0.0 = anything matches, 1.0 = exact only
 DEFAULT_SIMILARITY_THRESHOLD = 0.75
 
@@ -69,6 +122,17 @@ class DuplicateCluster:
         return len(self.sources) > 1
 
 
+@dataclass
+class ContradictionPair:
+    """Two rule blocks that appear to contradict each other."""
+
+    block_a: RuleBlock       # First rule
+    block_b: RuleBlock       # Contradicting rule
+    conflict_type: str       # Short category label
+    explanation: str         # Human-readable explanation
+    same_file: bool          # True if both blocks are in the same file
+
+
 class RuleDeduplicator:
     """Detects duplicate rules across harness config files.
 
@@ -98,6 +162,105 @@ class RuleDeduplicator:
         # Put cross-harness duplicates first
         clusters.sort(key=lambda c: (not c.is_cross_harness, -len(c.blocks)))
         return clusters
+
+    def detect_contradictions(self) -> list[ContradictionPair]:
+        """Scan rule blocks for semantically contradictory pairs.
+
+        Applies a set of known contradiction patterns to find rules that
+        directly oppose each other (e.g., 'always add comments' vs. 'avoid
+        adding comments'). Checks both within-file and cross-harness pairs.
+
+        Returns:
+            List of ContradictionPair instances, same-file contradictions
+            listed before cross-harness ones.
+        """
+        blocks = self._collect_blocks()
+        found: list[ContradictionPair] = []
+        seen: set[tuple[int, int]] = set()  # Avoid duplicate pairs
+
+        for i, block_a in enumerate(blocks):
+            for j, block_b in enumerate(blocks):
+                if j <= i:
+                    continue
+                pair_key = (i, j)
+                if pair_key in seen:
+                    continue
+                for pat_a, pat_b, conflict_type, explanation in _CONTRADICTION_PATTERNS:
+                    a_matches_a = bool(pat_a.search(block_a.text))
+                    a_matches_b = bool(pat_b.search(block_a.text))
+                    b_matches_a = bool(pat_a.search(block_b.text))
+                    b_matches_b = bool(pat_b.search(block_b.text))
+
+                    if (a_matches_a and b_matches_b) or (a_matches_b and b_matches_a):
+                        same_file = (block_a.file_path == block_b.file_path)
+                        found.append(ContradictionPair(
+                            block_a=block_a,
+                            block_b=block_b,
+                            conflict_type=conflict_type,
+                            explanation=explanation,
+                            same_file=same_file,
+                        ))
+                        seen.add(pair_key)
+                        break  # One contradiction type per pair is enough
+
+        # Same-file contradictions are more urgent — surface them first
+        found.sort(key=lambda p: (not p.same_file, p.conflict_type))
+        return found
+
+    def format_contradiction_report(self, contradictions: list[ContradictionPair]) -> str:
+        """Format contradiction pairs as a human-readable report.
+
+        Args:
+            contradictions: Output of ``detect_contradictions()``.
+
+        Returns:
+            Multi-line formatted string.
+        """
+        if not contradictions:
+            return "No contradictory rules detected. Your config appears consistent."
+
+        same_file = [p for p in contradictions if p.same_file]
+        cross_file = [p for p in contradictions if not p.same_file]
+
+        lines = [
+            "Rule Contradiction Report",
+            "=" * 50,
+            f"Found {len(contradictions)} contradictory rule pair(s): "
+            f"{len(same_file)} within-file, {len(cross_file)} cross-file.",
+            "",
+        ]
+
+        if same_file:
+            lines.append("WITHIN-FILE CONTRADICTIONS (highest priority — resolve immediately):")
+            lines.append("")
+            for i, pair in enumerate(same_file, 1):
+                lines.extend(self._format_contradiction(i, pair))
+
+        if cross_file:
+            lines.append("CROSS-FILE CONTRADICTIONS (may cause inconsistent behavior):")
+            lines.append("")
+            for i, pair in enumerate(cross_file, len(same_file) + 1):
+                lines.extend(self._format_contradiction(i, pair))
+
+        lines.append("Recommendation:")
+        lines.append(
+            "  Resolve contradictions in CLAUDE.md first, then re-run /sync to "
+            "propagate the consistent rule to all harnesses."
+        )
+        return "\n".join(lines)
+
+    def _format_contradiction(self, idx: int, pair: ContradictionPair) -> list[str]:
+        """Format a single ContradictionPair for display."""
+        loc = "same file" if pair.same_file else "cross-file"
+        lines = [
+            f"  [{idx}] {pair.conflict_type} ({loc}): {pair.explanation}",
+            f"       A [{pair.block_a.source}:{pair.block_a.file_path}]: "
+            f"{pair.block_a.text[:100].replace(chr(10), ' ')!r}",
+            f"       B [{pair.block_b.source}:{pair.block_b.file_path}]: "
+            f"{pair.block_b.text[:100].replace(chr(10), ' ')!r}",
+            "",
+        ]
+        return lines
 
     def format_report(self, clusters: list[DuplicateCluster]) -> str:
         """Format duplicate clusters as a human-readable report.

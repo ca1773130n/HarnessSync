@@ -14,13 +14,21 @@ Token counting method:
   For precise Anthropic tokenization we would need the tokenizer library,
   but the heuristic is within ±15% for typical rule files.
 
-Context window limits per harness (conservative estimates, 2025):
-  codex:    ~8,192 tokens (Codex CLI default context)
-  gemini:   ~32,768 tokens (Gemini 1.5 Flash/Pro)
-  opencode: ~32,768 tokens
-  cursor:   ~8,192 tokens (Cursor chat context limit for rules)
-  aider:    ~8,192 tokens (conservative; depends on model)
-  windsurf: ~8,192 tokens
+Context window limits per harness (2026 actuals):
+  codex:    ~200,000 tokens (Claude Sonnet 4 / Opus 4 default)
+  gemini:   ~1,000,000 tokens (Gemini 2.0 Flash default)
+  opencode: ~200,000 tokens (configurable; defaults to Claude tier)
+  cursor:   ~200,000 tokens (Claude Sonnet 4 default)
+  aider:    ~200,000 tokens (Claude Sonnet / GPT-4o class)
+  windsurf: ~200,000 tokens (Claude Sonnet default)
+  cline:    ~200,000 tokens (Claude Sonnet via VS Code extension)
+  continue: ~128,000 tokens (Continue.dev; model-dependent)
+  zed:      ~200,000 tokens (Zed AI, Claude Sonnet default)
+  neovim:   ~128,000 tokens (avante.nvim/codecompanion; model-dependent)
+
+Advisory thresholds are set conservatively: warn at 5% and critical at 10%
+of the context window. This keeps rules a small fraction of each session,
+leaving ample room for conversation history and large tool outputs.
 """
 
 from dataclasses import dataclass, field
@@ -30,38 +38,54 @@ from pathlib import Path
 # Approximate characters per token (GPT/Claude heuristic)
 CHARS_PER_TOKEN = 4.0
 
-# Cost per 1M input tokens (USD) per harness's typical model, 2025 estimates
+# Cost per 1M input tokens (USD) per harness's typical model, 2026 estimates
 # These are approximate — actual costs depend on the model selected by the user
 INPUT_COST_PER_MTK: dict[str, float] = {
-    "codex":    0.50,   # GPT-4o mini tier (Codex CLI default)
-    "gemini":   0.075,  # Gemini 1.5 Flash
-    "opencode": 3.00,   # GPT-4o or Claude tier (configurable)
-    "cursor":   3.00,   # Claude/GPT-4o (Cursor default)
-    "aider":    3.00,   # Claude/GPT-4o (model-dependent)
-    "windsurf": 3.00,   # Claude/GPT-4o tier
-    "cline":    3.00,   # Claude/GPT-4o (VS Code extension, model-dependent)
+    "codex":    3.00,   # Claude Sonnet 4 ($3/MTok input)
+    "gemini":   0.10,   # Gemini 2.0 Flash (~$0.10/MTok input)
+    "opencode": 3.00,   # Claude Sonnet 4 (configurable)
+    "cursor":   3.00,   # Claude Sonnet 4 (Cursor default)
+    "aider":    3.00,   # Claude Sonnet 4 / GPT-4o (model-dependent)
+    "windsurf": 3.00,   # Claude Sonnet 4 tier
+    "cline":    3.00,   # Claude Sonnet 4 (VS Code extension, model-dependent)
     "continue": 1.00,   # Continue.dev — varies widely by model choice
-    "zed":      3.00,   # Zed AI — Claude/GPT-4o tier
+    "zed":      3.00,   # Zed AI — Claude Sonnet 4 tier
     "neovim":   3.00,   # avante.nvim/codecompanion — model-dependent
 }
 
-# Context window sizes per harness (in tokens)
+# Context window sizes per harness (in tokens) — 2026 actuals
 CONTEXT_WINDOWS: dict[str, int] = {
-    "codex":    8_192,
-    "gemini":   32_768,
-    "opencode": 32_768,
-    "cursor":   8_192,
-    "aider":    8_192,
-    "windsurf": 8_192,
-    "cline":    16_384,   # Cline injects rules into each conversation context
-    "continue": 32_768,   # Continue.dev injects rules into context
-    "zed":      16_384,   # Zed AI system prompt context
-    "neovim":   16_384,   # avante.nvim/codecompanion context
+    "codex":    200_000,    # Claude Sonnet 4 / Opus 4 — 200K context
+    "gemini":   1_000_000,  # Gemini 2.0 Flash — 1M context
+    "opencode": 200_000,    # Claude Sonnet 4 default
+    "cursor":   200_000,    # Claude Sonnet 4 — full context available
+    "aider":    200_000,    # Claude Sonnet 4 / GPT-4o class
+    "windsurf": 200_000,    # Claude Sonnet 4 default
+    "cline":    200_000,    # Claude Sonnet 4 via VS Code extension
+    "continue": 128_000,    # Continue.dev — varies; 128K conservative estimate
+    "zed":      200_000,    # Zed AI, Claude Sonnet 4 default
+    "neovim":   128_000,    # avante.nvim/codecompanion — model-dependent
 }
 
 # Warning thresholds (fraction of context window)
-WARN_THRESHOLD = 0.25   # Warn at 25% usage
-CRITICAL_THRESHOLD = 0.50  # Critical at 50% usage
+# Rules should be a small fraction of context — keep them well under 10%
+# so conversation history and tool outputs fit comfortably.
+WARN_THRESHOLD = 0.05      # Warn at 5% usage
+CRITICAL_THRESHOLD = 0.10  # Critical at 10% usage
+
+# Harness default model names for display in reports
+HARNESS_DEFAULT_MODELS: dict[str, str] = {
+    "codex":    "Claude Sonnet 4",
+    "gemini":   "Gemini 2.0 Flash",
+    "opencode": "Claude Sonnet 4",
+    "cursor":   "Claude Sonnet 4",
+    "aider":    "Claude Sonnet 4",
+    "windsurf": "Claude Sonnet 4",
+    "cline":    "Claude Sonnet 4",
+    "continue": "model-dependent",
+    "zed":      "Claude Sonnet 4",
+    "neovim":   "model-dependent",
+}
 
 
 def _estimate_session_cost_usd(tokens: int, target: str) -> float:
@@ -130,9 +154,10 @@ class HarnessTokenReport:
         cost = self.session_cost_usd
         symbol = "⚠" if self.level == "warn" else ("✗" if self.level == "critical" else "✓")
         cost_str = f"~${cost:.4f}/session" if cost >= 0.0001 else f"~${cost:.6f}/session"
+        model = HARNESS_DEFAULT_MODELS.get(self.target, "unknown model")
         return (
-            f"{symbol} {self.target}: ~{self.total_tokens:,} tokens "
-            f"({pct:.1f}% of {self.context_window:,}-token context, {cost_str})"
+            f"{symbol} {self.target} ({model}): ~{self.total_tokens:,} tokens "
+            f"({pct:.2f}% of {self.context_window:,}-token context, {cost_str})"
         )
 
 
@@ -255,7 +280,7 @@ class TokenEstimator:
         Returns:
             HarnessTokenReport.
         """
-        context_window = CONTEXT_WINDOWS.get(target, 8_192)
+        context_window = CONTEXT_WINDOWS.get(target, 128_000)
         harness_report = HarnessTokenReport(target=target, context_window=context_window)
 
         for file_path in _get_rules_files(target, self.project_dir):
@@ -283,7 +308,7 @@ class TokenEstimator:
 def suggest_size_optimizations(
     report: "TokenEstimateReport",
     *,
-    target_fraction: float = 0.20,
+    target_fraction: float = 0.03,
 ) -> list[str]:
     """Suggest token-reduction actions for harnesses over their context budget.
 

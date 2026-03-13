@@ -23,7 +23,7 @@ import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 # Community registry URL — falls back to built-in snapshot if unreachable
@@ -194,6 +194,51 @@ _BUILTIN_REGISTRY: list[dict[str, Any]] = [
 _CATEGORIES = ["core", "development", "database", "search", "network",
                 "integration", "automation", "cloud", "monitoring", "utility"]
 
+# Portability level constants
+PORTABILITY_UNIVERSAL = "universal"      # Works in all MCP-capable harnesses via stdio
+PORTABILITY_NODE_REQUIRED = "node"       # Requires Node.js (npx); not all sandboxes allow it
+PORTABILITY_PYTHON_REQUIRED = "python"   # Requires Python/uvx; broader but not universal
+PORTABILITY_CLAUDE_ONLY = "claude-only"  # Plugin-style, Claude Code only
+PORTABILITY_PARTIAL = "partial"          # Works in some harnesses, not all
+
+# Harnesses that fully support stdio MCP servers
+_MCP_CAPABLE_HARNESSES = {
+    "codex", "gemini", "opencode", "cursor", "cline", "continue", "windsurf", "zed", "neovim"
+}
+
+# Per-server portability overrides.  Key = server ID, value = portability level.
+# Default (not listed here) is inferred from command type.
+_PORTABILITY_OVERRIDES: dict[str, str] = {
+    # Claude Code-specific plugins that use cc:// or plugin: scheme
+    "mcp-hookify": PORTABILITY_CLAUDE_ONLY,
+    "mcp-superpowers": PORTABILITY_CLAUDE_ONLY,
+    "mcp-claude-code-skills": PORTABILITY_CLAUDE_ONLY,
+    # Servers with known compatibility issues in non-Node harnesses
+    "mcp-server-puppeteer": PORTABILITY_NODE_REQUIRED,
+    "mcp-server-google-drive": PORTABILITY_NODE_REQUIRED,
+    "mcp-server-slack": PORTABILITY_NODE_REQUIRED,
+}
+
+
+def _infer_portability(command: str, server_id: str) -> str:
+    """Infer portability level from command launcher.
+
+    Args:
+        command: The command used to launch the server (e.g. 'npx', 'uvx').
+        server_id: Server ID for override lookup.
+
+    Returns:
+        Portability level string.
+    """
+    if server_id in _PORTABILITY_OVERRIDES:
+        return _PORTABILITY_OVERRIDES[server_id]
+    if command in ("npx", "node"):
+        return PORTABILITY_NODE_REQUIRED
+    if command in ("uvx", "python", "python3", "uv"):
+        return PORTABILITY_PYTHON_REQUIRED
+    # Binary or unknown — assume broadly portable
+    return PORTABILITY_UNIVERSAL
+
 
 @dataclass
 class RegistryEntry:
@@ -207,19 +252,41 @@ class RegistryEntry:
     category: str = "utility"
     tags: list[str] = field(default_factory=list)
     installed: bool = False
+    portability: str = PORTABILITY_UNIVERSAL  # portability level
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "RegistryEntry":
+        server_id = d.get("id", "")
+        command = d.get("command", "")
+        portability = d.get("portability") or _infer_portability(command, server_id)
         return cls(
-            id=d.get("id", ""),
-            name=d.get("name", d.get("id", "")),
+            id=server_id,
+            name=d.get("name", server_id),
             description=d.get("description", ""),
-            command=d.get("command", ""),
+            command=command,
             args=d.get("args", []),
             env=d.get("env", {}),
             category=d.get("category", "utility"),
             tags=d.get("tags", []),
+            portability=portability,
         )
+
+    @property
+    def portability_label(self) -> str:
+        """Human-readable portability label."""
+        labels = {
+            PORTABILITY_UNIVERSAL: "universal",
+            PORTABILITY_NODE_REQUIRED: "requires Node.js",
+            PORTABILITY_PYTHON_REQUIRED: "requires Python/uvx",
+            PORTABILITY_CLAUDE_ONLY: "Claude Code only",
+            PORTABILITY_PARTIAL: "partial",
+        }
+        return labels.get(self.portability, self.portability)
+
+    @property
+    def is_portable(self) -> bool:
+        """True if this server can be used in non-Claude-Code harnesses."""
+        return self.portability != PORTABILITY_CLAUDE_ONLY
 
     def to_mcp_config(self) -> dict[str, Any]:
         """Convert to Claude Code MCP server config format."""
@@ -528,4 +595,173 @@ class McpRegistry:
 
         lines.append("\nLegend: [✓] installed  [ ] not installed")
         lines.append("Install with: /sync-registry install <server-id>")
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Portability analysis
+    # ------------------------------------------------------------------
+
+    def analyze_portability(
+        self,
+        configured_servers: dict[str, Any] | None = None,
+    ) -> "PortabilityReport":
+        """Analyze portability of configured MCP servers.
+
+        For each configured MCP server, determines whether it will work
+        in non-Claude-Code harnesses and flags harness-specific servers
+        that need stubs or workarounds.
+
+        Args:
+            configured_servers: Dict of {server_name: config} as read from
+                .mcp.json or ~/.claude.json. If None, reads from Claude Code config.
+
+        Returns:
+            PortabilityReport with per-server classifications.
+        """
+        if configured_servers is None:
+            configured_servers = self._load_configured_servers()
+
+        entries_by_id = {e.id: e for e in self.load()}
+        results: list[PortabilityResult] = []
+
+        for name, config in (configured_servers or {}).items():
+            # Try to look up in registry
+            entry = entries_by_id.get(name)
+            if entry:
+                portability = entry.portability
+                description = entry.description
+            else:
+                # Infer from config
+                command = ""
+                if isinstance(config, dict):
+                    command = config.get("command", "")
+                portability = _infer_portability(command, name)
+                description = f"custom server ({command or 'unknown command'})"
+
+            results.append(PortabilityResult(
+                server_name=name,
+                portability=portability,
+                description=description,
+                config=config if isinstance(config, dict) else {},
+            ))
+
+        return PortabilityReport(results=results)
+
+    def _load_configured_servers(self) -> dict[str, Any]:
+        """Load all configured MCP servers from Claude Code config files."""
+        servers: dict[str, Any] = {}
+
+        # User-scope
+        for fname in (".claude.json", "claude.json"):
+            p = self._cc_home / fname
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                servers.update(data.get("mcpServers", {}))
+                break
+            except Exception:
+                pass
+
+        # Project-scope
+        try:
+            data = json.loads((self._project_dir / ".mcp.json").read_text(encoding="utf-8"))
+            servers.update(data.get("mcpServers", {}))
+        except Exception:
+            pass
+
+        return servers
+
+
+@dataclass
+class PortabilityResult:
+    """Portability classification for a single configured MCP server."""
+    server_name: str
+    portability: str
+    description: str
+    config: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_portable(self) -> bool:
+        return self.portability != PORTABILITY_CLAUDE_ONLY
+
+    @property
+    def portability_label(self) -> str:
+        labels = {
+            PORTABILITY_UNIVERSAL: "universal",
+            PORTABILITY_NODE_REQUIRED: "requires Node.js",
+            PORTABILITY_PYTHON_REQUIRED: "requires Python/uvx",
+            PORTABILITY_CLAUDE_ONLY: "Claude Code only",
+            PORTABILITY_PARTIAL: "partial",
+        }
+        return labels.get(self.portability, self.portability)
+
+
+@dataclass
+class PortabilityReport:
+    """Portability analysis for all configured MCP servers."""
+    results: list[PortabilityResult] = field(default_factory=list)
+
+    @property
+    def portable(self) -> list[PortabilityResult]:
+        return [r for r in self.results if r.is_portable]
+
+    @property
+    def claude_only(self) -> list[PortabilityResult]:
+        return [r for r in self.results if r.portability == PORTABILITY_CLAUDE_ONLY]
+
+    @property
+    def node_required(self) -> list[PortabilityResult]:
+        return [r for r in self.results if r.portability == PORTABILITY_NODE_REQUIRED]
+
+    @property
+    def python_required(self) -> list[PortabilityResult]:
+        return [r for r in self.results if r.portability == PORTABILITY_PYTHON_REQUIRED]
+
+    def format(self) -> str:
+        """Format portability report as a human-readable summary."""
+        if not self.results:
+            return "No MCP servers configured — nothing to analyze."
+
+        lines = [
+            "MCP Server Portability Analysis",
+            "=" * 55,
+            f"{len(self.results)} server(s) configured | "
+            f"{len(self.portable)} portable | "
+            f"{len(self.claude_only)} Claude Code only",
+            "",
+        ]
+
+        groups = [
+            (PORTABILITY_UNIVERSAL,       "✓ Universal (all MCP-capable harnesses)",   self.results),
+            (PORTABILITY_PYTHON_REQUIRED, "~ Requires Python/uvx",                     []),
+            (PORTABILITY_NODE_REQUIRED,   "~ Requires Node.js (npx)",                  []),
+            (PORTABILITY_CLAUDE_ONLY,     "✗ Claude Code only (not portable)",          self.claude_only),
+            (PORTABILITY_PARTIAL,         "? Partial support",                          []),
+        ]
+
+        # Populate groups from results
+        by_level: dict[str, list[PortabilityResult]] = {}
+        for r in self.results:
+            by_level.setdefault(r.portability, []).append(r)
+
+        for level, label, _ in groups:
+            items = by_level.get(level, [])
+            if not items:
+                continue
+            lines.append(label)
+            for r in items:
+                lines.append(f"  {r.server_name:<35} {r.portability_label}")
+                if r.description:
+                    lines.append(f"    {r.description[:70]}")
+            lines.append("")
+
+        if self.claude_only:
+            lines.append("Note: Claude Code-only servers will be silently skipped when syncing")
+            lines.append("  to other harnesses. Consider whether you need equivalent tools in")
+            lines.append("  Gemini, Cursor, etc. or if those features are harness-specific.")
+
+        if self.node_required:
+            lines.append("")
+            lines.append("Note: Node.js-based servers (npx) work in most harnesses but may")
+            lines.append("  fail in sandboxed environments that block subprocess execution.")
+
         return "\n".join(lines)

@@ -807,3 +807,223 @@ class SyncAuditLog:
                     f.write(json.dumps(entry, separators=(",", ":")) + "\n")
         except OSError:
             pass
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Target Config Version History
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+_TARGET_HISTORY_DIR = Path.home() / ".harnesssync" / "target-history"
+_TARGET_HISTORY_KEEP = 20  # Number of versions to retain per target file
+
+
+class TargetConfigHistory:
+    """Automatic timestamped version history for synced target harness config files.
+
+    After each sync, call ``snapshot_file()`` for every file written.  The
+    history stores the last N versions with timestamps so users can answer
+    "what did my Gemini config look like last Tuesday?" and restore any version.
+
+    Storage layout::
+
+        ~/.harnesssync/target-history/
+            gemini/GEMINI.md/
+                2026-03-13T12:00:00Z.txt
+                2026-03-12T09:15:00Z.txt
+                ...
+            codex/AGENTS.md/
+                ...
+
+    Usage::
+
+        history = TargetConfigHistory()
+        history.snapshot_file("gemini", Path("/project/GEMINI.md"))
+        versions = history.list_versions("gemini", "GEMINI.md")
+        content = history.get_version("gemini", "GEMINI.md", versions[0]["timestamp"])
+        history.restore_version("gemini", "GEMINI.md", versions[1]["timestamp"])
+    """
+
+    def __init__(
+        self,
+        history_dir: Path | None = None,
+        keep: int = _TARGET_HISTORY_KEEP,
+    ):
+        self.history_dir = history_dir or _TARGET_HISTORY_DIR
+        self.keep = keep
+
+    def _version_dir(self, target: str, file_path: str | Path) -> Path:
+        """Return the directory for version history of a specific file."""
+        name = Path(file_path).name
+        return self.history_dir / target / name
+
+    def snapshot_file(
+        self,
+        target: str,
+        file_path: Path,
+        timestamp: str | None = None,
+    ) -> Path | None:
+        """Capture a version snapshot of a target harness config file.
+
+        Called automatically after each sync to maintain version history.
+        No-ops silently if the file doesn't exist.
+
+        Args:
+            target: Harness target name (e.g. "gemini", "codex").
+            file_path: Absolute path to the target config file.
+            timestamp: ISO-8601 UTC timestamp. Defaults to now.
+
+        Returns:
+            Path to the saved version file, or None if file didn't exist.
+        """
+        if not file_path.exists():
+            return None
+
+        ts = timestamp or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        # Sanitize timestamp for use as filename
+        safe_ts = ts.replace(":", "-").replace("+", "Z")
+
+        version_dir = self._version_dir(target, file_path)
+        version_dir.mkdir(parents=True, exist_ok=True)
+
+        dest = version_dir / f"{safe_ts}.txt"
+        try:
+            content = file_path.read_text(encoding="utf-8")
+            dest.write_text(content, encoding="utf-8")
+        except OSError:
+            return None
+
+        self._prune(version_dir)
+        return dest
+
+    def list_versions(self, target: str, filename: str) -> list[dict]:
+        """List available versions for a target config file.
+
+        Args:
+            target: Harness target name.
+            filename: Config file basename (e.g. "GEMINI.md").
+
+        Returns:
+            List of dicts with ``timestamp`` and ``size_bytes`` keys,
+            sorted newest first.
+        """
+        vdir = self.history_dir / target / filename
+        if not vdir.exists():
+            return []
+
+        versions: list[dict] = []
+        for f in sorted(vdir.glob("*.txt"), reverse=True):
+            # Recover timestamp from filename
+            ts = f.stem.replace("Z-", "Z:").replace("-", ":", 2)
+            # Normalize: 2026-03-13T12-00-00Z.txt → 2026-03-13T12:00:00Z
+            ts = f.stem
+            for i, sep in enumerate(["-", "-", "T", "-", "-"]):
+                if i < 3:
+                    continue  # Preserve date hyphens
+            # Simple approach: replace only the time portion separators
+            raw = f.stem  # e.g. 2026-03-13T12-00-00Z
+            parts = raw.split("T")
+            if len(parts) == 2:
+                date_part, time_part = parts
+                time_part = time_part.replace("-", ":")
+                ts = f"{date_part}T{time_part}"
+            else:
+                ts = raw
+
+            versions.append({
+                "timestamp": ts,
+                "filename": f.name,
+                "size_bytes": f.stat().st_size,
+            })
+
+        return versions
+
+    def get_version(self, target: str, filename: str, timestamp: str) -> str | None:
+        """Retrieve the content of a specific version.
+
+        Args:
+            target: Harness target name.
+            filename: Config file basename.
+            timestamp: Timestamp string from ``list_versions()``.
+
+        Returns:
+            File content string, or None if not found.
+        """
+        # Try both with colons and hyphens in timestamp
+        safe_ts = timestamp.replace(":", "-").replace("+", "Z")
+        vdir = self.history_dir / target / filename
+        candidate = vdir / f"{safe_ts}.txt"
+        if not candidate.exists():
+            return None
+        try:
+            return candidate.read_text(encoding="utf-8")
+        except OSError:
+            return None
+
+    def restore_version(
+        self,
+        target: str,
+        filename: str,
+        timestamp: str,
+        dest_path: Path,
+    ) -> bool:
+        """Restore a historical version of a target config file.
+
+        Overwrites *dest_path* with the historical content.
+
+        Args:
+            target: Harness target name.
+            filename: Config file basename.
+            timestamp: Timestamp string from ``list_versions()``.
+            dest_path: Path to write the restored content to.
+
+        Returns:
+            True if restored successfully, False if version not found.
+        """
+        content = self.get_version(target, filename, timestamp)
+        if content is None:
+            return False
+        try:
+            dest_path.write_text(content, encoding="utf-8")
+            return True
+        except OSError:
+            return False
+
+    def format_versions(self, target: str, filename: str) -> str:
+        """Format a human-readable list of versions for a file.
+
+        Args:
+            target: Harness target name.
+            filename: Config file basename.
+
+        Returns:
+            Formatted string.
+        """
+        versions = self.list_versions(target, filename)
+        if not versions:
+            return f"No version history for {target}/{filename}."
+
+        lines = [
+            f"Version History: {target}/{filename}  ({len(versions)} versions)",
+            "=" * 55,
+        ]
+        for i, v in enumerate(versions):
+            ts = v["timestamp"][:19].replace("T", " ")
+            size = v["size_bytes"]
+            marker = " (latest)" if i == 0 else ""
+            lines.append(f"  [{i}] {ts}  {size:>7,} bytes{marker}")
+
+        lines.append(
+            f"\nRestore with: /sync-snapshot restore {target} {filename} <index>"
+        )
+        return "\n".join(lines)
+
+    def _prune(self, version_dir: Path) -> None:
+        """Remove oldest versions beyond the keep limit."""
+        files = sorted(version_dir.glob("*.txt"))
+        excess = len(files) - self.keep
+        for f in files[:excess]:
+            try:
+                f.unlink()
+            except OSError:
+                pass
