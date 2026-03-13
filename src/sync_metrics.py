@@ -401,6 +401,166 @@ class SyncMetricsExporter:
 # Convenience: record metrics from orchestrator results
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Drift Duration Tracker (Item 6 — Drift Analytics Over Time)
+# ---------------------------------------------------------------------------
+
+_DRIFT_DURATION_FILE = Path.home() / ".claude" / "harnesssync_drift_durations.json"
+
+
+class DriftDurationTracker:
+    """Track how long each target has been continuously out of sync.
+
+    Records when each target first drifted and when it was last resolved.
+    Provides duration queries so the analytics dashboard can show "Codex
+    has been out of sync for 3 days 2 hours".
+
+    Data is persisted to disk so durations survive process restarts.
+
+    Usage::
+
+        tracker = DriftDurationTracker()
+        tracker.mark_drift_start("codex")          # codex just drifted
+        duration = tracker.drift_duration("codex")  # how long?
+        tracker.mark_drift_resolved("codex")        # sync fixed it
+    """
+
+    def __init__(self, persist_path: Path | None = None):
+        self._path = persist_path or _DRIFT_DURATION_FILE
+        # {target: {"start": float_timestamp, "resolved": float_timestamp|None}}
+        self._state: dict[str, dict] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if self._path.exists():
+            try:
+                data = json.loads(self._path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    self._state = data
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    def _save(self) -> None:
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(
+                json.dumps(self._state, indent=2), encoding="utf-8"
+            )
+        except OSError:
+            pass
+
+    def mark_drift_start(self, target: str, timestamp: float | None = None) -> None:
+        """Record that a target started drifting now (or at timestamp).
+
+        Idempotent: if the target is already marked as drifting, the
+        original start time is preserved (drift duration accumulates).
+
+        Args:
+            target: Harness name (e.g. "codex").
+            timestamp: Unix timestamp; defaults to time.time().
+        """
+        if target not in self._state or self._state[target].get("resolved") is not None:
+            self._state[target] = {
+                "start": timestamp if timestamp is not None else time.time(),
+                "resolved": None,
+            }
+            self._save()
+
+    def mark_drift_resolved(self, target: str, timestamp: float | None = None) -> None:
+        """Record that the target's drift was resolved (e.g. after /sync).
+
+        Args:
+            target: Harness name.
+            timestamp: Unix timestamp; defaults to time.time().
+        """
+        if target in self._state:
+            self._state[target]["resolved"] = (
+                timestamp if timestamp is not None else time.time()
+            )
+            self._save()
+
+    def drift_duration(self, target: str) -> float | None:
+        """Return how long (seconds) a target has been / was out of sync.
+
+        For currently-drifting targets: seconds since drift started.
+        For resolved targets: total drift duration before resolution.
+        For targets never recorded: returns None.
+
+        Args:
+            target: Harness name.
+
+        Returns:
+            Duration in seconds, or None if no drift recorded.
+        """
+        entry = self._state.get(target)
+        if entry is None:
+            return None
+        start = entry.get("start")
+        if start is None:
+            return None
+        resolved = entry.get("resolved")
+        if resolved is not None:
+            return max(0.0, resolved - start)
+        return max(0.0, time.time() - start)
+
+    def is_drifting(self, target: str) -> bool:
+        """Return True if the target is currently marked as drifting."""
+        entry = self._state.get(target)
+        if entry is None:
+            return False
+        return entry.get("resolved") is None and entry.get("start") is not None
+
+    def format_duration(self, target: str) -> str:
+        """Return a human-readable drift duration string for a target.
+
+        Examples: "3 days 2 hours", "45 minutes", "never recorded".
+
+        Args:
+            target: Harness name.
+
+        Returns:
+            Formatted duration string.
+        """
+        secs = self.drift_duration(target)
+        if secs is None:
+            return "never recorded"
+        if secs < 60:
+            return f"{int(secs)} second(s)"
+        if secs < 3600:
+            return f"{int(secs / 60)} minute(s)"
+        if secs < 86400:
+            hours = int(secs / 3600)
+            mins = int((secs % 3600) / 60)
+            return f"{hours} hour(s) {mins} minute(s)" if mins else f"{hours} hour(s)"
+        days = int(secs / 86400)
+        hours = int((secs % 86400) / 3600)
+        return f"{days} day(s) {hours} hour(s)" if hours else f"{days} day(s)"
+
+    def all_targets(self) -> list[str]:
+        """Return all targets with recorded drift history."""
+        return sorted(self._state.keys())
+
+    def format_report(self) -> str:
+        """Return a multi-line drift duration summary for all known targets."""
+        if not self._state:
+            return "No drift history recorded."
+        lines = ["Drift Duration History", "=" * 40]
+        for target in self.all_targets():
+            status = "DRIFTING" if self.is_drifting(target) else "resolved"
+            duration = self.format_duration(target)
+            lines.append(f"  {target:<14} [{status:<9}]  {duration}")
+        return "\n".join(lines)
+
+    def reset(self) -> None:
+        """Clear all drift duration data (for testing)."""
+        self._state.clear()
+        if self._path.exists():
+            try:
+                self._path.unlink()
+            except OSError:
+                pass
+
+
 def record_sync_results(
     results: dict,
     exporter: SyncMetricsExporter | None = None,

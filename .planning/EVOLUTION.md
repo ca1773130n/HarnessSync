@@ -4440,3 +4440,69 @@ _2026-03-13T13:13:09.674Z_
 - restore_by_date() reveals a latent bug in list_snapshots() timestamp parsing that only affects files whose names contain underscores — worth fixing in a future iteration to make list_snapshots() always return clean YYYYMMDD_HHMMSS timestamps
 
 ---
+## Iteration 67
+_2026-03-13T13:31:28.455Z_
+
+### Items Attempted
+
+- **Interactive Conflict Resolver** — pass
+- **Live Capability Matrix Dashboard** — pass
+- **New Harness Onboarding Wizard** — pass
+- **Skill Translation Quality Hints** — pass
+- **MCP Server Availability Validator** — pass
+- **Team Config Broadcast** — pass
+- **Context-Aware Sync Triggers** — pass
+- **Config Version Pinning** — pass
+- **Import Config FROM Other Harnesses** — pass
+- **Auto-Sync Changelog** — pass
+- **Environment Profile Switching** — pass
+- **Secret Scrubber for Sync** — pass
+- **Offline Sync Queue** — pass
+- **Per-Project Sync Overrides** — pass
+- **Sync Health Notifications** — pass
+- **Rule Priority Visualizer** — pass
+- **Community Adapter Plugin API** — pass
+- **Config Linter with Auto-Fix** — pass
+- **Git Event Sync Triggers** — pass
+- **Target-Native Config Preview** — pass
+- **Skill Coverage Report** — pass
+- **Multi-Workspace Sync Coordinator** — pass
+- **Harness Update Watcher** — pass
+- **Sync Template Library** — pass
+- **Config Dependency Graph** — pass
+- **Tamper-Evident Sync Audit Log** — pass
+- **AI-Assisted Rule Translation** — pass
+- **Sync Impact Estimator** — pass
+- **Capability Gap Upvote Tracker** — pass
+- **One-Click Rollback with Diff** — pass
+- **Config SharePack Export** — pass
+- **Terminal Status Line Integration** — pass
+
+### Decisions Made
+
+- Added generate_improvement_hints() and annotate_with_improvement_hints() to skill_translator.py — distinguished from the existing annotate_translated_content() by being forward-looking (HOW to improve) rather than backward-looking (what was changed). Added target-native idiom suggestions per harness to make hints actionable.
+- Added GapUpvoteTracker to feature_gap_issue_creator.py rather than a new file — it naturally extends the gap-tracking responsibility of that module. Used a simple JSON store in ~/.harnesssync/ to persist upvotes across sessions without requiring a database.
+- Added format_rule_win_map() to rule_priority_sorter.py — chose adjacent-pair comparison (A vs B) rather than a full N×N matrix because harness rule ordering affects relative precedence between adjacent rules, not arbitrary pairs. Reused existing HARNESS_ORDER_SEMANTICS and validate_rule_order() to avoid duplication.
+- Added LocalOnlyServerResult dataclass and detect_local_only_servers() to mcp_reachability.py — kept high/medium risk distinction (high=will definitely fail, medium=may fail if package manager missing) to give users actionable prioritization. Required adding dataclass import.
+- Added SkillCoverageReport and build_skill_coverage_report() to skill_gap_analyzer.py — reused existing SkillGapAnalyzer._detect_active_targets() for target discovery. Separated presence (is the file there?) from translation quality (how faithful?) as two distinct metrics.
+- Added PinnedTargetManager to config_snapshot.py — placed it in the same file as CheckpointManager since pinning is a complementary snapshot-management concept. The filter_unpinned() method is the key integration point for the sync orchestrator.
+- Added diff_preview() and undo_with_diff() to HarnessUndoStack — added difflib import at module level. The diff compares the saved snapshot (what undo() would restore) against current disk state, showing what will change BEFORE the user commits.
+- Added SyncTriggerRule dataclass and SyncTriggerMatcher class to sync_filter.py — naturally extends the filtering responsibility. Used fnmatch for glob pattern matching to match existing Python stdlib patterns. The explain() method is critical for debuggability.
+
+### Patterns Discovered
+
+- The codebase consistently uses dataclasses for result/report types and plain dicts for config storage — new additions followed this pattern.
+- Lazy imports (inside methods) are used in sync_filter.py to avoid circular imports — the SyncTriggerMatcher followed this pattern by using 'import json' inside methods rather than at module level.
+- All formatters return multi-line strings rather than printing directly — this makes them testable and composable, which is a strong pattern throughout the codebase.
+- The project stores persistent state in ~/.harnesssync/ (for global state) or project/.harness-sync/ (for project-scoped state) — the PinnedTargetManager and GapUpvoteTracker both followed this convention.
+- Each module's public API is well-documented with usage examples in the module docstring — the new additions extended this pattern.
+
+### Takeaways
+
+- Most of the 30 product-ideation items already had mature implementations in prior iterations — the key value in this iteration was adding depth to partially-implemented features rather than greenfield work.
+- The skill translator module is one of the most feature-rich and carefully architected files — it has multiple layers of translation quality analysis that are underutilized by callers.
+- The conflict_detector.py at 1470 lines is the largest module and handles a very complex problem well — but its interactive features (resolve_three_way_interactive) are complex enough that users may not discover them.
+- The sync_filter.py module's tag-based filtering is very sophisticated but context-aware trigger rules were missing — the SyncTriggerMatcher fills a real gap for power users with many targets.
+- GapUpvoteTracker demonstrates the pattern of local-first tracking that could be extended to other community features without requiring server infrastructure.
+
+---

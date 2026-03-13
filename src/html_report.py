@@ -778,3 +778,191 @@ def write_capability_gap_report(
     content = generate_capability_gap_report(gap_data, title, include_workarounds)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(content, encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Item 21 — Web-Based Skill & Rule Browser
+# ---------------------------------------------------------------------------
+
+
+def generate_skill_browser(
+    skills: list[dict],
+    targets: list[str] | None = None,
+    title: str = "HarnessSync Skill & Rule Browser",
+) -> str:
+    """Generate a standalone HTML skill and rule browser.
+
+    Creates a self-contained HTML page with a searchable table showing all
+    synced skills and their translation status (exact / approximate / lossy)
+    per target harness. Users can filter by confidence level and see which
+    skills need manual review before syncing.
+
+    Args:
+        skills: List of skill dicts, each with keys:
+                - name (str): Skill name
+                - content (str): Raw SKILL.md content
+                - path (str): Source file path (optional)
+                - translated (dict): {target: translated_content} (optional)
+                - scores (dict): {target: score_dict} (optional; auto-computed if absent)
+        targets: Target harness names to include in columns.
+                 Defaults to ["codex", "gemini", "cursor", "aider", "windsurf"].
+        title: HTML page title.
+
+    Returns:
+        Self-contained HTML string.
+    """
+    from src.skill_translator import (
+        translate_skill_content,
+        score_translation,
+        compute_confidence_level,
+        ConfidenceLevel,
+    )
+
+    if targets is None:
+        targets = ["codex", "gemini", "cursor", "aider", "windsurf"]
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    # Confidence badge colours
+    _BADGE = {
+        ConfidenceLevel.EXACT:       ("badge-exact",       "#3fb950", "exact"),
+        ConfidenceLevel.APPROXIMATE: ("badge-approx",      "#d29922", "approx"),
+        ConfidenceLevel.LOSSY:       ("badge-lossy",       "#f85149", "lossy"),
+    }
+
+    # Build rows
+    rows_html: list[str] = []
+    for skill in skills:
+        name = _escape(skill.get("name", "?"))
+        path = _escape(skill.get("path", ""))
+        content = skill.get("content", "")
+        preview = _escape(content[:120].replace("\n", " "))
+
+        cells = [f'<td class="skill-name">{name}<br><span class="skill-path">{path}</span></td>',
+                 f'<td class="skill-preview">{preview}{"…" if len(content) > 120 else ""}</td>']
+
+        for target in targets:
+            pre_translated = (skill.get("translated") or {}).get(target)
+            if pre_translated is None:
+                translated = translate_skill_content(content, target)
+            else:
+                translated = pre_translated
+
+            pre_score = (skill.get("scores") or {}).get(target)
+            if pre_score is None:
+                score_result = score_translation(content, translated, target)
+            else:
+                score_result = pre_score
+
+            level = compute_confidence_level(content, translated, target)
+            css_class, colour, label = _BADGE[level]
+            score_val = score_result.get("score", 0)
+            note = "; ".join(score_result.get("notes", [])[:1])
+
+            cell = (
+                f'<td class="confidence-cell">'
+                f'<span class="badge {css_class}" title="{_escape(note)}">'
+                f'{label} {score_val}%'
+                f'</span>'
+                f'</td>'
+            )
+            cells.append(cell)
+
+        rows_html.append("<tr>" + "".join(cells) + "</tr>")
+
+    # Table headers
+    header_cells = ["<th>Skill</th>", "<th>Preview</th>"]
+    for t in targets:
+        header_cells.append(f"<th>{_escape(t)}</th>")
+    header_row = "<tr>" + "".join(header_cells) + "</tr>"
+
+    rows_str = "\n".join(rows_html)
+
+    css = """
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+       background: #0d1117; color: #c9d1d9; margin: 0; padding: 20px; }
+h1 { color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 10px; }
+.meta { color: #8b949e; font-size: 0.9em; margin-bottom: 16px; }
+table { width: 100%; border-collapse: collapse; background: #161b22;
+        border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }
+th { background: #1c2128; color: #79c0ff; padding: 10px 12px;
+     text-align: left; border-bottom: 1px solid #30363d; font-size: 0.85em; }
+td { padding: 8px 12px; border-bottom: 1px solid #21262d;
+     vertical-align: top; font-size: 0.85em; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #1c2128; }
+.skill-name { font-weight: bold; color: #58a6ff; white-space: nowrap; }
+.skill-path { color: #6e7681; font-size: 0.78em; font-weight: normal; }
+.skill-preview { color: #8b949e; max-width: 300px; }
+.confidence-cell { text-align: center; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px;
+         font-size: 0.78em; font-weight: bold; cursor: default;
+         border: 1px solid transparent; }
+.badge-exact  { background: #0d4a1f; color: #3fb950; border-color: #3fb950; }
+.badge-approx { background: #3d2a00; color: #d29922; border-color: #d29922; }
+.badge-lossy  { background: #490202; color: #f85149; border-color: #f85149; }
+.filter-bar { margin-bottom: 12px; display: flex; gap: 10px; align-items: center; }
+.filter-bar input { background: #161b22; border: 1px solid #30363d;
+                    color: #c9d1d9; padding: 6px 10px; border-radius: 6px;
+                    font-size: 0.9em; flex: 1; }
+.legend { font-size: 0.8em; color: #8b949e; margin-bottom: 12px; }
+.legend span { margin-right: 16px; }
+"""
+
+    js = """
+function filterSkills() {
+    const q = document.getElementById('search').value.toLowerCase();
+    const rows = document.querySelectorAll('tbody tr');
+    rows.forEach(row => {
+        const name = row.querySelector('.skill-name') ?
+            row.querySelector('.skill-name').textContent.toLowerCase() : '';
+        row.style.display = (!q || name.includes(q)) ? '' : 'none';
+    });
+}
+"""
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{_escape(title)}</title>
+<style>{css}</style>
+</head>
+<body>
+<h1>{_escape(title)}</h1>
+<div class="meta">Generated: {now} &nbsp;|&nbsp; {len(skills)} skill(s) &nbsp;|&nbsp; {len(targets)} target(s)</div>
+<div class="legend">
+  <span><span class="badge badge-exact">exact</span> — 100% faithful translation</span>
+  <span><span class="badge badge-approx">approx</span> — minor rewriting applied</span>
+  <span><span class="badge badge-lossy">lossy</span> — significant capability loss; review manually</span>
+</div>
+<div class="filter-bar">
+  <input id="search" type="text" placeholder="Filter by skill name…" oninput="filterSkills()">
+</div>
+<table>
+<thead>{header_row}</thead>
+<tbody>{rows_str}</tbody>
+</table>
+<script>{js}</script>
+</body>
+</html>"""
+
+
+def write_skill_browser(
+    skills: list[dict],
+    output_path: Path,
+    targets: list[str] | None = None,
+    title: str = "HarnessSync Skill & Rule Browser",
+) -> None:
+    """Write the skill browser HTML to a file.
+
+    Args:
+        skills: List of skill dicts (see ``generate_skill_browser``).
+        output_path: Destination file path.
+        targets: Target harness names. Defaults to 5 major targets.
+        title: Page title.
+    """
+    content = generate_skill_browser(skills, targets, title)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(content, encoding="utf-8")

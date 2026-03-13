@@ -180,3 +180,143 @@ def format_alias_table(aliases: dict[str, dict[str, str]]) -> str:
             lines.append(f"{original:<30}  {target:<12}  {alias}")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# MCP Env Var Remapping (Item 10 — MCP Server Config Portability)
+# ---------------------------------------------------------------------------
+
+# Known env var name mappings between harnesses for common MCP server credentials.
+# Format: {canonical_var: {target: harness_specific_var}}
+# "canonical" = the Claude Code / .mcp.json naming convention.
+_MCP_ENV_VAR_REMAP: dict[str, dict[str, str]] = {
+    "ANTHROPIC_API_KEY": {
+        "cursor":   "ANTHROPIC_API_KEY",   # Cursor passes through unchanged
+        "opencode": "ANTHROPIC_API_KEY",
+        "aider":    "ANTHROPIC_API_KEY",   # Aider reads this natively
+        "codex":    "OPENAI_API_KEY",      # Codex uses OpenAI protocol; remap for proxy servers
+        "gemini":   "GOOGLE_API_KEY",      # Gemini uses Google key
+        "windsurf": "WINDSURF_API_KEY",    # Windsurf has its own key management
+    },
+    "GITHUB_TOKEN": {
+        "cursor":   "GITHUB_TOKEN",
+        "codex":    "GITHUB_TOKEN",
+        "gemini":   "GITHUB_TOKEN",
+        "opencode": "GITHUB_TOKEN",
+        "aider":    "GITHUB_TOKEN",
+        "windsurf": "GITHUB_TOKEN",
+        "cline":    "GITHUB_TOKEN",
+    },
+    "BRAVE_API_KEY": {
+        "cursor":   "BRAVE_API_KEY",
+        "codex":    "BRAVE_API_KEY",
+        "gemini":   "BRAVE_API_KEY",
+        "opencode": "BRAVE_API_KEY",
+        "aider":    "BRAVE_API_KEY",
+    },
+    "OPENAI_API_KEY": {
+        "cursor":   "OPENAI_API_KEY",
+        "codex":    "OPENAI_API_KEY",
+        "gemini":   "OPENAI_API_KEY",
+        "aider":    "OPENAI_API_KEY",
+        "opencode": "OPENAI_API_KEY",
+    },
+}
+
+# Path normalization: some harnesses need absolute paths where Claude Code uses relative
+_PATH_KEYS = frozenset({"cwd", "workdir", "rootDir", "root_dir", "working_dir"})
+
+
+def remap_mcp_env_vars(
+    mcp_servers: dict[str, dict],
+    target: str,
+    extra_remaps: dict[str, str] | None = None,
+) -> dict[str, dict]:
+    """Remap env var names within MCP server configs for a target harness.
+
+    Some harnesses (e.g. Codex) expect different env var names for the same
+    credentials. This function rewrites the ``env`` block of each server config
+    so that the correct variable names reach each harness.
+
+    Example::
+
+        # .mcp.json uses ANTHROPIC_API_KEY; Codex expects OPENAI_API_KEY for proxy
+        remapped = remap_mcp_env_vars({"my-proxy": {..., "env": {"ANTHROPIC_API_KEY": "..."}}}, "codex")
+        # → {"my-proxy": {..., "env": {"OPENAI_API_KEY": "..."}}}
+
+    Args:
+        mcp_servers: Dict mapping server_name -> server config.
+        target: Target harness name (e.g. "codex", "cursor").
+        extra_remaps: Optional additional {original_key: target_key} overrides
+                      that supplement the built-in mapping.
+
+    Returns:
+        New dict with env vars renamed in each server's ``env`` block.
+        Server configs without an ``env`` key are returned unchanged.
+    """
+    # Build the remap table for this target
+    remap: dict[str, str] = {}
+    for canonical, per_target in _MCP_ENV_VAR_REMAP.items():
+        target_name = per_target.get(target)
+        if target_name and target_name != canonical:
+            remap[canonical] = target_name
+    if extra_remaps:
+        remap.update(extra_remaps)
+
+    if not remap:
+        return dict(mcp_servers)
+
+    result: dict[str, dict] = {}
+    for server_name, config in mcp_servers.items():
+        if not isinstance(config, dict) or "env" not in config:
+            result[server_name] = config
+            continue
+
+        env = config.get("env", {})
+        if not isinstance(env, dict):
+            result[server_name] = config
+            continue
+
+        new_env: dict[str, str] = {}
+        for k, v in env.items():
+            new_key = remap.get(k, k)
+            new_env[new_key] = v
+
+        new_config = dict(config)
+        new_config["env"] = new_env
+        result[server_name] = new_config
+
+    return result
+
+
+def normalize_mcp_paths(
+    mcp_servers: dict[str, dict],
+    base_dir: str,
+) -> dict[str, dict]:
+    """Expand relative path values in MCP server configs to absolute paths.
+
+    Some harnesses require absolute paths in fields like ``cwd``, ``rootDir``,
+    or ``working_dir``. This function resolves relative values against ``base_dir``.
+
+    Args:
+        mcp_servers: Dict mapping server_name -> server config.
+        base_dir: Absolute base directory for resolving relative paths.
+
+    Returns:
+        New dict with relative paths expanded.
+    """
+    import os
+
+    result: dict[str, dict] = {}
+    for server_name, config in mcp_servers.items():
+        if not isinstance(config, dict):
+            result[server_name] = config
+            continue
+        new_config = dict(config)
+        for key in _PATH_KEYS:
+            val = new_config.get(key)
+            if isinstance(val, str) and val and not os.path.isabs(val):
+                new_config[key] = os.path.normpath(os.path.join(base_dir, val))
+        result[server_name] = new_config
+
+    return result

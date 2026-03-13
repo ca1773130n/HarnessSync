@@ -133,6 +133,52 @@ class HarnessComparisonReport:
     overall_scores: dict[str, float]     # target -> 0-100 compatibility score
     parity_gaps: dict[str, list[str]]    # target -> list of gap descriptions
 
+    def format_coverage_summary(self) -> str:
+        """Format per-harness coverage scores as a compact post-sync summary.
+
+        Produces one line per target in the style:
+            Codex:    87% of your Claude Code config is active here  (2 features have no equivalent)
+            Gemini:  100% of your Claude Code config is active here
+            Cursor:   62% of your Claude Code config is active here  (3 features have no equivalent)
+
+        Returns:
+            Multi-line string suitable for display after a sync operation.
+        """
+        if not self.overall_scores:
+            return "No coverage data available."
+
+        lines: list[str] = ["Config Coverage per Harness", "─" * 50]
+        for target in sorted(self.overall_scores):
+            score = self.overall_scores[target]
+            gaps = self.parity_gaps.get(target, [])
+            gap_count = len(gaps)
+            score_str = f"{score:.0f}%"
+            if gap_count > 0:
+                gap_note = f"  ({gap_count} feature{'s' if gap_count != 1 else ''} have no equivalent)"
+            else:
+                gap_note = ""
+            lines.append(f"  {target:<14} {score_str:>5} of your Claude Code config is active here{gap_note}")
+
+        return "\n".join(lines)
+
+    def format_gap_details(self) -> str:
+        """Return per-target gap details explaining what's missing and why.
+
+        Returns:
+            Multi-line string with gap explanations per target.
+        """
+        all_gaps: list[str] = []
+        for target in sorted(self.parity_gaps):
+            gaps = self.parity_gaps[target]
+            if not gaps:
+                continue
+            all_gaps.append(f"\n  {target}:")
+            for gap in gaps:
+                all_gaps.append(f"    • {gap}")
+        if not all_gaps:
+            return "No feature gaps detected across configured targets."
+        return "Feature Gap Details:" + "".join(all_gaps)
+
 
 class HarnessConfigComparison:
     """Compare how CLAUDE.md config translates across multiple harnesses.

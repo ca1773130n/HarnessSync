@@ -1231,3 +1231,117 @@ def format_variant_summary(skill_dir: Path) -> str:
                 "  Tip: Add SKILL.fallback.md to catch harnesses without a dedicated variant."
             )
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Item 11 — Translation Confidence Annotations (exact / approximate / lossy)
+# ---------------------------------------------------------------------------
+#
+# Every translated skill item gets a confidence level tag that tells users
+# at a glance how faithfully the translation preserves the original intent.
+#
+#   exact       — 100% semantically faithful; the target supports all features
+#   approximate — main intent preserved but some constructs were rewritten
+#   lossy       — significant capability drop; users should review manually
+
+
+class ConfidenceLevel:
+    """Translation confidence level constants."""
+    EXACT       = "exact"        # Score >= 90 and no CC constructs remain
+    APPROXIMATE = "approximate"  # Score 60-89 or minor rewrites applied
+    LOSSY       = "lossy"        # Score < 60 or MCP/tool calls dropped
+
+
+def compute_confidence_level(original: str, translated: str, target_name: str) -> str:
+    """Determine the confidence level for a translation.
+
+    Uses the existing scoring pipeline (score_translation) and additional
+    heuristics to classify the translation into exact / approximate / lossy.
+
+    Args:
+        original: Raw source content before translation.
+        translated: Content after translate_skill_content().
+        target_name: Target harness name.
+
+    Returns:
+        One of ConfidenceLevel.EXACT, APPROXIMATE, or LOSSY.
+    """
+    score_result = score_translation(original, translated, target_name)
+    score = score_result.get("score", 0)
+    tool_refs_original = score_result.get("tool_refs_original", 0)
+
+    # Lossy: significant content drop or CC tool refs still present after translation
+    mcp_pattern = re.compile(r"mcp__\w+__\w+")
+    has_mcp_refs = bool(mcp_pattern.search(translated))
+    has_tool_call_blocks = bool(_TOOL_CALL_BLOCK_RE.search(translated))
+
+    if score < 60 or has_mcp_refs or has_tool_call_blocks:
+        return ConfidenceLevel.LOSSY
+
+    # Exact: very high score, nothing was rewritten
+    if score >= 90 and tool_refs_original == 0 and score_result.get("frontmatter_keys_dropped", 0) == 0:
+        return ConfidenceLevel.EXACT
+
+    # Approximate: rewriting occurred but intent preserved
+    return ConfidenceLevel.APPROXIMATE
+
+
+def annotate_with_confidence(
+    original: str,
+    translated: str,
+    skill_name: str,
+    target_name: str,
+) -> str:
+    """Prepend a confidence annotation comment to translated content.
+
+    The annotation informs users and automated tooling of the translation
+    fidelity. Exact copies get a minimal note; lossy translations get a
+    detailed warning with what was dropped.
+
+    Format::
+
+        <!-- sync:confidence level=exact skill=my-skill target=gemini -->
+        <!-- sync:confidence level=approximate skill=my-skill target=codex
+             Rewrote 2 Claude Code tool reference(s): Read, Write -->
+        <!-- sync:confidence level=lossy skill=my-skill target=cursor
+             WARNING: MCP tool references remain — check manually
+             Score: 45/100 — significant content change -->
+
+    Args:
+        original: Raw source content.
+        translated: Translated content.
+        skill_name: Skill name for the annotation.
+        target_name: Target harness name.
+
+    Returns:
+        Translated content with confidence annotation prepended.
+    """
+    level = compute_confidence_level(original, translated, target_name)
+    score_result = score_translation(original, translated, target_name)
+    score = score_result.get("score", 0)
+    notes = score_result.get("notes", [])
+
+    if level == ConfidenceLevel.EXACT:
+        annotation = (
+            f"<!-- sync:confidence level=exact skill={skill_name} target={target_name} -->\n"
+        )
+    elif level == ConfidenceLevel.APPROXIMATE:
+        detail_lines = [
+            f"<!-- sync:confidence level=approximate skill={skill_name} target={target_name}"
+        ]
+        for note in notes[:3]:
+            detail_lines.append(f"     {note}")
+        detail_lines.append("-->")
+        annotation = "\n".join(detail_lines) + "\n"
+    else:  # LOSSY
+        detail_lines = [
+            f"<!-- sync:confidence level=lossy skill={skill_name} target={target_name}",
+            "     WARNING: Translation may not preserve full behavior — review manually",
+            f"     Score: {score}/100",
+        ]
+        for note in notes[:3]:
+            detail_lines.append(f"     {note}")
+        detail_lines.append("-->")
+        annotation = "\n".join(detail_lines) + "\n"
+
+    return annotation + translated

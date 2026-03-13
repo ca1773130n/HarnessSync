@@ -16,10 +16,9 @@ Or as a blocking watch mode:
     watcher.watch_blocking() # block until Ctrl-C
 """
 
-import difflib
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -604,7 +603,6 @@ def make_notifying_alert_callback(
         Alert callback function compatible with DriftWatcher.alert_callback.
     """
     import os as _os
-    from typing import Callable
 
     # Resolve Slack webhook: explicit arg takes precedence over env var
     _slack_url = slack_webhook_url or _os.environ.get("HARNESSSYNC_SLACK_WEBHOOK", "").strip()
@@ -1136,3 +1134,231 @@ class ZeroDriftGuarantee:
                     self._revert_log = self._revert_log[-self._REVERT_LOG_MAX :]
 
         return violations
+
+
+# ---------------------------------------------------------------------------
+# Item 27 — Source Change Watcher (Auto-Sync on File Save)
+# ---------------------------------------------------------------------------
+#
+# Unlike DriftWatcher which monitors target harness outputs for external edits,
+# SourceChangeWatcher monitors the Claude Code *source* files (CLAUDE.md,
+# .claude/) for changes and triggers an auto-sync callback when they change.
+# This provides the "sync within seconds of any CLAUDE.md or .claude/ file
+# change" UX described in the feature spec.
+
+
+class SourceChangeWatcher:
+    """Watch Claude Code source files and auto-trigger sync on change.
+
+    Monitors ``CLAUDE.md`` and the ``.claude/`` directory (rules, skills,
+    agents, commands, settings) for file content changes. When a change is
+    detected the ``sync_callback`` is called so the caller can run a sync.
+
+    Internally hashes each watched file; when a hash changes, the file is
+    included in the change notification passed to the callback.
+
+    Usage::
+
+        def my_sync(changed_files):
+            print(f"Changed: {changed_files}")
+            # ... run orchestrator.sync_all() ...
+
+        watcher = SourceChangeWatcher(project_dir, sync_callback=my_sync)
+        watcher.start()          # non-blocking background thread
+        watcher.watch_blocking() # or blocking until Ctrl-C
+        watcher.stop()
+    """
+
+    # Source paths watched by default (relative to project_dir)
+    DEFAULT_SOURCE_PATHS: list[str] = [
+        "CLAUDE.md",
+        ".claude/CLAUDE.md",
+        ".claude/rules",
+        ".claude/skills",
+        ".claude/agents",
+        ".claude/commands",
+        ".claude/settings.json",
+        ".mcp.json",
+    ]
+
+    def __init__(
+        self,
+        project_dir: Path,
+        sync_callback: Callable[[list[str]], None],
+        poll_interval: float = 2.0,
+        extra_paths: list[str] | None = None,
+        debounce_seconds: float = 1.0,
+    ):
+        """Initialise the source change watcher.
+
+        Args:
+            project_dir: Project root directory (base for relative source paths).
+            sync_callback: Called with a list of changed file paths (relative to
+                           project_dir) when one or more source files change.
+            poll_interval: Seconds between each file check (default: 2.0).
+            extra_paths: Additional paths/directories to watch.
+            debounce_seconds: Minimum seconds between successive auto-sync calls.
+                              Prevents rapid-fire syncs when an editor saves many
+                              files at once (default: 1.0).
+        """
+        self.project_dir = project_dir
+        self.sync_callback = sync_callback
+        self.poll_interval = poll_interval
+        self.debounce_seconds = debounce_seconds
+
+        watched = list(self.DEFAULT_SOURCE_PATHS)
+        if extra_paths:
+            watched.extend(extra_paths)
+        self._watch_paths: list[str] = watched
+
+        # File hash snapshot: relative_path -> hash string
+        self._hashes: dict[str, str] = {}
+        self._last_sync_time: float = 0.0
+
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+
+        # Take initial snapshot
+        self._snapshot()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def start(self) -> None:
+        """Start background source-change polling (non-blocking)."""
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._poll_loop,
+            name="harnesssync-source-watcher",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Signal the watcher to stop and wait for its thread to exit."""
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self.poll_interval + 2)
+            self._thread = None
+
+    def is_running(self) -> bool:
+        """Return True if the watcher thread is alive."""
+        return self._thread is not None and self._thread.is_alive()
+
+    def watch_blocking(self) -> None:
+        """Run source-change detection in the current thread until interrupted.
+
+        Blocks until KeyboardInterrupt (Ctrl-C) or ``stop()`` is called from
+        another thread.
+        """
+        print("HarnessSync Source Watcher — monitoring CLAUDE.md and .claude/ for changes...")
+        print(f"Poll interval: {self.poll_interval}s  |  Press Ctrl-C to stop\n")
+        try:
+            while not self._stop_event.is_set():
+                self._check_once()
+                self._stop_event.wait(timeout=self.poll_interval)
+        except KeyboardInterrupt:
+            print("\nSource watcher stopped.")
+
+    def check_and_sync(self) -> list[str]:
+        """Run a single check and trigger sync if anything changed.
+
+        Can be called manually (e.g. from a git hook) without starting
+        the background thread.
+
+        Returns:
+            List of changed file paths that triggered the sync, or empty
+            list if nothing changed.
+        """
+        return self._check_once()
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _collect_paths(self) -> list[Path]:
+        """Expand watch_paths to concrete file paths that exist."""
+        paths: list[Path] = []
+        for rel in self._watch_paths:
+            p = self.project_dir / rel
+            if p.is_file():
+                paths.append(p)
+            elif p.is_dir():
+                # Recursively include all files in the directory
+                for child in sorted(p.rglob("*")):
+                    if child.is_file():
+                        paths.append(child)
+        return paths
+
+    def _snapshot(self) -> None:
+        """Take a fresh hash snapshot of all watched files."""
+        with self._lock:
+            new_hashes: dict[str, str] = {}
+            for path in self._collect_paths():
+                try:
+                    rel = str(path.relative_to(self.project_dir))
+                except ValueError:
+                    rel = str(path)
+                h = hash_file_sha256(path) or ""
+                new_hashes[rel] = h
+            self._hashes = new_hashes
+
+    def _check_once(self) -> list[str]:
+        """Check for changes and trigger sync_callback if needed.
+
+        Returns:
+            List of changed relative file paths.
+        """
+        changed: list[str] = []
+
+        with self._lock:
+            for path in self._collect_paths():
+                try:
+                    rel = str(path.relative_to(self.project_dir))
+                except ValueError:
+                    rel = str(path)
+                current_hash = hash_file_sha256(path) or ""
+                stored_hash = self._hashes.get(rel, "")
+                if current_hash != stored_hash:
+                    changed.append(rel)
+                    self._hashes[rel] = current_hash
+
+            # Also detect newly-created files not in previous snapshot
+            for path in self._collect_paths():
+                try:
+                    rel = str(path.relative_to(self.project_dir))
+                except ValueError:
+                    rel = str(path)
+                if rel not in self._hashes:
+                    current_hash = hash_file_sha256(path) or ""
+                    self._hashes[rel] = current_hash
+                    changed.append(rel)
+
+        if not changed:
+            return []
+
+        # Debounce: avoid rapid-fire syncs
+        now = time.time()
+        if now - self._last_sync_time < self.debounce_seconds:
+            return changed  # Changed detected but not triggering sync yet
+
+        self._last_sync_time = now
+        try:
+            self.sync_callback(changed)
+        except Exception:
+            pass  # Don't let sync errors crash the watcher thread
+
+        return changed
+
+    def _poll_loop(self) -> None:
+        """Background thread loop."""
+        while not self._stop_event.is_set():
+            try:
+                self._check_once()
+            except Exception:
+                pass
+            self._stop_event.wait(timeout=self.poll_interval)
