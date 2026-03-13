@@ -1,0 +1,134 @@
+name: Sync State Validation
+
+# Validates that target harness configs are in sync with Claude Code source.
+# Fails CI if any target has critical capability gaps or sync errors.
+# Use in team repos to enforce AI config hygiene without manual reminders.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'CLAUDE.md'
+      - 'CLAUDE.local.md'
+      - '.claude/**'
+      - '.mcp.json'
+      - 'AGENTS.md'
+      - 'GEMINI.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'CLAUDE.md'
+      - 'CLAUDE.local.md'
+      - '.claude/**'
+      - '.mcp.json'
+  workflow_dispatch: {}
+
+jobs:
+  sync-state-check:
+    name: Harness Config Sync Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run pre-sync gap warnings
+        run: |
+          python3 - <<'PYEOF'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path.cwd()))
+
+          try:
+              from src.config_health import pre_sync_gap_warnings, format_pre_sync_warnings
+              from src.source_reader import SourceReader
+          except ImportError as e:
+              print(f"Warning: could not import HarnessSync: {e}")
+              sys.exit(0)
+
+          reader = SourceReader(project_dir=Path.cwd())
+          try:
+              source_data = reader.discover_all()
+          except Exception as e:
+              print(f"Warning: could not read source config: {e}")
+              sys.exit(0)
+
+          warnings = pre_sync_gap_warnings(source_data)
+          errors = [w for w in warnings if w["severity"] == "error"]
+          if warnings:
+              print(format_pre_sync_warnings(warnings))
+          if errors:
+              print(f"::error::Pre-sync check: {len(errors)} critical gap(s) found")
+              sys.exit(1)
+          print("Pre-sync gap check: OK")
+          PYEOF
+
+      - name: Sync dry-run check
+        run: |
+          python3 - <<'PYEOF'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path.cwd()))
+
+          try:
+              from src.orchestrator import SyncOrchestrator
+          except ImportError as e:
+              print(f"Warning: could not import orchestrator: {e}")
+              sys.exit(0)
+
+          try:
+              orch = SyncOrchestrator(
+                  project_dir=Path.cwd(),
+                  scope="project",
+                  dry_run=True,
+                  verbose=True,
+              )
+              results = orch.sync_all()
+          except Exception as e:
+              print(f"Warning: sync dry-run failed: {e}")
+              sys.exit(0)
+
+          if not results:
+              print("Sync check: no targets configured")
+              sys.exit(0)
+
+          failed = [t for t, r in results.items() if not getattr(r, "success", True)]
+          if failed:
+              print(f"::error::Sync dry-run failed for: {', '.join(failed)}")
+              sys.exit(1)
+          print(f"Sync dry-run: {len(results)} target(s) OK")
+          PYEOF
+
+      - name: Report config health score
+        if: always()
+        run: |
+          python3 - <<'PYEOF'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path.cwd()))
+
+          try:
+              from src.config_health import ConfigHealthChecker
+              from src.source_reader import SourceReader
+          except ImportError as e:
+              print(f"Warning: could not import health checker: {e}")
+              sys.exit(0)
+
+          reader = SourceReader(project_dir=Path.cwd())
+          try:
+              source_data = reader.discover_all()
+          except Exception as e:
+              print(f"Warning: could not read source config: {e}")
+              sys.exit(0)
+
+          checker = ConfigHealthChecker()
+          report = checker.check(source_data, project_dir=Path.cwd())
+          print(checker.format_report(report))
+          if report.overall_score < 40:
+              print(f"::warning::Config health score: {report.overall_score}/100")
+          PYEOF

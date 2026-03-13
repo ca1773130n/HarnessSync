@@ -282,3 +282,132 @@ def describe_active_profile(profile: BranchProfile, branch: str) -> str:
     if profile.scope:
         lines.append(f"  Scope override: {profile.scope}")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Git Activity-Based Smart Sync Scheduling (item 28)
+# ---------------------------------------------------------------------------
+
+
+def get_git_commit_frequency(
+    repo_dir: Path,
+    lookback_days: int = 7,
+) -> float:
+    """Measure recent git commit frequency in commits per day.
+
+    Args:
+        repo_dir: Git repository root directory.
+        lookback_days: How many days of history to analyze.
+
+    Returns:
+        Average commits per day over the lookback window.
+        Returns 0.0 if git is unavailable or no commits found.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "git", "log",
+                f"--since={lookback_days} days ago",
+                "--oneline",
+                "--no-merges",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(repo_dir),
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return 0.0
+        commit_lines = [l for l in result.stdout.strip().splitlines() if l.strip()]
+        return len(commit_lines) / max(1, lookback_days)
+    except (OSError, subprocess.TimeoutExpired):
+        return 0.0
+
+
+def recommend_sync_interval_seconds(
+    repo_dir: Path,
+    base_cooldown: int = 300,
+    active_cooldown: int = 60,
+    quiet_cooldown: int = 1800,
+    active_threshold: float = 5.0,
+    quiet_threshold: float = 0.5,
+) -> int:
+    """Recommend a sync cooldown interval based on git commit activity.
+
+    During active dev sprints (many commits), sync more aggressively so
+    config changes propagate quickly. During quiet periods, back off to
+    reduce unnecessary syncs.
+
+    Activity levels:
+        active:  >= active_threshold commits/day → active_cooldown seconds
+        normal:  between thresholds              → base_cooldown seconds
+        quiet:   <= quiet_threshold commits/day  → quiet_cooldown seconds
+
+    Args:
+        repo_dir: Git repository root.
+        base_cooldown: Normal sync interval in seconds (default 300 = 5 min).
+        active_cooldown: Fast sync interval during active sprints (default 60s).
+        quiet_cooldown: Slow sync interval during quiet periods (default 30 min).
+        active_threshold: Commits/day to be considered "active" (default 5).
+        quiet_threshold: Commits/day to be considered "quiet" (default 0.5).
+
+    Returns:
+        Recommended sync cooldown in seconds.
+    """
+    freq = get_git_commit_frequency(repo_dir)
+
+    if freq >= active_threshold:
+        return active_cooldown
+    elif freq <= quiet_threshold:
+        return quiet_cooldown
+    else:
+        return base_cooldown
+
+
+def get_activity_label(repo_dir: Path) -> str:
+    """Return a human-readable activity label for the current repository.
+
+    Args:
+        repo_dir: Git repository root.
+
+    Returns:
+        One of: "active sprint", "normal", "quiet"
+    """
+    freq = get_git_commit_frequency(repo_dir)
+    if freq >= 5.0:
+        return "active sprint"
+    elif freq <= 0.5:
+        return "quiet"
+    else:
+        return "normal"
+
+
+def adaptive_cooldown(
+    repo_dir: Path,
+    env_override: str | None = None,
+) -> int:
+    """Return the recommended sync cooldown, respecting env var overrides.
+
+    Checks HARNESSSYNC_COOLDOWN env var first; falls back to the git
+    activity-based recommendation.
+
+    Args:
+        repo_dir: Git repository root for activity measurement.
+        env_override: Override value string (from HARNESSSYNC_COOLDOWN env var).
+                      If None, reads from environment automatically.
+
+    Returns:
+        Cooldown interval in seconds.
+    """
+    import os
+
+    if env_override is None:
+        env_override = os.environ.get("HARNESSSYNC_COOLDOWN", "")
+
+    if env_override:
+        try:
+            return max(0, int(env_override))
+        except ValueError:
+            pass
+
+    return recommend_sync_interval_seconds(repo_dir)

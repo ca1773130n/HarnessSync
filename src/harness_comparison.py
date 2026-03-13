@@ -415,3 +415,219 @@ class HarnessConfigComparison:
         cmp = cls()
         report = cmp.compare(source_data, targets=targets, rules_content=rules_content)
         return cmp, report
+
+
+# ---------------------------------------------------------------------------
+# Behavioral Equivalence Testing (item 26)
+# ---------------------------------------------------------------------------
+
+
+def run_behavioral_equivalence_test(
+    project_dir: Path,
+    targets: list[str] | None = None,
+) -> "BehavioralEquivalenceReport":
+    """Test behavioral equivalence across synced harnesses.
+
+    Checks that each harness's synced config faithfully represents the key
+    rules from Claude Code. Flags harnesses with low rule coverage so users
+    know when a sync approximation isn't working as intended.
+
+    This is a static test — no live CLI calls. It checks:
+    1. That key rule phrases from CLAUDE.md appear in each target's config
+    2. Coverage percentage per harness (probes found / probes total)
+    3. Which specific rules are missing per harness
+
+    Args:
+        project_dir: Project root directory.
+        targets: Harnesses to test. Defaults to all detected.
+
+    Returns:
+        BehavioralEquivalenceReport with per-target coverage results.
+    """
+    import re as _re
+
+    if targets is None:
+        try:
+            from src.adapters import AdapterRegistry
+            targets = AdapterRegistry.list_targets()
+        except Exception:
+            targets = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"]
+
+    # Discover source rules
+    source_rules = ""
+    for candidate in [
+        project_dir / "CLAUDE.md",
+        project_dir / ".claude" / "CLAUDE.md",
+        Path.home() / ".claude" / "CLAUDE.md",
+    ]:
+        if candidate.is_file():
+            try:
+                source_rules = candidate.read_text(encoding="utf-8")
+                break
+            except OSError:
+                pass
+
+    probes = _extract_rule_probes(source_rules)
+
+    # Target config file locations
+    _TARGET_RULES_FILES: dict[str, list[str]] = {
+        "codex":    ["AGENTS.md", ".codex/AGENTS.md"],
+        "gemini":   ["GEMINI.md", ".gemini/GEMINI.md"],
+        "opencode": [".opencode/AGENTS.md"],
+        "cursor":   [".cursor/rules/claude-code-rules.mdc"],
+        "aider":    ["CONVENTIONS.md"],
+        "windsurf": [".windsurfrules"],
+        "cline":    [".clinerules", ".roo/rules/harnesssync.md"],
+        "continue": [".continue/rules/harnesssync.md"],
+        "zed":      [".zed/system-prompt.md"],
+        "neovim":   [".avante/system-prompt.md"],
+    }
+
+    results: dict[str, dict] = {}
+    for target in targets:
+        target_content = ""
+        config_found = False
+
+        for rel_path in _TARGET_RULES_FILES.get(target, []):
+            candidate = project_dir / rel_path
+            if candidate.is_file():
+                try:
+                    target_content = candidate.read_text(encoding="utf-8")
+                    config_found = True
+                    break
+                except OSError:
+                    pass
+
+        if not config_found:
+            results[target] = {
+                "status": "missing",
+                "config_found": False,
+                "probes_found": 0,
+                "probes_total": len(probes),
+                "coverage_pct": 0.0,
+                "missing_probes": list(probes[:5]),
+                "notes": "Target config file not found — run /sync first",
+            }
+            continue
+
+        content_lower = target_content.lower()
+        found_probes: list[str] = []
+        missing_probes: list[str] = []
+
+        for probe in probes:
+            probe_words = [w for w in _re.split(r"\W+", probe.lower()) if len(w) > 3]
+            if probe_words and all(w in content_lower for w in probe_words[:3]):
+                found_probes.append(probe)
+            else:
+                missing_probes.append(probe)
+
+        total = len(probes)
+        found = len(found_probes)
+        coverage = found / total if total > 0 else 1.0
+        status = "ok" if coverage >= 0.8 else ("warn" if coverage >= 0.5 else "fail")
+
+        results[target] = {
+            "status": status,
+            "config_found": True,
+            "probes_found": found,
+            "probes_total": total,
+            "coverage_pct": round(coverage * 100, 1),
+            "missing_probes": missing_probes[:5],
+            "notes": "",
+        }
+
+    return BehavioralEquivalenceReport(
+        project_dir=str(project_dir),
+        targets=targets,
+        probes=probes,
+        results=results,
+    )
+
+
+def _extract_rule_probes(rules_content: str, max_probes: int = 10) -> list[str]:
+    """Extract key rule phrases from CLAUDE.md to use as behavioral test probes.
+
+    Args:
+        rules_content: CLAUDE.md text content.
+        max_probes: Maximum number of probes to extract.
+
+    Returns:
+        List of short probe strings (first sentence of each bullet point).
+    """
+    import re as _re
+
+    probes: list[str] = []
+    for line in rules_content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("<!--"):
+            continue
+        m = _re.match(r"^[-*•]\s+(.+)$|^\d+\.\s+(.+)$", stripped)
+        if m:
+            probe = (m.group(1) or m.group(2) or "").strip()
+            if len(probe) > 10:
+                probes.append(probe[:80])
+            if len(probes) >= max_probes:
+                break
+    return probes
+
+
+class BehavioralEquivalenceReport:
+    """Result of a behavioral equivalence test across harnesses."""
+
+    def __init__(
+        self,
+        project_dir: str,
+        targets: list[str],
+        probes: list[str],
+        results: dict[str, dict],
+    ):
+        self.project_dir = project_dir
+        self.targets = targets
+        self.probes = probes
+        self.results = results
+
+    @property
+    def has_failures(self) -> bool:
+        return any(r.get("status") == "fail" for r in self.results.values())
+
+    def format(self) -> str:
+        """Return a human-readable equivalence report."""
+        lines = ["Cross-Harness Behavioral Equivalence Report", "=" * 55, ""]
+
+        if not self.probes:
+            lines.append("No rule probes extracted — add rules to CLAUDE.md to enable testing.")
+            return "\n".join(lines)
+
+        lines.append(f"Rule probes checked: {len(self.probes)}")
+        lines.append("")
+
+        status_icons = {"ok": "✓", "warn": "~", "fail": "✗", "missing": "—"}
+
+        for target in self.targets:
+            r = self.results.get(target, {})
+            status = r.get("status", "missing")
+            icon = status_icons.get(status, "?")
+            cov = r.get("coverage_pct", 0.0)
+            found = r.get("probes_found", 0)
+            total = r.get("probes_total", 0)
+            lines.append(f"  {icon} {target:<12} {cov:5.1f}% coverage ({found}/{total} probes)")
+
+            for probe in r.get("missing_probes", [])[:3]:
+                lines.append(f"       ✗ {probe[:60]!r}")
+
+            notes = r.get("notes", "")
+            if notes:
+                lines.append(f"       ℹ {notes}")
+
+        lines.append("")
+        lines.append("Coverage: ✓ ≥80%  ~ ≥50%  ✗ <50%  — config not found")
+
+        if self.has_failures:
+            failing = [t for t, r in self.results.items() if r.get("status") == "fail"]
+            lines.append(
+                f"\nAction needed: {len(failing)} harness(es) have low rule coverage: "
+                + ", ".join(failing)
+            )
+            lines.append("Run /sync to resync, or check sync tag filtering with /sync-matrix.")
+
+        return "\n".join(lines)

@@ -340,6 +340,200 @@ def _score_bar(score: int, width: int = 20) -> str:
     return "[" + "█" * filled + "░" * (width - filled) + "]"
 
 
+def pre_sync_gap_warnings(
+    source_data: dict,
+    targets: list[str] | None = None,
+) -> list[dict]:
+    """Warn about source settings that have no equivalent in target harnesses.
+
+    Call this BEFORE syncing to give users a chance to decide how to handle
+    settings that will be silently dropped or approximated. Unlike the health
+    score (post-hoc aggregate), each warning here is actionable and specific.
+
+    Args:
+        source_data: Output of SourceReader.discover_all()
+        targets: Target harness names to check (default: all registered).
+
+    Returns:
+        List of warning dicts, each with:
+            - target: str — which harness this affects
+            - setting: str — the setting/field that has no equivalent
+            - severity: "info" | "warn" | "error"
+            - message: str — human-readable explanation
+            - suggestion: str — closest approximation or workaround
+    """
+    if targets is None:
+        try:
+            from src.adapters import AdapterRegistry
+            targets = AdapterRegistry.list_targets()
+        except Exception:
+            targets = list(_TARGET_NATIVE_FRACTIONS.keys())
+
+    warnings: list[dict] = []
+    settings = source_data.get("settings", {})
+    mcp_servers = source_data.get("mcp_servers", {})
+    has_agents = bool(source_data.get("agents"))
+    has_commands = bool(source_data.get("commands"))
+
+    # Per-target gap matrix: setting_key -> {target: (severity, message, suggestion)}
+    _GAPS: dict[str, dict[str, tuple[str, str, str]]] = {
+        "allowedTools": {
+            "gemini": (
+                "warn",
+                "Claude Code tool allowlist has no direct Gemini equivalent",
+                "Add '<!-- sync:gemini-only --> Use caution with tool execution' to GEMINI.md",
+            ),
+            "aider": (
+                "warn",
+                "Claude Code tool allowlist has no Aider equivalent",
+                "Consider adding tool guidance to CONVENTIONS.md instead",
+            ),
+        },
+        "deniedTools": {
+            "gemini": (
+                "error",
+                "Claude Code tool denylist has no Gemini equivalent — denied tools will not be blocked",
+                "Add explicit instructions in GEMINI.md: '<!-- sync:gemini-only --> Do not use: <tool>'",
+            ),
+            "aider": (
+                "error",
+                "Claude Code tool denylist has no Aider equivalent",
+                "Add explicit tool restrictions to CONVENTIONS.md for Aider",
+            ),
+            "cursor": (
+                "warn",
+                "Claude Code tool denylist maps partially to Cursor rules",
+                "Check .cursor/rules/ for any injected deny guidance after sync",
+            ),
+        },
+        "approvalMode": {
+            "aider": (
+                "info",
+                "Claude Code approvalMode has no Aider equivalent (Aider always requires per-change approval)",
+                "No action needed — Aider's default behavior is to confirm each edit",
+            ),
+        },
+        "env": {
+            "gemini": (
+                "warn",
+                "Environment variables in settings.json are not forwarded to Gemini CLI",
+                "Add required env vars to ~/.gemini/.env manually or via /sync-setup",
+            ),
+        },
+    }
+
+    for setting_key, target_map in _GAPS.items():
+        if not settings.get(setting_key):
+            continue
+        for target in targets:
+            if target not in target_map:
+                continue
+            severity, message, suggestion = target_map[target]
+            warnings.append({
+                "target": target,
+                "setting": setting_key,
+                "severity": severity,
+                "message": message,
+                "suggestion": suggestion,
+            })
+
+    # Warn about agents for harnesses that convert rather than support them natively
+    _NO_AGENT_SUPPORT = {"aider", "windsurf", "cursor"}
+    if has_agents:
+        for target in targets:
+            if target in _NO_AGENT_SUPPORT:
+                warnings.append({
+                    "target": target,
+                    "setting": "agents",
+                    "severity": "info",
+                    "message": f"{target} has no native agent system — agents will be converted to rules",
+                    "suggestion": "Agent content will be inlined as instructions; review after sync",
+                })
+
+    # Warn about slash commands for harnesses that don't support them
+    _NO_COMMAND_SUPPORT = {"aider", "gemini"}
+    if has_commands:
+        for target in targets:
+            if target in _NO_COMMAND_SUPPORT:
+                warnings.append({
+                    "target": target,
+                    "setting": "commands",
+                    "severity": "info",
+                    "message": f"{target} has no slash command system — commands will be summarized or dropped",
+                    "suggestion": "Key commands will be documented as instructions in the target's rules file",
+                })
+
+    # Warn about URL-based MCP servers for targets that only support stdio
+    url_mcp_servers = {
+        k: v for k, v in mcp_servers.items()
+        if v.get("type") == "url" or v.get("url")
+    }
+    if url_mcp_servers:
+        _NO_URL_MCP = {"aider", "cursor"}
+        for target in targets:
+            if target in _NO_URL_MCP:
+                names = ", ".join(list(url_mcp_servers.keys())[:3])
+                if len(url_mcp_servers) > 3:
+                    names += f" (+{len(url_mcp_servers) - 3} more)"
+                warnings.append({
+                    "target": target,
+                    "setting": "mcp_url_servers",
+                    "severity": "warn",
+                    "message": f"{target} does not support remote/URL MCP servers ({names})",
+                    "suggestion": "These MCP servers will be skipped for this target — use stdio-based servers instead",
+                })
+
+    return warnings
+
+
+def format_pre_sync_warnings(warnings: list[dict]) -> str:
+    """Format pre-sync gap warnings as human-readable text.
+
+    Args:
+        warnings: Output of pre_sync_gap_warnings().
+
+    Returns:
+        Formatted string, or empty string if no warnings.
+    """
+    if not warnings:
+        return ""
+
+    errors = [w for w in warnings if w["severity"] == "error"]
+    warns = [w for w in warnings if w["severity"] == "warn"]
+    infos = [w for w in warnings if w["severity"] == "info"]
+
+    lines = ["Pre-Sync Capability Gap Warnings", "=" * 50, ""]
+
+    for w in errors:
+        lines.append(f"  ✗ [{w['target'].upper()}] {w['setting']}: {w['message']}")
+        lines.append(f"    → {w['suggestion']}")
+        lines.append("")
+
+    for w in warns:
+        lines.append(f"  ⚠ [{w['target'].upper()}] {w['setting']}: {w['message']}")
+        lines.append(f"    → {w['suggestion']}")
+        lines.append("")
+
+    for w in infos:
+        lines.append(f"  ℹ [{w['target'].upper()}] {w['setting']}: {w['message']}")
+        lines.append(f"    → {w['suggestion']}")
+        lines.append("")
+
+    summary_parts = []
+    if errors:
+        summary_parts.append(f"{len(errors)} error(s)")
+    if warns:
+        summary_parts.append(f"{len(warns)} warning(s)")
+    if infos:
+        summary_parts.append(f"{len(infos)} info(s)")
+
+    lines.append("Summary: " + ", ".join(summary_parts))
+    if errors:
+        lines.append("Errors indicate settings that will be silently dropped — review before syncing.")
+
+    return "\n".join(lines)
+
+
 def get_drift_analytics(state_manager, targets: list[str] | None = None) -> dict:
     """Compute drift frequency and age analytics for all configured targets.
 
