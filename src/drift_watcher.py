@@ -16,12 +16,14 @@ Or as a blocking watch mode:
     watcher.watch_blocking() # block until Ctrl-C
 """
 
+import difflib
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+from difflib import unified_diff
 
 from src.state_manager import StateManager
 from src.utils.hashing import hash_file_sha256
@@ -61,6 +63,155 @@ class DriftAlert:
             f"[{ts}] DRIFT ALERT — {self.target}: {self.file_path} was modified outside HarnessSync\n"
             f"  Run /sync-restore to restore, or /sync to accept manual edits as new baseline."
         )
+
+
+@dataclass
+class DriftRootCause:
+    """Detailed root cause analysis for a drift event."""
+
+    alert: DriftAlert
+    lines_added: list[tuple[int, str]]    # (line_num, text) new lines
+    lines_removed: list[tuple[int, str]]  # (line_num, text) removed lines
+    lines_modified: int                    # count of changed lines
+    likely_cause: str                      # human-readable explanation
+    diff_text: str                         # unified diff string
+    suggested_action: str                  # what to do about it
+
+
+# Heuristic patterns for root-cause inference
+_VERSION_PATTERNS = (
+    "version:",
+    "\"version\"",
+    "# version",
+    "v0.", "v1.", "v2.", "v3.", "v4.", "v5.", "v6.", "v7.", "v8.", "v9.",
+)
+_ENV_VAR_PATTERNS = (
+    "=",          # KEY=VALUE lines
+    "export ",
+    "api_key",
+    "api-key",
+    "token",
+    "secret",
+    "password",
+    "passwd",
+)
+
+
+def analyze_drift_root_cause(
+    alert: DriftAlert,
+    stored_content: str,
+    current_content: str,
+) -> DriftRootCause:
+    """Generate a detailed root-cause analysis for a drift event.
+
+    Compares stored_content (what HarnessSync last wrote) with current_content
+    (what the file contains now) to explain what changed and why it likely
+    drifted, plus what the user should do about it.
+
+    Args:
+        alert: The DriftAlert that triggered this analysis.
+        stored_content: File content at last HarnessSync write (source of truth).
+        current_content: Current on-disk content of the drifted file.
+
+    Returns:
+        DriftRootCause with diff, line counts, likely cause, and action.
+    """
+    stored_lines = stored_content.splitlines(keepends=True)
+    current_lines = current_content.splitlines(keepends=True)
+
+    file_label = alert.file_path
+    diff_lines = list(
+        unified_diff(
+            stored_lines,
+            current_lines,
+            fromfile=f"harnesssync/{file_label}",
+            tofile=f"current/{file_label}",
+            lineterm="",
+        )
+    )
+    diff_text = "\n".join(diff_lines)
+
+    # Collect added/removed lines with line numbers
+    added: list[tuple[int, str]] = []
+    removed: list[tuple[int, str]] = []
+    current_line_num = 0
+    stored_line_num = 0
+
+    for raw_line in diff_lines:
+        if raw_line.startswith("@@"):
+            # Parse hunk header to reset counters: @@ -a,b +c,d @@
+            try:
+                parts = raw_line.split(" ")
+                plus_part = next(p for p in parts if p.startswith("+"))
+                current_line_num = int(plus_part[1:].split(",")[0]) - 1
+                minus_part = next(p for p in parts if p.startswith("-"))
+                stored_line_num = int(minus_part[1:].split(",")[0]) - 1
+            except (ValueError, StopIteration):
+                pass
+            continue
+        if raw_line.startswith("---") or raw_line.startswith("+++"):
+            continue
+        if raw_line.startswith("+"):
+            current_line_num += 1
+            added.append((current_line_num, raw_line[1:].rstrip("\n")))
+        elif raw_line.startswith("-"):
+            stored_line_num += 1
+            removed.append((stored_line_num, raw_line[1:].rstrip("\n")))
+        else:
+            current_line_num += 1
+            stored_line_num += 1
+
+    # Estimate modified lines as min(added, removed) — paired changes
+    lines_modified = min(len(added), len(removed))
+
+    # ------------------------------------------------------------------ #
+    # Heuristic root-cause inference                                       #
+    # ------------------------------------------------------------------ #
+    all_changed_text = " ".join(t for _, t in added + removed).lower()
+
+    # 1. Only whitespace changed
+    if stored_content.strip() == current_content.strip() and stored_content != current_content:
+        likely_cause = "Whitespace normalization (trailing spaces, newlines)"
+        suggested_action = "Run /sync to restore canonical formatting"
+
+    # 2. Version strings changed (self-update)
+    elif any(pat.lower() in all_changed_text for pat in _VERSION_PATTERNS) and (
+        added and removed
+    ):
+        likely_cause = "Harness self-update modified config file"
+        suggested_action = "Run /sync-check to verify harness update compatibility"
+
+    # 3. Environment variable / secret values changed
+    elif any(pat.lower() in all_changed_text for pat in _ENV_VAR_PATTERNS) and (
+        added and removed
+    ):
+        likely_cause = "Environment variable update (possible secret rotation)"
+        suggested_action = "Run /sync-diff to review changes, then /sync to restore"
+
+    # 4. Pure addition (no lines removed)
+    elif added and not removed:
+        likely_cause = "Manual addition of new config section"
+        suggested_action = "Run /sync-merge to incorporate manual additions, or /sync to overwrite"
+
+    # 5. Pure deletion (no lines added)
+    elif removed and not added:
+        likely_cause = "Manual deletion of synced content"
+        suggested_action = "Run /sync to restore deleted content"
+
+    # 6. Default — mixed manual edit
+    else:
+        likely_cause = "Manual edit to synced config file"
+        suggested_action = "Run /sync-diff to review changes, then /sync to restore"
+
+    return DriftRootCause(
+        alert=alert,
+        lines_added=added,
+        lines_removed=removed,
+        lines_modified=lines_modified,
+        likely_cause=likely_cause,
+        diff_text=diff_text,
+        suggested_action=suggested_action,
+    )
 
 
 class DriftWatcher:
@@ -205,6 +356,66 @@ class DriftWatcher:
         """
         key = (target, file_path)
         self._alerted.discard(key)
+
+    def get_root_cause(self, alert: DriftAlert) -> DriftRootCause | None:
+        """Return a detailed root-cause analysis for a drift alert.
+
+        Reads the stored (source-of-truth) content from the HarnessSync state
+        and the current on-disk content of the drifted file, then delegates to
+        :func:`analyze_drift_root_cause` for diff generation and heuristic
+        cause inference.
+
+        The "stored" content is the project-level source file that HarnessSync
+        last synced FROM (e.g. CLAUDE.md in project_dir). The state manager's
+        file_hashes track paths of TARGET files; to retrieve what was written we
+        look up the source file in project_dir by matching the filename.
+
+        Args:
+            alert: A DriftAlert previously emitted by this watcher.
+
+        Returns:
+            DriftRootCause with diff and explanation, or None if either content
+            is unavailable (file deleted, source not found, I/O error).
+        """
+        if alert.deleted:
+            # No current content to diff against
+            return None
+
+        # Read current on-disk content of the drifted file
+        try:
+            current_content = Path(alert.file_path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+
+        # Retrieve stored content from state: the state stores the *target* file
+        # path and its hash, but not the content.  We recover the source content
+        # from the project-dir file that was originally synced to this target.
+        # Strategy: look for a file with the same basename in project_dir.
+        stored_content: str | None = None
+        target_filename = Path(alert.file_path).name
+
+        # Try the project_dir source file first (most common case)
+        candidate = self.project_dir / target_filename
+        if candidate.is_file():
+            try:
+                stored_content = candidate.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                stored_content = None
+
+        # Fallback: search one level deep in project_dir for the filename
+        if stored_content is None:
+            for child in self.project_dir.rglob(target_filename):
+                if child.is_file() and child != Path(alert.file_path):
+                    try:
+                        stored_content = child.read_text(encoding="utf-8", errors="replace")
+                        break
+                    except OSError:
+                        continue
+
+        if stored_content is None:
+            return None
+
+        return analyze_drift_root_cause(alert, stored_content, current_content)
 
     # ------------------------------------------------------------------
     # Internal

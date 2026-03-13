@@ -32,7 +32,6 @@ Usage::
 """
 
 import json
-import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 

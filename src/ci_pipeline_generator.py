@@ -27,7 +27,6 @@ Usage::
     print(gen.generate_summary())
 """
 
-import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 

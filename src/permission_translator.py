@@ -25,7 +25,6 @@ Target mappings:
 """
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
 
 # Tools that are shell-executable and can be passed to Codex allowedCommands
@@ -358,7 +357,7 @@ class PermissionTranslator:
         ]
         for g in gaps:
             lines.append(f"<!-- {g.comment} -->")
-        lines.append(f"<!-- End HarnessSync permission notes -->")
+        lines.append("<!-- End HarnessSync permission notes -->")
         return "\n".join(lines)
 
 
@@ -448,8 +447,8 @@ def generate_audit_report(
 
     # Matrix table
     col_targets = targets[:8]  # cap width
-    header = f"| Capability       | " + " | ".join(f"{t:<10}" for t in col_targets) + " |"
-    sep    = f"|:-----------------|-" + "-|-".join("-" * 12 for _ in col_targets) + "-|"
+    header = "| Capability       | " + " | ".join(f"{t:<10}" for t in col_targets) + " |"
+    sep    = "|:-----------------|-" + "-|-".join("-" * 12 for _ in col_targets) + "-|"
     lines.append(header)
     lines.append(sep)
 
@@ -474,7 +473,6 @@ def generate_audit_report(
 
     # Dangerous inconsistencies
     inconsistencies: list[str] = []
-    ref_target = col_targets[0] if col_targets else None
     for cap_key, cap_label in (
         ("shell",      "Shell execution"),
         ("network",    "Network access"),

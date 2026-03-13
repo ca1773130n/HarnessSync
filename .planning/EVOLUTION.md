@@ -2733,3 +2733,72 @@ _2026-03-13T06:23:17.388Z_
 - The sync_impact_predictor already had sophisticated per-harness conflict detection but lacked a rollup numeric score — adding impact_score makes it actionable for automated pipelines that need a threshold to decide whether to prompt for review.
 
 ---
+## Iteration 42
+_2026-03-13T06:38:18.959Z_
+
+### Items Attempted
+
+- **Visual Conflict Resolver** — pass
+- **Live Capability Gap Matrix** — pass
+- **Per-Harness Skill Exclusions** — pass
+- **Team Config Broadcast** — pass
+- **Harness Health Monitor** — pass
+- **MCP Server Compatibility Bridge** — pass
+- **Auto Sync Changelog** — pass
+- **Skill Translation Quality Scores** — pass
+- **Timestamped Config Snapshots** — pass
+- **CI/CD Sync Pipeline** — pass
+- **First-Run Onboarding Wizard** — pass
+- **Semantic Rule Deduplication** — pass
+- **Context-Aware Sync Profiles** — pass
+- **Cross-Harness Behavior Benchmark** — pass
+- **Webhook-Triggered Sync** — pass
+- **Natural Language Rule Authoring** — pass
+- **Cross-Harness Cost Tracker** — pass
+- **Plugin Ecosystem Compatibility Map** — pass
+- **Env Var Vault Sync** — pass
+- **Sync Impact Predictor** — pass
+- **One-Click Config Sharing** — pass
+- **Smart Sync Scheduling** — pass
+- **Sync Regression Guard** — pass
+- **Config Version Pinning** — pass
+- **Auto Harness Discovery** — pass
+- **Skill Marketplace Import** — pass
+- **Permissions Audit Report** — pass
+- **Sync Notifications to Slack/Discord** — pass
+- **Feature Gap Issue Creator** — pass
+- **AI Rule Conflict Detector** — pass
+- **Git Commit Sync Trigger** — pass
+
+### Decisions Made
+
+- Created ci_pipeline_generator.py as a pure Python code generator rather than embedding a static YAML file — this allows runtime customisation (branch, runner, Python version, secrets, cron) without the user having to hand-edit YAML.
+- CI workflow supports two distinct trigger modes (push-trigger and schedule-trigger) with separate factory methods; push-trigger watches only config-related paths to avoid spurious runs.
+- skill_marketplace.py falls back to a curated offline registry when the GitHub API is unavailable or rate-limited — makes the feature usable without network access and without a token.
+- feature_gap_issue_creator.py separates draft() from submit() so users can review every issue body before it's posted; submit() refuses to proceed without an explicit token.
+- Auto-snapshot naming uses 'auto-YYYYMMDD-HHMMSS' prefix so auto and manual snapshots co-exist in the same directory and auto-ones can be pruned independently.
+- Added restore_auto_snapshot(index=N) to config_time_machine.py so users can say 'go back 3 syncs' without knowing exact timestamps — addresses the 'rollback only goes one step back' pain point.
+- generate_audit_report() in permission_translator.py uses the existing PermissionTranslator internals rather than duplicating translation logic — avoids drift between the translation and audit paths.
+- run_live_latency_benchmark() in harness_comparison.py runs actual subprocess calls but with a configurable timeout, so slow/missing CLIs don't hang the user; each CLI has its own argv template.
+- SmartSyncScheduler uses a JSONL activity log rather than a binary state file — JSONL is appendable and human-readable, making debugging easy and avoiding write-lock issues.
+- Smart scheduler determines idle state from seconds-since-last-non-sync-event rather than total events, avoiding false 'active' readings from frequent sync events themselves.
+
+### Patterns Discovered
+
+- The codebase consistently uses @dataclass for result/report objects with a .format() method — followed this pattern in all new code (IssueDraft, InstallResult, LatencyBenchmarkReport, etc.).
+- All I/O operations (file reads, subprocess calls, network requests) are wrapped in try/except returning empty/default values rather than raising — matches the resilience pattern throughout the codebase.
+- Module-level constants for paths and defaults (e.g. _SNAPSHOT_DIR, DEFAULT_IDLE_THRESHOLD_SECONDS) keep configuration discoverable and testable.
+- Existing harness CLI templates (_HARNESS_CLI_TEMPLATES) follow the same pattern as other per-harness dicts (_FEATURE_SUPPORT, _APPROVAL_MODE_MAP) — consistent with codebase conventions.
+- Several modules (drift_watcher, config_health, harness_comparison) had item-number comments in docstrings referencing planning items — adopted same convention in new code.
+- The codebase makes heavy use of | None type hints and sentinel values (empty string, -1 for latency) rather than Optional[] — Python 3.10+ style consistently applied.
+
+### Takeaways
+
+- Many of the 30 ideation items already had substantial implementations — the codebase is further along than the item list implies. Real gaps were in CI/CD tooling, marketplace integration, and upstream issue creation.
+- The config_time_machine.py had manual snapshots but no auto-snapshot-before-sync hook — a single method addition closes a real user pain point (multi-step rollback).
+- The permission_translator.py translate() logic was solid but exposed no cross-harness comparison surface — the audit report was a natural addition that reuses all existing translation work.
+- harness_comparison.py's run_behavioral_equivalence_test was already a static analysis tool; a live latency benchmark required subprocess invocation but fits naturally alongside it.
+- sync_pauser.py was pause/resume only — adding SmartSyncScheduler as a companion class (in the same file, same module) keeps related scheduling logic co-located without adding a new file.
+- The project has no package.json — 'npm test' fails by design; the actual test runner is pytest. Future evolve prompts should check for pyproject.toml or setup.py first.
+
+---

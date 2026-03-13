@@ -191,7 +191,7 @@ class HarnessConfigComparison:
         compliance_count = 0
 
         if rules_content:
-            from src.sync_filter import filter_rules_for_target, has_compliance_pinned, extract_compliance_pinned
+            from src.sync_filter import filter_rules_for_target
             from src.harness_rule_dsl import RuleDSLParser, get_compliance_rules
 
             parser = RuleDSLParser()
