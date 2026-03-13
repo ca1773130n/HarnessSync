@@ -529,8 +529,10 @@ def _show_default_status():
             print("Inline Harness Blocks:")
             print("-" * 40)
             for _harness, _block in sorted(_inline_blocks.items()):
-                _preview = _block.split("\n")[0][:60]
-                print(f"  {_harness:<12} {_preview}...")
+                _first_line = _block.split("\n")[0]
+                _truncated = len(_first_line) > 60 or "\n" in _block
+                _preview = _first_line[:60]
+                print(f"  {_harness:<12} {_preview}{'...' if _truncated else ''}")
     except Exception:
         pass  # Non-critical; inline block display is informational only
 

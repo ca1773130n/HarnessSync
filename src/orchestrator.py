@@ -922,7 +922,11 @@ class SyncOrchestrator:
                 from src.skill_gap_analyzer import post_sync_capability_report
                 synced_targets = [
                     t for t in results
-                    if not t.startswith('_') and 'error' not in results[t]
+                    if not t.startswith('_')
+                    and isinstance(results[t], dict)
+                    and 'error' not in results[t]
+                    and '_skipped_incremental' not in results[t]
+                    and '_queued' not in results[t]
                 ]
                 if synced_targets:
                     cap_report = post_sync_capability_report(
