@@ -1162,3 +1162,193 @@ def format_update_report(updates: list[dict]) -> str:
     lines.append("")
     lines.append("Run /sync-status to check for config schema changes.")
     return "\n".join(lines)
+
+
+def generate_upgrade_migration_guide(
+    target: str,
+    from_version: str,
+    to_version: str,
+    project_dir: Path | None = None,
+) -> dict:
+    """Generate a step-by-step migration guide when a harness is upgraded.
+
+    When the user upgrades a harness (e.g. Gemini CLI from 1.5 to 2.0) and the
+    config format changes, this function produces a structured guide covering:
+      - Features gained/lost between the two versions
+      - Migration rules that will be applied automatically by HarnessSync
+      - Deprecated fields requiring manual attention
+      - Manual action items the user must perform
+
+    Args:
+        target: Harness name (e.g. "gemini", "cursor").
+        from_version: The version being upgraded from.
+        to_version: The version being upgraded to.
+        project_dir: Project root directory (used for pinned version lookup).
+
+    Returns:
+        Dict with keys:
+          - ``target``: str
+          - ``from_version``: str
+          - ``to_version``: str
+          - ``features_gained``: list[str]  — features newly supported in to_version
+          - ``features_lost``: list[str]    — features supported in from_version but not to_version
+          - ``auto_migrations``: list[str]  — migration rule descriptions applied automatically
+          - ``deprecated_warnings``: list[str]  — deprecated fields that need attention
+          - ``manual_actions``: list[str]   — steps the user must take manually
+          - ``summary``: str               — one-line upgrade impact summary
+    """
+    features_gained: list[str] = []
+    features_lost: list[str] = []
+
+    target_features = VERSIONED_FEATURES.get(target, {})
+    for feat, (min_ver, description) in target_features.items():
+        had_before = _version_gte(from_version, min_ver)
+        has_after = _version_gte(to_version, min_ver)
+        if has_after and not had_before:
+            features_gained.append(f"{feat}: {description}")
+        elif had_before and not has_after:
+            # This can happen if min_ver > to_version (downgrade or unusual range)
+            features_lost.append(f"{feat}: {description}")
+
+    # Collect auto-migrations: rules whose version range overlaps the upgrade window
+    auto_migrations: list[str] = []
+    target_migrations = _MIGRATION_RULES.get(target, [])
+    for rule in target_migrations:
+        rule_version = rule.get("introduced_in", "")
+        if rule_version and _version_gte(to_version, rule_version) and not _version_gte(from_version, rule_version):
+            action = rule.get("action", "")
+            field = rule.get("field", "")
+            rename_to = rule.get("rename_to", "")
+            if action == "rename" and rename_to:
+                auto_migrations.append(
+                    f"Field '{field}' renamed to '{rename_to}' (v{rule_version}+) — HarnessSync will rewrite automatically"
+                )
+            elif action == "remove":
+                auto_migrations.append(
+                    f"Field '{field}' removed in v{rule_version} — HarnessSync will drop it from the synced config"
+                )
+            elif action == "transform":
+                transform = rule.get("transform", "")
+                auto_migrations.append(
+                    f"Field '{field}' transformed ({transform}) in v{rule_version} — HarnessSync will apply the transformation"
+                )
+            elif action:
+                auto_migrations.append(
+                    f"Field '{field}' ({action}) in v{rule_version} — HarnessSync will handle this migration"
+                )
+
+    # Collect deprecated field warnings
+    deprecated_warnings: list[str] = []
+    target_deprecated = DEPRECATED_FIELDS.get(target, {})
+    for field, dep_info in target_deprecated.items():
+        deprecated_since = dep_info.get("deprecated_since", "")
+        removal_version = dep_info.get("removal_version", "")
+        replacement = dep_info.get("replacement", "")
+        # Warn if the field was not deprecated at from_version but is at to_version
+        if deprecated_since and _version_gte(to_version, deprecated_since) and not _version_gte(from_version, deprecated_since):
+            msg = f"'{field}' deprecated since v{deprecated_since}"
+            if removal_version:
+                msg += f", scheduled for removal in v{removal_version}"
+            if replacement:
+                msg += f" — use '{replacement}' instead"
+            deprecated_warnings.append(msg)
+
+    # Build manual action items
+    manual_actions: list[str] = []
+    if features_gained:
+        manual_actions.append(
+            f"Run /sync to push updated config that enables {len(features_gained)} newly supported feature(s)"
+        )
+    if deprecated_warnings:
+        manual_actions.append(
+            f"Review {len(deprecated_warnings)} deprecated field(s) in your {target} config and migrate to replacements"
+        )
+    if not auto_migrations and not features_gained and not deprecated_warnings:
+        manual_actions.append(
+            f"No breaking changes detected for {target} v{from_version} → v{to_version} — run /sync as a precaution"
+        )
+
+    # Build one-line summary
+    parts = []
+    if features_gained:
+        parts.append(f"{len(features_gained)} feature(s) gained")
+    if features_lost:
+        parts.append(f"{len(features_lost)} feature(s) lost")
+    if auto_migrations:
+        parts.append(f"{len(auto_migrations)} auto-migration(s)")
+    if deprecated_warnings:
+        parts.append(f"{len(deprecated_warnings)} deprecation warning(s)")
+    summary = (
+        f"{target.capitalize()} v{from_version} → v{to_version}: "
+        + (", ".join(parts) if parts else "no breaking changes")
+    )
+
+    return {
+        "target": target,
+        "from_version": from_version,
+        "to_version": to_version,
+        "features_gained": features_gained,
+        "features_lost": features_lost,
+        "auto_migrations": auto_migrations,
+        "deprecated_warnings": deprecated_warnings,
+        "manual_actions": manual_actions,
+        "summary": summary,
+    }
+
+
+def format_upgrade_migration_guide(guide: dict) -> str:
+    """Format a migration guide dict as a human-readable terminal string.
+
+    Args:
+        guide: Output of generate_upgrade_migration_guide().
+
+    Returns:
+        Multi-line formatted string ready for CLI output.
+    """
+    target = guide.get("target", "")
+    from_v = guide.get("from_version", "?")
+    to_v = guide.get("to_version", "?")
+
+    lines = [
+        f"Migration Guide: {target.capitalize()} v{from_v} → v{to_v}",
+        "=" * 60,
+        "",
+    ]
+
+    features_gained = guide.get("features_gained", [])
+    if features_gained:
+        lines.append("Features Gained:")
+        for f in features_gained:
+            lines.append(f"  + {f}")
+        lines.append("")
+
+    features_lost = guide.get("features_lost", [])
+    if features_lost:
+        lines.append("Features Lost:")
+        for f in features_lost:
+            lines.append(f"  - {f}")
+        lines.append("")
+
+    auto_migrations = guide.get("auto_migrations", [])
+    if auto_migrations:
+        lines.append("Automatic Migrations (HarnessSync will handle these):")
+        for m in auto_migrations:
+            lines.append(f"  * {m}")
+        lines.append("")
+
+    deprecated_warnings = guide.get("deprecated_warnings", [])
+    if deprecated_warnings:
+        lines.append("Deprecation Warnings:")
+        for w in deprecated_warnings:
+            lines.append(f"  ! {w}")
+        lines.append("")
+
+    manual_actions = guide.get("manual_actions", [])
+    if manual_actions:
+        lines.append("Required Actions:")
+        for i, action in enumerate(manual_actions, 1):
+            lines.append(f"  {i}. {action}")
+        lines.append("")
+
+    lines.append(guide.get("summary", ""))
+    return "\n".join(lines)

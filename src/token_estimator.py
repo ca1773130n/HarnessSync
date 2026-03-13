@@ -280,6 +280,57 @@ class TokenEstimator:
         return harness_report
 
 
+def suggest_size_optimizations(
+    report: "TokenEstimateReport",
+    *,
+    target_fraction: float = 0.20,
+) -> list[str]:
+    """Suggest token-reduction actions for harnesses over their context budget.
+
+    For each harness where the synced config consumes more than ``target_fraction``
+    of the context window, produces actionable suggestions: which files to trim,
+    how many tokens could be saved, and what to do.
+
+    Args:
+        report: TokenBudgetReport from TokenBudgetEstimator.estimate_all() or similar.
+        target_fraction: Fraction of the context window to target (default 0.20 = 20%).
+
+    Returns:
+        List of human-readable suggestion strings, one per over-budget harness.
+        Empty if all harnesses are within budget.
+    """
+    suggestions: list[str] = []
+
+    for harness_report in report.harnesses:
+        if harness_report.total_fraction <= target_fraction:
+            continue
+
+        current_tokens = harness_report.total_tokens
+        window = harness_report.context_window
+        target_tokens = int(window * target_fraction)
+        excess = current_tokens - target_tokens
+
+        # Find the largest file — that's the best trimming candidate
+        if not harness_report.files:
+            continue
+        largest = max(harness_report.files, key=lambda f: f.token_estimate)
+
+        trim_pct = min(100, int((excess / largest.token_estimate) * 100)) if largest.token_estimate else 0
+        cost_now = harness_report.session_cost_usd
+        cost_target = _estimate_session_cost_usd(target_tokens, harness_report.target)
+        savings = cost_now - cost_target
+
+        suggestion = (
+            f"{harness_report.target}: {current_tokens:,} tokens "
+            f"({harness_report.total_fraction * 100:.0f}% of {window:,}-token context). "
+            f"Trim ~{trim_pct}% from {largest.file_path} to reach {target_fraction * 100:.0f}% target "
+            f"(saves ~{excess:,} tokens, ~${savings:.5f}/session)."
+        )
+        suggestions.append(suggestion)
+
+    return suggestions
+
+
 def _get_rules_files(target: str, project_dir: Path) -> list[Path]:
     """Return paths of synced rules files for the given target harness.
 

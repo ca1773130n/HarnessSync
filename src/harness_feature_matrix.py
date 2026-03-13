@@ -808,3 +808,121 @@ class HarnessFeatureMatrix:
             "Run /sync-gaps <harness> for full details on a specific target."
         )
         return "\n".join(lines)
+
+    def get_features_missing_everywhere(self) -> list[str]:
+        """Return features that are unsupported by every harness.
+
+        Useful for identifying features that exist in Claude Code but have
+        zero harness ecosystem support — worth flagging prominently.
+
+        Returns:
+            Sorted list of feature names with level "unsupported" in ALL harnesses.
+        """
+        return sorted(
+            feat
+            for feat in ALL_FEATURES
+            if all(
+                _FEATURE_MATRIX.get(feat, {}).get(h) == "unsupported"
+                for h in ALL_HARNESSES
+            )
+        )
+
+    def get_cross_harness_gaps(
+        self,
+        min_support_level: str = "partial",
+    ) -> dict[str, list[str]]:
+        """Return features that fall below the minimum support level per harness.
+
+        Unlike ``get_support_gaps()`` (which only returns "unsupported"),
+        this method accepts any minimum level so callers can find features that
+        are at most "partial" or "adapter" across the harness fleet.
+
+        Args:
+            min_support_level: Minimum acceptable level. Features with a level
+                *worse* than this are included in the result.
+                Accepted values: "native", "partial", "adapter", "unsupported".
+                Default: "partial" (returns features that are only adapter or worse).
+
+        Returns:
+            Dict mapping harness_name -> list of feature names below the threshold.
+        """
+        threshold = _LEVEL_ORDER.get(min_support_level, 1)
+        result: dict[str, list[str]] = {}
+        for harness in ALL_HARNESSES:
+            below = sorted(
+                feat
+                for feat in ALL_FEATURES
+                if _LEVEL_ORDER.get(
+                    _FEATURE_MATRIX.get(feat, {}).get(harness, "unsupported"), 3
+                ) > threshold
+            )
+            if below:
+                result[harness] = below
+        return result
+
+    def format_feature_adoption_report(self) -> str:
+        """Return a feature adoption report sorted by cross-harness support rate.
+
+        For each feature, shows how many harnesses support it at each level,
+        sorted from most-adopted to least-adopted. Helps users understand which
+        features to use confidently and which to avoid in multi-harness setups.
+
+        Returns:
+            Multi-line formatted string.
+        """
+        lines: list[str] = [
+            "Feature Adoption Report",
+            "=" * 60,
+            "",
+            "Features sorted by native support rate (most portable first):",
+            "",
+        ]
+
+        # Compute adoption score per feature
+        scored: list[tuple[float, str]] = []
+        for feat in ALL_FEATURES:
+            native_count = sum(
+                1 for h in ALL_HARNESSES
+                if _FEATURE_MATRIX.get(feat, {}).get(h) == "native"
+            )
+            partial_count = sum(
+                1 for h in ALL_HARNESSES
+                if _FEATURE_MATRIX.get(feat, {}).get(h) in ("partial", "adapter")
+            )
+            unsupported_count = sum(
+                1 for h in ALL_HARNESSES
+                if _FEATURE_MATRIX.get(feat, {}).get(h) == "unsupported"
+            )
+            total = len(ALL_HARNESSES)
+            score = (native_count + 0.5 * partial_count) / total
+            scored.append((score, feat))
+
+        scored.sort(reverse=True)
+
+        for score, feat in scored:
+            harness_map = _FEATURE_MATRIX.get(feat, {})
+            native_list = [h for h in ALL_HARNESSES if harness_map.get(h) == "native"]
+            partial_list = [h for h in ALL_HARNESSES if harness_map.get(h) in ("partial", "adapter")]
+            unsup_list = [h for h in ALL_HARNESSES if harness_map.get(h) == "unsupported"]
+
+            pct = int(score * 100)
+            bar_len = int(pct / 5)
+            bar = "█" * bar_len + "░" * (20 - bar_len)
+
+            lines.append(f"  {feat:<12}  {bar}  {pct:3d}%")
+            if native_list:
+                lines.append(f"    native   : {', '.join(native_list)}")
+            if partial_list:
+                lines.append(f"    partial  : {', '.join(partial_list)}")
+            if unsup_list:
+                lines.append(f"    missing  : {', '.join(unsup_list)}")
+            lines.append("")
+
+        missing_everywhere = self.get_features_missing_everywhere()
+        if missing_everywhere:
+            lines.append(
+                f"  NOTE: {', '.join(missing_everywhere)} "
+                f"ha{'ve' if len(missing_everywhere) > 1 else 's'} 0% support across all harnesses."
+            )
+
+        return "\n".join(lines)

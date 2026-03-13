@@ -780,6 +780,97 @@ class ConflictDetector:
 
         return "".join(output_parts)
 
+    def format_side_by_side_diff(
+        self,
+        three_way: dict,
+        width: int = 80,
+    ) -> str:
+        """Render a side-by-side terminal diff from three_way_diff() output.
+
+        Displays two columns:
+          LEFT  = sync source (what HarnessSync would write)
+          RIGHT = current file (what the user manually edited)
+
+        Changed lines are prefixed with ``+`` / ``-`` indicators. Each column
+        is ``(width // 2 - 2)`` characters wide, truncated with ``…`` if longer.
+
+        Args:
+            three_way: Dict from ``three_way_diff()`` containing source_lines,
+                       current_lines, and unified_source_vs_current.
+            width: Total terminal width in characters. Default: 80.
+
+        Returns:
+            Multi-line formatted string suitable for terminal display.
+        """
+        import difflib
+
+        col_w = max(20, (width // 2) - 3)
+        file_path = three_way.get("file_path", "")
+        source_lines = [l.rstrip("\n") for l in three_way.get("source_lines", [])]
+        current_lines = [l.rstrip("\n") for l in three_way.get("current_lines", [])]
+
+        def _trunc(s: str, w: int) -> str:
+            return s if len(s) <= w else s[: w - 1] + "…"
+
+        sep = "─" * width
+        header_l = _trunc("SYNC SOURCE (HarnessSync)", col_w)
+        header_r = _trunc(f"CURRENT ({file_path})", col_w)
+        header = f"  {header_l:<{col_w}}  │  {header_r}"
+
+        lines: list[str] = [
+            sep,
+            f"SIDE-BY-SIDE DIFF: {file_path}",
+            sep,
+            header,
+            "─" * width,
+        ]
+
+        # Build a line-level diff using SequenceMatcher
+        matcher = difflib.SequenceMatcher(
+            None, source_lines, current_lines, autojunk=False
+        )
+
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == "equal":
+                for k in range(i2 - i1):
+                    left = _trunc(source_lines[i1 + k], col_w)
+                    right = _trunc(current_lines[j1 + k], col_w)
+                    lines.append(f"  {left:<{col_w}}  │  {right}")
+            elif tag == "replace":
+                # Show deletions on left, insertions on right
+                left_block = source_lines[i1:i2]
+                right_block = current_lines[j1:j2]
+                max_len = max(len(left_block), len(right_block))
+                for k in range(max_len):
+                    left_raw = left_block[k] if k < len(left_block) else ""
+                    right_raw = right_block[k] if k < len(right_block) else ""
+                    left = _trunc(left_raw, col_w - 2)
+                    right = _trunc(right_raw, col_w - 2)
+                    l_indicator = "-" if left_raw else " "
+                    r_indicator = "+" if right_raw else " "
+                    lines.append(
+                        f"{l_indicator} {left:<{col_w - 1}}  │  {r_indicator} {right}"
+                    )
+            elif tag == "delete":
+                for k in range(i2 - i1):
+                    left = _trunc(source_lines[i1 + k], col_w - 2)
+                    lines.append(f"- {left:<{col_w - 1}}  │  {'':>{col_w}}")
+            elif tag == "insert":
+                for k in range(j2 - j1):
+                    right = _trunc(current_lines[j1 + k], col_w - 2)
+                    lines.append(f"  {'':>{col_w - 1}}  │  + {right}")
+
+        lines.append(sep)
+        has_conflict = three_way.get("has_real_conflict", True)
+        if not has_conflict:
+            lines.append("  (no differences — files are identical)")
+        else:
+            lines.append("  Legend:  - = sync would overwrite  + = your manual edit")
+            lines.append(
+                "  Resolve: s) use sync source  k) keep current  e) edit manually"
+            )
+        return "\n".join(lines)
+
     def format_warnings(self, conflicts: dict[str, list[dict]]) -> str:
         """
         Format conflict warnings for user output.

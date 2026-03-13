@@ -371,6 +371,74 @@ class WebhookNotifier:
         except Exception as e:
             return WebhookResult(name=name, kind="webhook", success=False, error=str(e))
 
+    def notify_drift_event(
+        self,
+        target: str,
+        file_path: str,
+        detected_at: str,
+        deleted: bool = False,
+        project_dir: Path | None = None,
+    ) -> list[WebhookResult]:
+        """Dispatch drift-specific webhook notifications to subscribed endpoints.
+
+        Sends a structured drift alert payload to all configured webhooks that
+        subscribe to ``drift`` or ``success`` events. Teams can route drift
+        alerts to dedicated Slack channels or monitoring dashboards.
+
+        Payload schema::
+
+            {
+                "event": "drift_detected",
+                "target": "codex",
+                "file": "AGENTS.md",
+                "file_path": "/path/to/AGENTS.md",
+                "status": "modified" | "deleted",
+                "detected_at": "2024-01-15T12:00:00",
+                "project": "/path/to/project"
+            }
+
+        Args:
+            target: Harness target name (e.g. "codex").
+            file_path: Absolute path to the drifted file.
+            detected_at: ISO 8601 timestamp of when drift was detected.
+            deleted: True if the file was deleted, False if modified.
+            project_dir: Project directory for context in the payload.
+
+        Returns:
+            List of WebhookResult for each dispatched webhook/script.
+        """
+        import os as _os
+
+        payload = {
+            "event": "drift_detected",
+            "target": target,
+            "file": _os.path.basename(file_path),
+            "file_path": file_path,
+            "status": "deleted" if deleted else "modified",
+            "detected_at": detected_at,
+            "project": str(project_dir or Path.cwd()),
+        }
+
+        dispatch_results: list[WebhookResult] = []
+        for webhook in self._config.get("webhooks", []):
+            on_events = webhook.get("on", ["success", "partial", "failed"])
+            # Send drift events to webhooks opting into "drift" or general "success"
+            if "drift" in on_events or "success" in on_events:
+                result = self._send_webhook(webhook, payload)
+                dispatch_results.append(result)
+                if not result.success:
+                    self.logger.warning(
+                        f"Drift webhook '{result.name}' failed: {result.error}"
+                    )
+
+        for script in self._config.get("scripts", []):
+            on_events = script.get("on", ["success"])
+            if "drift" in on_events or "success" in on_events:
+                result = self._run_script(script, payload, project_dir)
+                dispatch_results.append(result)
+
+        return dispatch_results
+
     def _run_script(
         self, script: dict, payload: dict, project_dir: Path | None
     ) -> WebhookResult:

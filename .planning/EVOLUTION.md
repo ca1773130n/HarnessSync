@@ -3208,3 +3208,73 @@ _2026-03-13T08:13:03.731Z_
 - suggest_rule_improvements() is intentionally heuristic-only — LLM-powered suggestions would be more accurate but would add a dependency and latency; the heuristic approach catches the most common config quality issues without network calls
 
 ---
+## Iteration 49
+_2026-03-13T08:36:20.512Z_
+
+### Items Attempted
+
+- **Harness Capability Compatibility Score** — pass
+- **Cursor Rules & Agent Sync** — pass
+- **Aider Convention Sync** — pass
+- **Continue.dev Config Sync** — pass
+- **Sync Profiles with Inheritance** — pass
+- **Selective Component Sync** — pass
+- **Git Branch-Aware Sync Profiles** — pass
+- **Team Config Snapshot Sharing** — pass
+- **Config Variable Templating** — pass
+- **Drift Detection Alerts** — pass
+- **Git Post-Checkout Sync Hook** — pass
+- **Harness Update Impact Advisor** — pass
+- **Unused Skill & Rule Detector** — pass
+- **Natural Language Rule Builder** — pass
+- **Cross-Harness Behavior Tester** — pass
+- **MCP Server Compatibility Matrix** — pass
+- **Interactive First-Sync Onboarding Wizard** — pass
+- **Auto-Generated Sync Changelog** — pass
+- **Config Health Score & Recommendations** — pass
+- **Multi-Project Config Overview Dashboard** — pass
+- **Config Export as Human-Readable Docs** — pass
+- **Harness Migration Assistant** — pass
+- **Community Skill Library Browser** — pass
+- **Secret & Sensitive Config Filtering** — pass
+- **CI/CD Sync Validation Action** — pass
+- **Translation Gap Suggestions** — pass
+- **Visual Rollback Timeline** — pass
+- **Auto-Discover Newly Installed Harnesses** — pass
+- **PR Config Diff Comment Bot** — pass
+- **Skill Portability Linter** — pass
+- **Config Coverage Report** — pass
+- **Cross-Harness Usage Analytics** — pass
+- **Config Size & Token Optimizer** — pass
+- **Harness Config Sandbox** — pass
+- **Scheduled Sync with Email/Slack Digest** — pass
+- **Context-Aware Rule Suggestions** — pass
+- **Multi-Account Rule Federation** — pass
+
+### Decisions Made
+
+- Enhanced calculate_fidelity_score() to capture per-category item counts (synced/adapted/skipped/failed) and generate human-readable summary_clauses like '3 skills unsupported, 1 MCP server approximated' — matching the spec's requested format exactly
+- Added _NATIVE_ALTERNATIVES dict to generate_gap_report() mapping (target, feature) pairs to actionable native workaround suggestions instead of dead-end 'not supported' messages
+- Added --only-for TARGET:sections CLI flag using argparse action='append' to support multiple per-target overrides in one invocation; wired into new cli_per_target_only orchestrator parameter that merges with existing _per_target_only project-config overrides
+- Added substitute_config_vars() and helpers at module level in source_reader.py (not inside SourceReader class) to keep it easily importable as a utility function; wired as a best-effort preprocessing step in orchestrator.sync_all() before rules list conversion
+- Added UsageTracker class to dead_config_detector.py with JSON-backed persistence at ~/.harnesssync/usage_log.json; added _check_stale_by_usage() to DeadConfigDetector.detect() as a third check with a stale_days parameter (default 30, pass 0 to skip)
+- Added _detect_via_package_managers() function to harness_detector.py that checks Homebrew (brew list --formula + --cask), npm (list -g --json), and pip (list --format=columns) with short timeouts; integrated into both detect_new_harnesses() and scan_all()
+- Added full post-checkout hook (install/uninstall/is_installed) to git_hook_installer.py; the hook only fires on branch checkouts (not file checkouts, checked via $3 argument) and only when config files differ between branches to avoid noise
+- Added lint_skill_portability() and lint_all_skills_portability() to ConfigLinter; checks 7 portability patterns (CC tool refs, $ARGUMENTS, /slash-commands, hardcoded paths, subagent_type frontmatter, tool_call XML, mcp__ references); wired into sync-lint via --skills flag
+
+### Patterns Discovered
+
+- The codebase consistently uses best-effort try/except blocks with pass for all non-critical features (project type detection, branch sync, etc.) — good defensive pattern but makes debugging harder; new code follows this pattern
+- Module-level functions alongside classes (e.g. substitute_config_vars at module level in source_reader.py) are used throughout the codebase; avoids forcing instantiation for utility functions
+- The orchestrator's _per_target_only/_per_target_skip dict pattern is a clean extension point — adding CLI-level per-target overrides as _cli_per_target_only follows the same merge pattern already used for project-config overrides
+- argparse action='append' is the right choice for repeatable flags like --only-for; generates a list or None (not empty list), so `(getattr(args, 'only_for', None) or [])` is the safe iteration pattern
+- The harness_detector.py package manager scan has tight timeouts (10-15s) which is appropriate for user-facing commands; pip list can be slow on large environments
+
+### Takeaways
+
+- Items 2 (Cursor), 3 (Aider), 4 (Continue.dev) were already implemented as full adapters in previous iterations — the codebase is more complete than the item descriptions suggest
+- Items 5 (Sync Profiles), 7 (Branch-Aware), 8 (Config Bundles), 10 (Drift Detection), 15 (Cross-Harness Tester), 16 (MCP Matrix), 17 (Onboarding Wizard), 18 (Changelog), 19 (Config Health), 20 (Dashboard), 21 (Docs Export), 22 (Migration Assistant), 23 (Skill Library), 24 (Secret Filtering), 25 (CI Action), 27 (Rollback Timeline) all had substantial existing implementations
+- The split between 'feature exists in some form' vs 'feature needs enhancement' is the key judgment call for evolve iterations — enhancing existing features to match the spec more precisely is more valuable than re-implementing
+- Indentation errors from string insertion near method boundaries (the return paths bug in source_reader.py) are easy to miss; the stale return was at the end of the _collect_source_paths method that my insertion cut off from its natural end
+
+---

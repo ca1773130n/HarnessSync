@@ -366,3 +366,236 @@ class RuleEffectivenessTracker:
         """Return rule titles that fire frequently (candidates for promotion)."""
         report = self.score_rules(hot_threshold=hot_threshold)
         return [r.title for r in report.hot]
+
+
+# ── Skill Usage Tracker (item 22) ───────────────────────────────────────────
+
+_SKILL_STATE_FILE = Path.home() / ".harnesssync" / "skill_usage.json"
+
+
+@dataclass
+class SkillUsageEntry:
+    """Usage record for a single skill across all harnesses."""
+
+    name: str
+    invocations: int = 0
+    last_invoked: datetime | None = None
+    harness_counts: dict = field(default_factory=dict)
+    unique_days: int = 0
+
+
+class SkillUsageTracker:
+    """Track which synced skills are invoked and how often, per harness.
+
+    Records invocations when a skill name is detected in tool output or
+    session transcripts. Stores counts per harness so users can see which
+    harness they rely on most for each skill.
+
+    Storage: ~/.harnesssync/skill_usage.json
+    """
+
+    def __init__(self, state_file: Path | None = None):
+        self._path = state_file or _SKILL_STATE_FILE
+        self._data: dict = self._load()
+
+    def _load(self) -> dict:
+        if not self._path.exists():
+            return {"version": 1, "skills": {}}
+        try:
+            raw = json.loads(self._path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict) and "skills" in raw:
+                return raw
+        except (json.JSONDecodeError, OSError):
+            pass
+        return {"version": 1, "skills": {}}
+
+    def _save(self) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=self._path.parent,
+            suffix=".tmp",
+            delete=False,
+            encoding="utf-8",
+        )
+        try:
+            json.dump(self._data, tmp, indent=2, ensure_ascii=False)
+            tmp.write("\n")
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            tmp.close()
+            os.replace(tmp.name, str(self._path))
+        except Exception:
+            tmp.close()
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+            raise
+
+    def record_invocation(self, skill_name: str, harness: str = "unknown") -> None:
+        """Record a skill invocation for a given harness.
+
+        Args:
+            skill_name: Name of the invoked skill (e.g. "feature-dev").
+            harness: Harness where the skill was invoked (e.g. "codex").
+        """
+        skills = self._data.setdefault("skills", {})
+        entry = skills.setdefault(skill_name, {
+            "invocations": 0,
+            "last_invoked": None,
+            "harness_counts": {},
+            "unique_days": 0,
+            "days": [],
+        })
+
+        now = datetime.now(timezone.utc)
+        today = now.date().isoformat()
+
+        entry["invocations"] = entry.get("invocations", 0) + 1
+        entry["last_invoked"] = now.isoformat()
+
+        harness_counts = entry.setdefault("harness_counts", {})
+        harness_counts[harness] = harness_counts.get(harness, 0) + 1
+
+        days = entry.setdefault("days", [])
+        if today not in days:
+            days.append(today)
+            if len(days) > 90:
+                days[:] = days[-90:]
+            entry["unique_days"] = len(days)
+
+        self._save()
+
+    def detect_and_record(
+        self,
+        text: str,
+        known_skills: list[str],
+        harness: str = "unknown",
+    ) -> list[str]:
+        """Scan text for skill invocations and record matches.
+
+        Args:
+            text: Text to scan (e.g. assistant response or tool output).
+            known_skills: List of known skill names to look for.
+            harness: Harness where the session occurred.
+
+        Returns:
+            List of skill names that were detected and recorded.
+        """
+        text_lower = text.lower()
+        detected: list[str] = []
+
+        for skill in known_skills:
+            needle = _NON_ALPHA.sub(".", skill.lower())
+            if re.search(r"\b" + needle + r"\b", text_lower):
+                self.record_invocation(skill, harness)
+                detected.append(skill)
+
+        return detected
+
+    def get_usage_stats(self) -> list[SkillUsageEntry]:
+        """Return usage stats for all tracked skills, sorted by invocations desc.
+
+        Returns:
+            List of SkillUsageEntry objects.
+        """
+        skills = self._data.get("skills", {})
+        entries: list[SkillUsageEntry] = []
+
+        for name, data in skills.items():
+            last_inv: datetime | None = None
+            if data.get("last_invoked"):
+                try:
+                    last_inv = datetime.fromisoformat(data["last_invoked"])
+                except ValueError:
+                    pass
+            entries.append(SkillUsageEntry(
+                name=name,
+                invocations=data.get("invocations", 0),
+                last_invoked=last_inv,
+                harness_counts=dict(data.get("harness_counts", {})),
+                unique_days=data.get("unique_days", 0),
+            ))
+
+        entries.sort(key=lambda e: -e.invocations)
+        return entries
+
+    def format_usage_report(self, top_n: int = 20) -> str:
+        """Return a human-readable skill usage dashboard.
+
+        Args:
+            top_n: Maximum skills to display. Default: 20.
+
+        Returns:
+            Formatted report string.
+        """
+        entries = self.get_usage_stats()
+        if not entries:
+            return "Skill Usage: No invocations recorded yet."
+
+        lines = [
+            f"Skill Usage Dashboard ({len(entries)} skill(s) tracked)",
+            "=" * 55,
+            f"  {'Skill':<25}  {'Total':>6}  {'Days':>5}  Top Harness",
+            "  " + "-" * 52,
+        ]
+
+        for entry in entries[:top_n]:
+            top_harness = (
+                max(entry.harness_counts, key=entry.harness_counts.get)
+                if entry.harness_counts
+                else "—"
+            )
+            lines.append(
+                f"  {entry.name:<25}  {entry.invocations:>6}  "
+                f"{entry.unique_days:>5}  {top_harness}"
+            )
+
+        if len(entries) > top_n:
+            lines.append(f"  ... and {len(entries) - top_n} more")
+
+        total = sum(e.invocations for e in entries)
+        lines += ["", f"  Total invocations recorded: {total}"]
+        return "\n".join(lines)
+
+    def get_unused_skills(
+        self,
+        known_skills: list[str],
+        stale_days: int = 30,
+    ) -> list[str]:
+        """Return skills that have never been invoked or not used recently.
+
+        Args:
+            known_skills: All skill names from the skills directory.
+            stale_days: Skills last invoked more than this many days ago count as stale.
+
+        Returns:
+            Sorted list of unused/stale skill names.
+        """
+        skills = self._data.get("skills", {})
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(days=stale_days)
+        unused: list[str] = []
+
+        for skill in known_skills:
+            if skill not in skills:
+                unused.append(skill)
+                continue
+            last_raw = skills[skill].get("last_invoked")
+            if not last_raw:
+                unused.append(skill)
+                continue
+            try:
+                last = datetime.fromisoformat(last_raw)
+                if last < cutoff:
+                    unused.append(skill)
+            except ValueError:
+                unused.append(skill)
+
+        return sorted(unused)
+
+    def reset(self) -> None:
+        """Clear all skill usage data."""
+        self._data = {"version": 1, "skills": {}}
+        self._save()

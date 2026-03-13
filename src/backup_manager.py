@@ -549,3 +549,82 @@ class BackupContext:
 
         # Do not suppress exception
         return False
+
+
+# ---------------------------------------------------------------------------
+# Auto-snapshot before sync (item 8 — Timestamped Rollback Snapshots)
+# ---------------------------------------------------------------------------
+
+def auto_snapshot_targets(
+    state: dict,
+    label: str = "pre-sync",
+    backup_root: Path | None = None,
+) -> dict[str, list[Path]]:
+    """Create timestamped snapshots of all tracked target config files before sync.
+
+    Reads the file_hashes from the HarnessSync state dict to discover which
+    files are currently tracked for each target, then backs up every file that
+    exists on disk. Call this at the start of a sync operation to ensure a
+    full rollback is possible.
+
+    The backups are created under ``~/.harnesssync/backups/<target>/`` using
+    BackupManager, so they're compatible with the existing rollback workflow.
+
+    Args:
+        state: HarnessSync state dict (from StateManager.load_state()).
+               Expected shape: {"targets": {target_name: {"file_hashes": {...}}}}
+        label: Human-readable label appended to backup directory names.
+               Default: "pre-sync".
+        backup_root: Override backup root directory (default: BackupManager default).
+
+    Returns:
+        Dict mapping target_name -> list of backup directory Paths created.
+        Targets with no tracked files are omitted from the result.
+    """
+    bm = BackupManager(backup_root=backup_root)
+    targets_state = state.get("targets", {})
+    result: dict[str, list[Path]] = {}
+
+    for target_name, target_data in targets_state.items():
+        file_hashes: dict[str, str] = target_data.get("file_hashes", {})
+        backup_paths: list[Path] = []
+
+        for file_path_str in file_hashes:
+            fp = Path(file_path_str)
+            if not fp.exists():
+                continue  # File already gone — nothing to backup
+            try:
+                backup_path = bm.backup_target(fp, target_name, label=label)
+                backup_paths.append(backup_path)
+            except OSError:
+                # Non-fatal: log and continue
+                bm.logger.warning(
+                    f"auto_snapshot: failed to backup {fp} for {target_name}"
+                )
+
+        if backup_paths:
+            result[target_name] = backup_paths
+
+    return result
+
+
+def format_snapshot_manifest(snapshot_map: dict[str, list[Path]]) -> str:
+    """Format the result of auto_snapshot_targets() for terminal display.
+
+    Args:
+        snapshot_map: Output of auto_snapshot_targets().
+
+    Returns:
+        Human-readable summary string.
+    """
+    if not snapshot_map:
+        return "Pre-sync snapshot: no files to back up."
+
+    total = sum(len(v) for v in snapshot_map.values())
+    lines = [f"Pre-sync snapshot: {total} file(s) backed up across {len(snapshot_map)} target(s)"]
+    for target, paths in sorted(snapshot_map.items()):
+        lines.append(f"  {target}: {len(paths)} file(s)")
+        for p in paths:
+            lines.append(f"    → {p.name}")
+    lines.append("Use /sync-rollback to restore from these snapshots.")
+    return "\n".join(lines)

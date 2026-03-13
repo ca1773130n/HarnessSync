@@ -245,6 +245,131 @@ def score_skill_file(path: Path, target_name: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Batch scoring (item 9 — Skill Translation Quality Score)
+# ---------------------------------------------------------------------------
+
+def score_skills_batch(
+    skills: list[tuple[str, str]],
+    target_name: str,
+    low_score_threshold: int = 70,
+) -> dict:
+    """Score multiple skills for a target harness and return an aggregate report.
+
+    Translates each skill and scores the result, then aggregates into a
+    summary with per-skill breakdown and a list of low-quality translations
+    that should be reviewed before syncing.
+
+    Args:
+        skills: List of (skill_name, raw_content) tuples.
+        target_name: Destination harness (e.g. "codex", "gemini").
+        low_score_threshold: Scores below this value trigger a warning.
+                             Default: 70.
+
+    Returns:
+        Dict with:
+            - target: str
+            - skill_count: int
+            - average_score: int (0-100)
+            - min_score: int
+            - max_score: int
+            - low_quality: list[dict] — skills scoring below threshold
+            - scores: list[dict] — full per-skill score dicts
+            - summary: str — one-line human-readable summary
+    """
+    if not skills:
+        return {
+            "target": target_name,
+            "skill_count": 0,
+            "average_score": 100,
+            "min_score": 100,
+            "max_score": 100,
+            "low_quality": [],
+            "scores": [],
+            "summary": f"{target_name}: No skills to score.",
+        }
+
+    score_dicts: list[dict] = []
+    for name, content in skills:
+        translated = translate_skill_content(content, target_name)
+        result = score_translation(content, translated, target_name)
+        result["skill_name"] = name
+        score_dicts.append(result)
+
+    score_values = [d["score"] for d in score_dicts]
+    avg = int(sum(score_values) / len(score_values))
+    low_quality = [d for d in score_dicts if d["score"] < low_score_threshold]
+
+    summary_parts = [f"{target_name}: {len(skills)} skill(s), avg score {avg}/100"]
+    if low_quality:
+        summary_parts.append(
+            f"{len(low_quality)} below {low_score_threshold} — review before syncing"
+        )
+
+    return {
+        "target": target_name,
+        "skill_count": len(skills),
+        "average_score": avg,
+        "min_score": min(score_values),
+        "max_score": max(score_values),
+        "low_quality": low_quality,
+        "scores": score_dicts,
+        "summary": ", ".join(summary_parts) + ".",
+    }
+
+
+def format_batch_score_report(batch_result: dict) -> str:
+    """Format a batch score report from score_skills_batch() for terminal output.
+
+    Args:
+        batch_result: Output of score_skills_batch().
+
+    Returns:
+        Multi-line formatted string with per-skill breakdown and warnings.
+    """
+    target = batch_result.get("target", "?")
+    count = batch_result.get("skill_count", 0)
+    avg = batch_result.get("average_score", 0)
+    min_s = batch_result.get("min_score", 0)
+    max_s = batch_result.get("max_score", 0)
+    low_quality = batch_result.get("low_quality", [])
+    scores = batch_result.get("scores", [])
+
+    if not scores:
+        return f"Skill Translation Quality — {target}: no skills."
+
+    lines: list[str] = [
+        f"Skill Translation Quality — {target}",
+        "=" * 50,
+        f"  Skills scored:   {count}",
+        f"  Average score:   {avg}/100",
+        f"  Score range:     {min_s} – {max_s}",
+        "",
+    ]
+
+    if low_quality:
+        lines.append(f"  LOW QUALITY ({len(low_quality)} skill(s) need review):")
+        for d in sorted(low_quality, key=lambda x: x["score"]):
+            name = d.get("skill_name", "?")
+            score = d["score"]
+            grade = d.get("grade", "?")
+            notes = d.get("notes", [])
+            lines.append(f"    {score:3d}/100  [{grade}]  {name}")
+            for note in notes[:2]:
+                lines.append(f"             {note}")
+        lines.append("")
+
+    lines.append("  All skills:")
+    for d in sorted(scores, key=lambda x: -x["score"]):
+        name = d.get("skill_name", "?")
+        score = d["score"]
+        grade = d.get("grade", "?")
+        indicator = "✓" if score >= 70 else ("~" if score >= 50 else "✗")
+        lines.append(f"    {indicator} {score:3d}/100  [{grade}]  {name}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Degraded-but-functional skill variant generator (#21)
 # ---------------------------------------------------------------------------
 

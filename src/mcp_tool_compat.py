@@ -668,6 +668,124 @@ def _format_features_section() -> list[str]:
     return lines
 
 
+def pre_sync_check(
+    mcp_servers: dict[str, dict],
+    targets: list[str] | None = None,
+) -> dict:
+    """Run pre-sync compatibility checks on all MCP servers.
+
+    Validates the full MCP config before writing to target harnesses and
+    returns a structured report with error counts, per-harness summaries,
+    and a go/no-go recommendation.
+
+    Args:
+        mcp_servers: Dict mapping server name -> config dict (from .mcp.json).
+        targets: Subset of harnesses to validate. Defaults to ALL_HARNESSES.
+
+    Returns:
+        Dict with keys:
+          - ``ok``: bool  — True if no errors (warnings are acceptable)
+          - ``error_count``: int
+          - ``warning_count``: int
+          - ``blocking``: list[str]  — error messages that will break sync
+          - ``cautions``: list[str]  — warning messages to review
+          - ``harness_summary``: dict[str, dict]  — per-harness {"errors": int, "warnings": int}
+          - ``recommendation``: str  — human-readable go/no-go message
+    """
+    if targets is None:
+        targets = ALL_HARNESSES
+
+    blocking: list[str] = []
+    cautions: list[str] = []
+    harness_error_count: dict[str, int] = {t: 0 for t in targets}
+    harness_warn_count: dict[str, int] = {t: 0 for t in targets}
+
+    for server_name, config in mcp_servers.items():
+        for target in targets:
+            for issue in check_server_compat(server_name, config, target):
+                msg = f"[{target}] {server_name}: {issue.message}"
+                if issue.severity == "error":
+                    blocking.append(msg)
+                    harness_error_count[target] = harness_error_count.get(target, 0) + 1
+                elif issue.severity == "warning":
+                    cautions.append(msg)
+                    harness_warn_count[target] = harness_warn_count.get(target, 0) + 1
+
+    total_errors = len(blocking)
+    total_warnings = len(cautions)
+    ok = total_errors == 0
+
+    harness_summary = {
+        t: {"errors": harness_error_count.get(t, 0), "warnings": harness_warn_count.get(t, 0)}
+        for t in targets
+    }
+
+    if ok and total_warnings == 0:
+        recommendation = "All MCP servers are compatible — safe to sync."
+    elif ok:
+        recommendation = (
+            f"No blocking errors — sync will proceed. "
+            f"Review {total_warnings} warning(s) for potential runtime issues."
+        )
+    else:
+        recommendation = (
+            f"Sync blocked: {total_errors} error(s) detected. "
+            f"Fix the listed issues before syncing."
+        )
+
+    return {
+        "ok": ok,
+        "error_count": total_errors,
+        "warning_count": total_warnings,
+        "blocking": blocking,
+        "cautions": cautions,
+        "harness_summary": harness_summary,
+        "recommendation": recommendation,
+    }
+
+
+def format_pre_sync_report(check_result: dict) -> str:
+    """Format the output of pre_sync_check() as a human-readable terminal string.
+
+    Args:
+        check_result: Output dict from pre_sync_check().
+
+    Returns:
+        Multi-line formatted string ready for CLI display.
+    """
+    lines = [
+        "MCP Pre-Sync Check",
+        "=" * 60,
+        "",
+    ]
+
+    ok = check_result.get("ok", True)
+    status = "PASS" if ok else "FAIL"
+    lines.append(f"Status: {status}")
+    lines.append(
+        f"  {check_result.get('error_count', 0)} error(s), "
+        f"{check_result.get('warning_count', 0)} warning(s)"
+    )
+    lines.append("")
+
+    blocking = check_result.get("blocking", [])
+    if blocking:
+        lines.append("Blocking Errors:")
+        for msg in blocking:
+            lines.append(f"  ✗ {msg}")
+        lines.append("")
+
+    cautions = check_result.get("cautions", [])
+    if cautions:
+        lines.append("Warnings:")
+        for msg in cautions:
+            lines.append(f"  ⚠ {msg}")
+        lines.append("")
+
+    lines.append(check_result.get("recommendation", ""))
+    return "\n".join(lines)
+
+
 def format_server_warnings(
     mcp_servers: dict[str, dict],
     targets: list[str] | None = None,
