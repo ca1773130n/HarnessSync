@@ -57,6 +57,12 @@ class ProfileManager:
 
     VALID_SECTIONS = {"rules", "skills", "agents", "commands", "mcp", "settings"}
 
+    # Top-level profile fields recognized by apply_to_kwargs()
+    VALID_PROFILE_KEYS = {
+        "description", "scope", "only_sections", "skip_sections", "targets",
+        "mcp_servers", "account", "harness_env", "extends",
+    }
+
     def __init__(self, config_dir: Path = None):
         self.config_dir = config_dir or (Path.home() / ".harnesssync")
         self._profiles_path = self.config_dir / "profiles.json"
@@ -222,6 +228,17 @@ class ProfileManager:
         # (only public servers) without requiring separate CLAUDE.md files.
         if "mcp_servers" in profile and profile["mcp_servers"]:
             result["profile_mcp_servers"] = list(profile["mcp_servers"])
+
+        # Credential account: use a named Claude Code account (multi-account setup).
+        # Allows consultants/developers with work/personal separation to switch accounts
+        # per project by activating the appropriate named profile.
+        if "account" in profile and profile["account"]:
+            result["account"] = profile["account"]
+
+        # Harness environment override: select which env-tagged rules to include.
+        # Profiles can pin rules to a specific environment (e.g., "production", "dev").
+        if "harness_env" in profile and profile["harness_env"]:
+            result["harness_env"] = profile["harness_env"]
 
         return result
 
@@ -473,12 +490,20 @@ class ProfileManager:
             "only_sections": ["rules", "mcp"],
             # mcp_servers is intentionally empty here (template — fill in your servers)
             # Example: "mcp_servers": ["internal-jira", "company-github"]
+            # Set "account": "work" to use a dedicated work Claude Code account
         },
         "oss-mcp-only": {
             "description": "OSS context — sync only public/open-source MCP servers",
             "scope": "all",
             "only_sections": ["rules", "mcp"],
             # Example: "mcp_servers": ["context7", "github-public", "brave-search"]
+            # Set "account": "personal" to use a personal Claude Code account
+        },
+        "consultant-client": {
+            "description": "Client project — dedicated account + rules only, no personal MCPs",
+            "scope": "project",
+            "only_sections": ["rules"],
+            # Set "account": "<client-account-name>" and "targets" to client-approved harnesses
         },
     }
 
@@ -558,6 +583,12 @@ class ProfileManager:
             mcp_servers = cfg.get("mcp_servers", [])
             if mcp_servers:
                 lines.append(f"    mcp-servers: {', '.join(mcp_servers)}")
+            account = cfg.get("account", "")
+            if account:
+                lines.append(f"    account: {account}")
+            harness_env = cfg.get("harness_env", "")
+            if harness_env:
+                lines.append(f"    harness-env: {harness_env}")
 
         return "\n".join(lines)
 

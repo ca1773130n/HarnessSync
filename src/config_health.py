@@ -340,6 +340,185 @@ def _score_bar(score: int, width: int = 20) -> str:
     return "[" + "█" * filled + "░" * (width - filled) + "]"
 
 
+def suggest_rule_improvements(rules_content: str) -> list[dict]:
+    """Analyze rule content and suggest improvements for quality and clarity.
+
+    Detects common config quality issues:
+    - Duplicate or near-duplicate rules that can be consolidated
+    - Overly long rules that should be split
+    - Rules with vague language that lack actionable specifics
+    - Rules that reference external tools/versions that may be outdated
+    - Empty or placeholder rules
+
+    Args:
+        rules_content: Full text of CLAUDE.md or combined rules content.
+
+    Returns:
+        List of suggestion dicts, each with:
+            - type: "duplicate" | "vague" | "too-long" | "outdated-ref" | "empty"
+            - severity: "info" | "warn"
+            - line: int | None — approximate source line (1-indexed)
+            - message: str — human-readable suggestion
+            - excerpt: str — snippet of the rule in question (≤120 chars)
+    """
+    suggestions: list[dict] = []
+    lines = rules_content.splitlines()
+
+    _BULLET_RE = re.compile(r"^[-*•]\s+(.+)$")
+    bullet_rules: list[tuple[int, str]] = []
+    for i, line in enumerate(lines, 1):
+        m = _BULLET_RE.match(line.strip())
+        if m:
+            bullet_rules.append((i, m.group(1).strip()))
+
+    # Duplicate / near-duplicate detection via Jaccard similarity on word tokens
+    _STOP_WORDS = {"the", "a", "an", "and", "or", "in", "to", "of", "for",
+                   "is", "are", "be", "use", "when", "with", "this", "that"}
+
+    def _tokens(text: str) -> frozenset[str]:
+        words = re.findall(r"\b\w+\b", text.lower())
+        return frozenset(w for w in words if w not in _STOP_WORDS and len(w) > 2)
+
+    seen: list[tuple[frozenset, int]] = []
+    for line_num, rule_text in bullet_rules:
+        toks = _tokens(rule_text)
+        if len(toks) >= 3:
+            for prev_toks, prev_line in seen:
+                if len(prev_toks) >= 3:
+                    overlap = len(toks & prev_toks)
+                    union = len(toks | prev_toks)
+                    if union and overlap / union >= 0.7:
+                        suggestions.append({
+                            "type": "duplicate",
+                            "severity": "warn",
+                            "line": line_num,
+                            "message": (
+                                f"Rule on line {line_num} is very similar to rule on line {prev_line} "
+                                f"({int(overlap / union * 100)}% overlap) — consider consolidating"
+                            ),
+                            "excerpt": rule_text[:120],
+                        })
+                        break
+        seen.append((toks, line_num))
+
+    # Vague language patterns
+    _VAGUE: list[tuple[re.Pattern, str]] = [
+        (re.compile(r"\bmake sure\b", re.I),
+         "'Make sure' is vague — rephrase as a specific action or constraint"),
+        (re.compile(r"\bif (possible|applicable|needed)\b", re.I),
+         "Conditional 'if possible/needed' rules are often skipped — make them specific or remove"),
+        (re.compile(r"\b(various|some|several)\b.{0,30}\b(files?|places?|cases?)\b", re.I),
+         "Vague quantifiers ('various', 'some', 'several') should be replaced with specifics"),
+    ]
+    for line_num, rule_text in bullet_rules:
+        for pattern, message in _VAGUE:
+            if pattern.search(rule_text):
+                suggestions.append({
+                    "type": "vague",
+                    "severity": "info",
+                    "line": line_num,
+                    "message": message,
+                    "excerpt": rule_text[:120],
+                })
+                break
+
+    # Overly long rules
+    for line_num, rule_text in bullet_rules:
+        if len(rule_text) > 300:
+            suggestions.append({
+                "type": "too-long",
+                "severity": "info",
+                "line": line_num,
+                "message": (
+                    f"Rule on line {line_num} is {len(rule_text)} chars — "
+                    "consider splitting into multiple focused rules for better portability"
+                ),
+                "excerpt": rule_text[:120] + "...",
+            })
+
+    # Outdated hard-coded references
+    _OUTDATED: list[tuple[re.Pattern, str]] = [
+        (re.compile(r"\bgpt-3\.5\b|\bgpt-4\b(?!o)", re.I),
+         "Hard-coded model version may become outdated — use abstract capability names"),
+        (re.compile(r"\b(node|python|go)\s+\d+\.\d+\b", re.I),
+         "Hard-coded language version may go stale — remove or add a review note"),
+    ]
+    for line_num, rule_text in bullet_rules:
+        for pattern, message in _OUTDATED:
+            if pattern.search(rule_text):
+                suggestions.append({
+                    "type": "outdated-ref",
+                    "severity": "info",
+                    "line": line_num,
+                    "message": message,
+                    "excerpt": rule_text[:120],
+                })
+                break
+
+    # Empty / placeholder rules
+    _PLACEHOLDER_RE = re.compile(
+        r"^(TODO|FIXME|TBD|placeholder|fill in|your rule here)[\s:]*$", re.I
+    )
+    for line_num, rule_text in bullet_rules:
+        if _PLACEHOLDER_RE.match(rule_text) or len(rule_text.strip()) < 10:
+            suggestions.append({
+                "type": "empty",
+                "severity": "warn",
+                "line": line_num,
+                "message": f"Empty or placeholder rule on line {line_num} — remove or complete it",
+                "excerpt": rule_text[:120],
+            })
+
+    return suggestions
+
+
+def format_rule_improvement_suggestions(suggestions: list[dict]) -> str:
+    """Format rule improvement suggestions as human-readable text.
+
+    Args:
+        suggestions: Output of suggest_rule_improvements().
+
+    Returns:
+        Formatted string, or empty string if no suggestions.
+    """
+    if not suggestions:
+        return ""
+
+    by_type: dict[str, list[dict]] = {}
+    for s in suggestions:
+        by_type.setdefault(s["type"], []).append(s)
+
+    lines = ["Rule Improvement Suggestions", "=" * 50, ""]
+    type_labels = {
+        "duplicate":    ("⚠", "Potential Duplicate Rules"),
+        "vague":        ("ℹ", "Vague Language"),
+        "too-long":     ("ℹ", "Overly Long Rules"),
+        "outdated-ref": ("ℹ", "Outdated References"),
+        "empty":        ("⚠", "Empty / Placeholder Rules"),
+    }
+    for stype, (icon, label) in type_labels.items():
+        items = by_type.get(stype, [])
+        if not items:
+            continue
+        lines.append(f"{icon} {label} ({len(items)}):")
+        for s in items:
+            line_ref = f"line {s['line']}: " if s.get("line") else ""
+            lines.append(f"  {line_ref}{s['message']}")
+            if s.get("excerpt"):
+                lines.append(f"    \"{s['excerpt'][:80]}\"")
+        lines.append("")
+
+    total_warn = sum(1 for s in suggestions if s["severity"] == "warn")
+    total_info = sum(1 for s in suggestions if s["severity"] == "info")
+    parts = []
+    if total_warn:
+        parts.append(f"{total_warn} warning(s)")
+    if total_info:
+        parts.append(f"{total_info} suggestion(s)")
+    lines.append("Summary: " + ", ".join(parts))
+    return "\n".join(lines)
+
+
 def pre_sync_gap_warnings(
     source_data: dict,
     targets: list[str] | None = None,

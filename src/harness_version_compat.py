@@ -606,6 +606,93 @@ def _update_pinned_version(target: str, version: str, project_dir: Path | None =
         pass
 
 
+def detect_installed_version(target: str) -> str | None:
+    """Detect the currently installed version of a harness CLI.
+
+    Public wrapper around _detect_installed_version that also falls back to
+    checking package manifests (package.json, pip metadata) for GUI-only tools
+    like Cursor where the CLI binary may not be on PATH.
+
+    Args:
+        target: Harness name (e.g. "cursor", "gemini", "codex").
+
+    Returns:
+        Version string (e.g. "0.43.2"), or None if not detectable.
+    """
+    # Try the CLI --version flag first (works for terminal-based tools)
+    version = _detect_installed_version(target)
+    if version:
+        return version
+
+    # Fallback: check application package metadata for GUI tools
+    import re as _re
+
+    _APP_MANIFEST_PATHS: dict[str, list[Path]] = {
+        "cursor": [
+            Path("/Applications/Cursor.app/Contents/Resources/app/package.json"),
+            Path.home() / "AppData" / "Local" / "Programs" / "cursor" / "resources" / "app" / "package.json",
+        ],
+        "windsurf": [
+            Path("/Applications/Windsurf.app/Contents/Resources/app/package.json"),
+            Path.home() / "AppData" / "Local" / "Programs" / "windsurf" / "resources" / "app" / "package.json",
+        ],
+    }
+
+    for manifest_path in _APP_MANIFEST_PATHS.get(target, []):
+        if manifest_path.is_file():
+            try:
+                import json as _json
+                data = _json.loads(manifest_path.read_text(encoding="utf-8"))
+                v = data.get("version", "")
+                if v and _re.match(r"\d+\.\d+", v):
+                    return v
+            except (OSError, ValueError):
+                pass
+
+    return None
+
+
+def detect_all_installed_versions(project_dir: Path | None = None) -> dict[str, str | None]:
+    """Detect installed versions for all known harnesses.
+
+    Scans the system for all supported harness tools and returns a mapping
+    of harness name to detected version. Useful for sync-status and first-run
+    onboarding to show which harnesses are actually installed.
+
+    Args:
+        project_dir: Optional project root for pinned-version context.
+
+    Returns:
+        Dict mapping target_name -> version_string (or None if not detected).
+        Only includes targets where the harness appears to be installed.
+    """
+    import shutil as _shutil
+
+    _CLI_NAMES: dict[str, str] = {
+        "codex":    "codex",
+        "gemini":   "gemini",
+        "opencode": "opencode",
+        "aider":    "aider",
+        "cursor":   "cursor",
+        "windsurf": "windsurf",
+        "cline":    "code",    # Cline is a VS Code extension
+        "continue": "code",    # Continue.dev is a VS Code extension
+        "zed":      "zed",
+        "neovim":   "nvim",
+    }
+
+    results: dict[str, str | None] = {}
+    for target, cli in _CLI_NAMES.items():
+        # Skip targets where the CLI is not on PATH (for extension-based tools, try anyway)
+        if not _shutil.which(cli) and target not in ("cline", "continue"):
+            continue
+        version = detect_installed_version(target)
+        if version is not None:
+            results[target] = version
+
+    return results
+
+
 def format_compat_warnings(project_dir: Path | None = None) -> list[str]:
     """Generate all version compatibility warnings for all pinned targets.
 

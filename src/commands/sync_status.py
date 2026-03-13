@@ -484,6 +484,18 @@ def _show_default_status():
         for line in _format_plugin_drift(drift):
             print(line)
 
+    # Config coverage scores — show how much of the Claude Code config maps to each harness
+    try:
+        from src.compatibility_reporter import CompatibilityReporter
+        _source_data = reader.discover_all()
+        _reporter = CompatibilityReporter()
+        _coverage = _reporter.static_coverage_score(_source_data, registered)
+        _coverage_text = _reporter.format_static_coverage(_coverage)
+        if _coverage_text.strip():
+            print(_coverage_text)
+    except Exception:
+        pass  # Non-critical; don't break status output
+
     # Capability upgrade suggestions (proactive notification of new harness features)
     try:
         from src.harness_version_compat import format_upgrade_suggestions

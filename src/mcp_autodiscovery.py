@@ -197,6 +197,7 @@ class McpAutoDiscovery:
         candidates.extend(self._scan_npm_global(configured, report))
         candidates.extend(self._scan_python_packages(configured, report))
         candidates.extend(self._check_known_patterns(configured))
+        candidates.extend(self._scan_mcp_home_directory(configured, report))
 
         # Deduplicate by name
         seen_names: set[str] = set()
@@ -356,6 +357,86 @@ class McpAutoDiscovery:
                 ))
         except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception) as e:
             report.scan_errors.append(f"pip package scan: {e}")
+
+        return found
+
+    def _scan_mcp_home_directory(
+        self, configured: dict, report: McpDiscoveryReport
+    ) -> list[DiscoveredMcpServer]:
+        """Scan ~/.mcp/ directory for locally installed MCP server scripts.
+
+        The ~/.mcp/ convention is used by developers who install MCP servers as
+        local scripts rather than via npm/pip. Each entry is either an executable
+        script (treated as a direct command) or a directory containing a
+        package.json (treated as an npx-runnable package).
+
+        Args:
+            configured: Already-configured server names to skip.
+            report: Discovery report for recording scan errors.
+
+        Returns:
+            List of discovered MCP server candidates.
+        """
+        mcp_home = Path.home() / ".mcp"
+        found: list[DiscoveredMcpServer] = []
+
+        if not mcp_home.is_dir():
+            return found
+
+        try:
+            for entry in sorted(mcp_home.iterdir()):
+                name = entry.name
+                # Skip hidden files and non-server files
+                if name.startswith(".") or name.startswith("_"):
+                    continue
+
+                # Normalize name to mcp-server-<name> convention if needed
+                server_name = name if name.startswith("mcp-") else f"mcp-{name}"
+                already = server_name in configured or name in configured
+
+                if entry.is_file() and entry.stat().st_mode & 0o111:
+                    # Executable script — invoke directly
+                    found.append(DiscoveredMcpServer(
+                        name=server_name,
+                        command=str(entry),
+                        args=[],
+                        description=f"Local MCP server script: {entry}",
+                        source="mcp-home",
+                        already_configured=already,
+                    ))
+
+                elif entry.is_dir():
+                    # Check for package.json (Node.js server)
+                    pkg_json = entry / "package.json"
+                    if pkg_json.is_file():
+                        try:
+                            pkg = json.loads(pkg_json.read_text(encoding="utf-8"))
+                            description = pkg.get("description", f"Local MCP server: {name}")
+                            main_script = pkg.get("main", "index.js")
+                            found.append(DiscoveredMcpServer(
+                                name=server_name,
+                                command="node",
+                                args=[str(entry / main_script)],
+                                description=description,
+                                source="mcp-home",
+                                already_configured=already,
+                            ))
+                        except (OSError, ValueError) as e:
+                            report.scan_errors.append(f"~/.mcp/{name}/package.json: {e}")
+
+                    # Check for pyproject.toml / setup.py (Python server)
+                    elif (entry / "pyproject.toml").is_file() or (entry / "setup.py").is_file():
+                        found.append(DiscoveredMcpServer(
+                            name=server_name,
+                            command="python",
+                            args=["-m", name.replace("-", "_")],
+                            description=f"Local Python MCP server: {name}",
+                            source="mcp-home",
+                            already_configured=already,
+                        ))
+
+        except OSError as e:
+            report.scan_errors.append(f"~/.mcp/ scan error: {e}")
 
         return found
 

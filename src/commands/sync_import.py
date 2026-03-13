@@ -53,10 +53,14 @@ _FRONTMATTER_RE = re.compile(r"^---\s*\n.*?---\s*\n", re.DOTALL)
 
 # Auto-detect source files per harness
 _DEFAULT_FILES: dict[str, list[str]] = {
-    "cursor": [".cursor/rules/claude-code-rules.mdc", ".cursor/rules/*.mdc"],
-    "aider":  ["CONVENTIONS.md"],
-    "codex":  ["AGENTS.md"],
-    "gemini": ["GEMINI.md"],
+    "cursor":    [".cursor/rules/claude-code-rules.mdc", ".cursor/rules/*.mdc",
+                  ".cursorrules"],
+    "aider":     ["CONVENTIONS.md", ".aider.conf.yml"],
+    "codex":     ["AGENTS.md"],
+    "gemini":    ["GEMINI.md"],
+    "windsurf":  [".windsurfrules"],
+    "opencode":  ["AGENTS.md"],
+    "cline":     [".cline/rules.md", ".clinerules"],
 }
 
 # CLAUDE.md import section header/footer
@@ -208,7 +212,8 @@ def import_from_harness(
     """Import configuration from a target harness into CLAUDE.md.
 
     Args:
-        harness: Source harness ("cursor", "aider", "codex", "gemini").
+        harness: Source harness ("cursor", "aider", "codex", "gemini", "windsurf",
+                 "opencode", "cline").
         project_dir: Project root directory.
         file_path: Specific file to import (auto-detected if None).
         dry_run: If True, preview only.
@@ -603,7 +608,7 @@ def main() -> None:
     parser.add_argument(
         "--from",
         dest="harness",
-        choices=["cursor", "aider", "codex", "gemini"],
+        choices=["cursor", "aider", "codex", "gemini", "windsurf", "opencode", "cline"],
         required=True,
         help="Source harness to import from",
     )

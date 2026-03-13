@@ -785,6 +785,126 @@ class CompatibilityReporter:
 
         return "\n".join(lines)
 
+    def static_coverage_score(self, source_data: dict, targets: list[str]) -> dict[str, dict]:
+        """Compute a 0-100 config coverage score per harness without running a sync.
+
+        Uses a static capability matrix to estimate how much of the Claude Code
+        config will successfully map to each target. This is the score shown in
+        /sync-status to give users a quick fidelity signal without running the
+        full sync engine.
+
+        Score formula:
+          - full support: 100 pts  (rules → rules, MCP → native MCP config)
+          - partial/adapted: 70 pts (section syncs but with format translation)
+          - no support: 0 pts      (section is dropped entirely)
+        Weighted by section importance (rules=2x, mcp=1.5x, others=1x).
+
+        Args:
+            source_data: Output of SourceReader.discover_all().
+            targets: List of target harness names to score.
+
+        Returns:
+            Dict mapping target_name -> {
+                "score": int,        # 0-100
+                "label": str,        # "excellent" | "good" | "fair" | "poor"
+                "details": dict,     # {section: "full"|"partial"|"none"}
+            }
+        """
+        # Static capability matrix: target -> {section: "full"|"partial"|"none"}
+        # "full" = native support, "partial" = adapted, "none" = dropped
+        _CAPABILITY: dict[str, dict[str, str]] = {
+            "codex":    {"rules": "full",  "skills": "partial", "agents": "partial",
+                         "commands": "partial", "mcp": "partial", "settings": "partial"},
+            "gemini":   {"rules": "full",  "skills": "partial", "agents": "partial",
+                         "commands": "partial", "mcp": "full",    "settings": "partial"},
+            "opencode": {"rules": "full",  "skills": "full",    "agents": "partial",
+                         "commands": "partial", "mcp": "full",    "settings": "partial"},
+            "cursor":   {"rules": "full",  "skills": "partial", "agents": "partial",
+                         "commands": "partial", "mcp": "full",    "settings": "none"},
+            "aider":    {"rules": "full",  "skills": "none",    "agents": "none",
+                         "commands": "none",    "mcp": "none",    "settings": "partial"},
+            "windsurf": {"rules": "full",  "skills": "partial", "agents": "partial",
+                         "commands": "partial", "mcp": "partial", "settings": "none"},
+            "cline":    {"rules": "full",  "skills": "partial", "agents": "none",
+                         "commands": "none",    "mcp": "full",    "settings": "partial"},
+            "continue": {"rules": "full",  "skills": "none",    "agents": "none",
+                         "commands": "none",    "mcp": "full",    "settings": "none"},
+            "zed":      {"rules": "full",  "skills": "none",    "agents": "none",
+                         "commands": "none",    "mcp": "full",    "settings": "none"},
+            "neovim":   {"rules": "full",  "skills": "none",    "agents": "none",
+                         "commands": "none",    "mcp": "full",    "settings": "partial"},
+        }
+        _SECTION_WEIGHTS: dict[str, float] = {
+            "rules": 2.0, "mcp": 1.5, "skills": 1.5,
+            "agents": 1.0, "commands": 1.0, "settings": 1.0,
+        }
+        _SUPPORT_POINTS: dict[str, float] = {"full": 100.0, "partial": 70.0, "none": 0.0}
+
+        # Determine which source sections are non-empty
+        active_sections = {
+            s for s in _SECTION_WEIGHTS
+            if source_data.get(s if s != "mcp" else "mcp_servers")
+        }
+
+        results: dict[str, dict] = {}
+        for target in targets:
+            caps = _CAPABILITY.get(target, {})
+            weighted_sum = 0.0
+            weight_total = 0.0
+            details: dict[str, str] = {}
+
+            for section in active_sections:
+                support = caps.get(section, "full" if section == "rules" else "none")
+                details[section] = support
+                w = _SECTION_WEIGHTS.get(section, 1.0)
+                weighted_sum += _SUPPORT_POINTS[support] * w
+                weight_total += w
+
+            score = round(weighted_sum / weight_total) if weight_total > 0 else 100
+            if score >= 90:
+                label = "excellent"
+            elif score >= 75:
+                label = "good"
+            elif score >= 50:
+                label = "fair"
+            else:
+                label = "poor"
+
+            results[target] = {"score": score, "label": label, "details": details}
+
+        return results
+
+    def format_static_coverage(self, coverage: dict[str, dict]) -> str:
+        """Format static coverage scores as a compact per-target summary.
+
+        Args:
+            coverage: Output of static_coverage_score().
+
+        Returns:
+            Formatted multi-line string for display in /sync-status.
+        """
+        if not coverage:
+            return ""
+
+        lines = ["\nConfig Coverage Scores", "=" * 40]
+        for target, data in sorted(coverage.items()):
+            score = data["score"]
+            label = data["label"]
+            bar_len = int(score / 5)
+            bar = "█" * bar_len + "░" * (20 - bar_len)
+            lines.append(f"\n{target.upper():<12} {score:>3}/100  [{bar}]  {label}")
+
+            # Show partial/none sections compactly
+            partial = [s for s, v in data.get("details", {}).items() if v == "partial"]
+            none_secs = [s for s, v in data.get("details", {}).items() if v == "none"]
+            if partial:
+                lines.append(f"  ~ adapted:  {', '.join(partial)}")
+            if none_secs:
+                lines.append(f"  ✗ dropped:  {', '.join(none_secs)}")
+
+        lines.append("")
+        return "\n".join(lines)
+
     def format_settings_translation_block(self, targets: list[str], settings: dict) -> str:
         """Format per-target settings translation notes into a single block.
 

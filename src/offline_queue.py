@@ -315,6 +315,109 @@ class OfflineQueue:
         lines.append("\nRun /sync to replay when targets are available.")
         return "\n".join(lines)
 
+    def clear_exhausted(self) -> int:
+        """Remove queue entries that have exceeded the retry limit.
+
+        These entries would never be retried anyway (replay_pending drops them
+        silently), but clearing them explicitly keeps the queue file tidy and
+        surfaces to users that some syncs were permanently abandoned.
+
+        Returns:
+            Number of exhausted entries removed.
+        """
+        queue = self._load()
+        live = [e for e in queue if e.get("retry_count", 0) < MAX_RETRY_ATTEMPTS]
+        removed = len(queue) - len(live)
+        if removed:
+            self._save(live)
+        return removed
+
+    def get_next_retry_time(self, target: str, project_dir: str | None = None) -> str | None:
+        """Return the ISO timestamp when a queued target will next be retried.
+
+        Useful for status displays that want to tell the user 'Codex sync will
+        retry at 14:32' rather than just 'pending'.
+
+        Args:
+            target: Target harness name.
+            project_dir: Project directory path (None = any project).
+
+        Returns:
+            ISO timestamp string, or None if no backoff window is set (i.e., the
+            entry will be retried on the next /sync invocation).
+        """
+        key = f"{target}::{project_dir or ''}"
+        for entry in self._load():
+            if entry.get("key") == key:
+                return entry.get("next_retry_at")
+        return None
+
+    def format_pending(self) -> str:
+        """Format human-readable table of pending queue entries.
+
+        More structured than format_summary() — suitable for display in
+        /sync-status and /sync --show-queue. Shows target, reason, age,
+        retry count, and estimated next-retry time for each entry.
+
+        Returns:
+            Formatted table string, or a one-liner if the queue is empty.
+        """
+        entries = self.list_pending()
+        if not entries:
+            return "Offline sync queue: empty"
+
+        from datetime import datetime as _dt
+
+        now = _dt.now()
+        lines = [f"Offline Sync Queue  ({len(entries)} pending)", "─" * 60]
+        lines.append(f"  {'Target':<12} {'Age':>6}  {'Retries':>8}  {'Next Retry':<20}  Reason")
+        lines.append(f"  {'─'*12} {'─'*6}  {'─'*8}  {'─'*20}  {'─'*20}")
+
+        for entry in entries:
+            target = entry.get("target", "?")
+            reason = entry.get("reason", "")[:30]
+            retry_count = entry.get("retry_count", 0)
+            retries_str = f"{retry_count}/{MAX_RETRY_ATTEMPTS}"
+            next_retry = entry.get("next_retry_at", "")
+            if next_retry:
+                try:
+                    nr_dt = _dt.fromisoformat(next_retry)
+                    delta_mins = int((nr_dt - now).total_seconds() / 60)
+                    if delta_mins > 0:
+                        next_retry_str = f"in {delta_mins}m ({nr_dt.strftime('%H:%M')})"
+                    else:
+                        next_retry_str = "ready"
+                except ValueError:
+                    next_retry_str = next_retry[:20]
+            else:
+                next_retry_str = "ready"
+
+            queued_at = entry.get("queued_at", "")
+            age_str = ""
+            if queued_at:
+                try:
+                    q_dt = _dt.fromisoformat(queued_at)
+                    age_secs = int((now - q_dt).total_seconds())
+                    if age_secs < 3600:
+                        age_str = f"{age_secs // 60}m"
+                    elif age_secs < 86400:
+                        age_str = f"{age_secs // 3600}h"
+                    else:
+                        age_str = f"{age_secs // 86400}d"
+                except ValueError:
+                    age_str = "?"
+
+            lines.append(
+                f"  {target:<12} {age_str:>6}  {retries_str:>8}  {next_retry_str:<20}  {reason}"
+            )
+
+            if entry.get("last_error"):
+                lines.append(f"    └─ last error: {entry['last_error'][:60]}")
+
+        lines.append("─" * 60)
+        lines.append("Run /sync to replay queued syncs when targets become available.")
+        return "\n".join(lines)
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------

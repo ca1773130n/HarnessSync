@@ -320,21 +320,22 @@ class SetupWizard:
 
         # Step 1: Detect installed harnesses
         print("[1/4] Detecting installed AI harnesses...")
-        checker = HarnessReadinessChecker()
-        all_targets = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"]
+        all_targets = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf",
+                       "cline", "continue", "zed", "neovim"]
+        installed_map = self.detect_installed_harnesses(include_versions=True)
         detected: list[str] = []
         not_found: list[str] = []
         for target in all_targets:
-            report = checker.check(target, project_dir=cwd)
-            if report.all_pass:
+            info = installed_map.get(target)
+            if info and info["installed"]:
                 detected.append(target)
-                print(f"  ✓ {target}")
-            elif any(c.passed for c in report.checks):
-                detected.append(target)
-                print(f"  ~ {target} (partial)")
+                version_str = f" v{info['version']}" if info.get("version") else ""
+                method = info.get("detection_method", "")
+                method_note = f" ({method})" if method and method != "cli" else ""
+                print(f"  ✓ {target}{version_str}{method_note}")
             else:
                 not_found.append(target)
-                print(f"  ✗ {target} (not installed)")
+                print(f"  ✗ {target} (not detected)")
 
         if not detected:
             print("\nNo harnesses detected. Install at least one harness and re-run.")
@@ -460,6 +461,97 @@ class SetupWizard:
         print(f"\n.harnesssync written to {harnesssync_path}")
         print("Run /sync to perform your first sync.")
         return config
+
+    @staticmethod
+    def detect_installed_harnesses(include_versions: bool = True) -> dict[str, dict]:
+        """Detect which AI harnesses are installed on this machine.
+
+        Combines CLI binary detection with application manifest inspection to
+        identify installed harnesses and their versions. Used by the first-run
+        guided wizard and /sync-status to show which harnesses are available.
+
+        Args:
+            include_versions: If True, attempt to detect installed version strings.
+                              Set to False for faster detection when versions aren't needed.
+
+        Returns:
+            Dict mapping harness name -> {
+                "installed": bool,
+                "version": str | None,
+                "config_dir": str | None,   # detected config directory
+                "detection_method": str,     # "cli" | "app-bundle" | "config-dir"
+            }
+        """
+        import shutil
+
+        _CLI_BINARIES: dict[str, str] = {
+            "codex":    "codex",
+            "gemini":   "gemini",
+            "opencode": "opencode",
+            "aider":    "aider",
+            "cursor":   "cursor",
+            "windsurf": "windsurf",
+            "cline":    "code",      # VS Code hosts Cline
+            "continue": "code",      # VS Code hosts Continue
+            "zed":      "zed",
+            "neovim":   "nvim",
+        }
+        _CONFIG_DIR_FALLBACKS: dict[str, Path] = {
+            "codex":    Path.home() / ".codex",
+            "gemini":   Path.home() / ".gemini",
+            "opencode": Path.home() / ".config" / "opencode",
+            "cursor":   Path.home() / ".cursor",
+            "aider":    Path.home() / ".aider",
+            "windsurf": Path.home() / ".codeium" / "windsurf",
+            "cline":    Path.home() / ".vscode" / "extensions",
+            "continue": Path.home() / ".continue",
+            "zed":      (
+                Path.home() / "Library" / "Application Support" / "Zed"
+                if (Path.home() / "Library").exists()
+                else Path.home() / ".config" / "zed"
+            ),
+        }
+
+        results: dict[str, dict] = {}
+
+        for harness, cli in _CLI_BINARIES.items():
+            installed = False
+            version: str | None = None
+            config_dir: str | None = None
+            detection_method = "none"
+
+            # Method 1: CLI binary on PATH
+            if shutil.which(cli):
+                installed = True
+                detection_method = "cli"
+
+            # Method 2: Config directory exists (harness installed but not on PATH)
+            if not installed:
+                fallback = _CONFIG_DIR_FALLBACKS.get(harness)
+                if fallback and fallback.exists():
+                    installed = True
+                    detection_method = "config-dir"
+
+            if installed:
+                config_dir_path = _CONFIG_DIR_FALLBACKS.get(harness)
+                if config_dir_path and config_dir_path.exists():
+                    config_dir = str(config_dir_path)
+
+                if include_versions:
+                    try:
+                        from src.harness_version_compat import detect_installed_version
+                        version = detect_installed_version(harness)
+                    except Exception:
+                        pass
+
+                results[harness] = {
+                    "installed": True,
+                    "version": version,
+                    "config_dir": config_dir,
+                    "detection_method": detection_method,
+                }
+
+        return results
 
     @staticmethod
     def _suggest_account_name(source_path: Path) -> str:
