@@ -521,6 +521,19 @@ def _show_default_status():
     except Exception:
         pass  # Non-critical; don't break status output
 
+    # Inline harness blocks — show which <!-- harness:X --> overrides are active
+    try:
+        _inline_blocks = reader.get_all_inline_harness_blocks()
+        if _inline_blocks:
+            print()
+            print("Inline Harness Blocks:")
+            print("-" * 40)
+            for _harness, _block in sorted(_inline_blocks.items()):
+                _preview = _block.split("\n")[0][:60]
+                print(f"  {_harness:<12} {_preview}...")
+    except Exception:
+        pass  # Non-critical; inline block display is informational only
+
     # Item 11 — Config health scores (0-100 per harness with trend)
     try:
         from src.config_health import SyncHealthTracker

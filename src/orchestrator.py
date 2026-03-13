@@ -915,6 +915,25 @@ class SyncOrchestrator:
             except Exception:
                 pass  # Upgrade advisor is informational, never blocks
 
+        # --- POST-SYNC: CAPABILITY GAP REPORT ---
+        # Show which skills/capabilities are missing in synced targets.
+        if not self.dry_run:
+            try:
+                from src.skill_gap_analyzer import post_sync_capability_report
+                synced_targets = [
+                    t for t in results
+                    if not t.startswith('_') and 'error' not in results[t]
+                ]
+                if synced_targets:
+                    cap_report = post_sync_capability_report(
+                        synced_targets, project_dir=self.project_dir
+                    )
+                    if cap_report:
+                        results['_capability_report'] = cap_report
+                        self.logger.info(cap_report)
+            except Exception:
+                pass  # Capability report is informational, never blocks
+
         return results
 
     def _apply_section_filter(self, data: dict, target: str = "") -> dict:
