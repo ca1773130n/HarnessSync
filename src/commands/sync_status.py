@@ -510,6 +510,23 @@ def _show_default_status():
     except Exception:
         pass  # Non-critical; don't break status output on version check failure
 
+    # Item 11 — Config health scores (0-100 per harness with trend)
+    try:
+        from src.config_health import SyncHealthTracker
+        _tracker = SyncHealthTracker()
+        _health_scores = []
+        for _target_name in registered:
+            try:
+                _score = _tracker.compute_score(_target_name)
+                _health_scores.append(_score)
+            except Exception:
+                pass
+        if _health_scores:
+            print()
+            print(_tracker.format_dashboard(_health_scores))
+    except Exception:
+        pass  # Non-critical; health scores are informational only
+
 
 if __name__ == "__main__":
     main()

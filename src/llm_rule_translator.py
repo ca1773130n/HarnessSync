@@ -49,6 +49,13 @@ class TranslationResult:
     skipped: bool = False  # True if content needed no translation
     annotation: str = ""   # Machine-readable translation notes
     error: str = ""        # Non-empty if translation failed
+    # Item 6 — Confidence scoring
+    confidence: str = "High"          # "High" | "Medium" | "Low"
+    lost_capabilities: list = None    # Plain-language list of what was lost in translation
+
+    def __post_init__(self) -> None:
+        if self.lost_capabilities is None:
+            self.lost_capabilities = []
 
     def format(self, include_annotation: bool = True) -> str:
         """Return formatted translated content with optional annotation header."""
@@ -57,13 +64,25 @@ class TranslationResult:
         lines = []
         if self.best_effort and include_annotation:
             method = "LLM (best effort)" if self.used_llm else "regex (best effort)"
+            conf_tag = f" confidence='{self.confidence}'"
             lines.append(
-                f"<!-- hs:translated target='{self.target}' method='{method}' -->"
+                f"<!-- hs:translated target='{self.target}' method='{method}'{conf_tag} -->"
             )
             if self.annotation:
                 lines.append(f"<!-- hs:notes {self.annotation} -->")
+            if self.lost_capabilities:
+                lost_str = "; ".join(self.lost_capabilities)
+                lines.append(f"<!-- hs:lost {lost_str} -->")
         lines.append(self.translated)
         return "\n".join(lines)
+
+    def format_confidence_summary(self) -> str:
+        """Return a one-line confidence summary for user display."""
+        conf_emoji = {"High": "✓", "Medium": "~", "Low": "✗"}.get(self.confidence, "?")
+        summary = f"[{conf_emoji} {self.confidence}]"
+        if self.lost_capabilities:
+            summary += f" Lost: {', '.join(self.lost_capabilities)}"
+        return summary
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +146,101 @@ _COMPLEX_PATTERNS = [
 def _needs_llm_translation(content: str) -> bool:
     """Return True if content contains patterns that regex can't handle well."""
     return any(p.search(content) for p in _COMPLEX_PATTERNS)
+
+
+# ---------------------------------------------------------------------------
+# Item 6 — Translation confidence scoring
+# ---------------------------------------------------------------------------
+
+# Patterns indicating capabilities that CANNOT be preserved in any harness
+_UNPRESERVABLE_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"<tool_call>|</tool_call>", re.IGNORECASE),
+     "tool-call XML blocks (no generic harness equivalent)"),
+    (re.compile(r"\bAgent\s+tool\b|\bSubagent\b", re.IGNORECASE),
+     "sub-agent dispatch (Claude Code only)"),
+    (re.compile(r"\bEnterPlanMode\b|\bExitPlanMode\b", re.IGNORECASE),
+     "plan-mode transitions (Claude Code only)"),
+    (re.compile(r"\bTodoWrite\b|\bTodoRead\b", re.IGNORECASE),
+     "TodoWrite/TodoRead task tracking (Claude Code only)"),
+    (re.compile(r"\bNotebookEdit\b|\bNotebookRead\b", re.IGNORECASE),
+     "Jupyter notebook tools (Claude Code only)"),
+    (re.compile(r"PostToolUse|PreToolUse|UserPromptSubmit|SessionStart|SessionEnd",
+                re.IGNORECASE),
+     "hook event references (Claude Code only)"),
+    (re.compile(r"mcp__\w+__\w+", re.IGNORECASE),
+     "MCP tool call references (harness-specific availability)"),
+]
+
+# Patterns indicating capabilities that are PARTIALLY preserved
+_PARTIAL_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\b(Read|Write|Edit|Bash|Glob|Grep)\s+tool\b", re.IGNORECASE),
+     "Claude Code tool references (generalised to descriptions)"),
+    (re.compile(r"/[a-z][-a-z]+\b"),
+     "slash commands (not supported in most harnesses)"),
+    (re.compile(r"\bskill\b|\bskills\b", re.IGNORECASE),
+     "skill invocations (no universal equivalent)"),
+    (re.compile(r"\bhook\b", re.IGNORECASE),
+     "hook behavior (no equivalent in most harnesses)"),
+    (re.compile(r"\bpermission\b|\bapproval\b", re.IGNORECASE),
+     "permission/approval settings (harness-specific config)"),
+]
+
+
+def score_translation_confidence(
+    original: str,
+    translated: str,
+    target: str,
+) -> tuple[str, list[str]]:
+    """Score translation confidence and identify lost capabilities.
+
+    Examines the original content for patterns that cannot be faithfully
+    preserved in the target harness, then computes an overall confidence level.
+
+    Args:
+        original: Original Claude Code rule content.
+        translated: Translated content for the target harness.
+        target: Target harness name.
+
+    Returns:
+        Tuple of (confidence_level, lost_capabilities):
+          - confidence_level: "High" | "Medium" | "Low"
+          - lost_capabilities: List of plain-language descriptions of lost features.
+    """
+    lost: list[str] = []
+
+    # Check for completely unpreservable patterns in the original
+    for pattern, description in _UNPRESERVABLE_PATTERNS:
+        if pattern.search(original):
+            lost.append(description)
+
+    # Check for partially-preserved patterns
+    partial: list[str] = []
+    for pattern, description in _PARTIAL_PATTERNS:
+        if pattern.search(original):
+            partial.append(description)
+
+    # Target-specific capability checks
+    if target == "aider":
+        if re.search(r"\bMCP\b|\bmcp\b", original):
+            lost.append("MCP servers (Aider has no MCP support)")
+        if re.search(r"\bskill\b", original, re.IGNORECASE):
+            lost.append("skill activation (Aider reads skills as context only)")
+    elif target in ("codex", "gemini", "opencode"):
+        if re.search(r"\.mdc\b|cursor\s*rule", original, re.IGNORECASE):
+            lost.append("Cursor .mdc format directives")
+    elif target == "cursor":
+        if re.search(r"\bAGENTS\.md\b|\bCONVENTIONS\.md\b", original):
+            lost.append("Codex/Aider-specific file references")
+
+    # Compute confidence
+    if lost:
+        confidence = "Low" if len(lost) >= 2 else "Medium"
+    elif partial:
+        confidence = "Medium"
+    else:
+        confidence = "High"
+
+    return confidence, lost + partial
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +326,7 @@ class LLMRuleTranslator:
         # Step 2: Check if LLM translation is needed and available
         if not force_llm and not _needs_llm_translation(regex_translated):
             changed = regex_translated != content
+            confidence, lost = score_translation_confidence(content, regex_translated, self.target)
             return TranslationResult(
                 original=content,
                 translated=regex_translated,
@@ -219,11 +334,14 @@ class LLMRuleTranslator:
                 skipped=not changed,
                 best_effort=changed,
                 used_llm=False,
+                confidence=confidence,
+                lost_capabilities=lost,
             )
 
         if not self._enabled:
             # Return regex result with annotation that LLM was not available
             note = "LLM translation unavailable (no API key or disabled)"
+            confidence, lost = score_translation_confidence(content, regex_translated, self.target)
             return TranslationResult(
                 original=content,
                 translated=regex_translated,
@@ -231,6 +349,8 @@ class LLMRuleTranslator:
                 best_effort=True,
                 used_llm=False,
                 annotation=note,
+                confidence=confidence,
+                lost_capabilities=lost,
             )
 
         # Step 3: LLM translation
@@ -333,6 +453,12 @@ class LLMRuleTranslator:
         Returns:
             TranslationResult with LLM output.
         """
+        # Pre-compute confidence from the original content regardless of LLM outcome
+        confidence, lost = score_translation_confidence(original, original, self.target)
+        # LLM output is always "best effort" — cap confidence at Medium for complex rules
+        if confidence == "High" and _needs_llm_translation(original):
+            confidence = "Medium"
+
         try:
             client = self._get_client()
         except (ImportError, ValueError) as exc:
@@ -343,6 +469,8 @@ class LLMRuleTranslator:
                 best_effort=True,
                 used_llm=False,
                 error=str(exc),
+                confidence=confidence,
+                lost_capabilities=lost,
             )
 
         prompt = self._build_prompt(regex_translated)
@@ -361,6 +489,8 @@ class LLMRuleTranslator:
                 used_llm=True,
                 best_effort=True,
                 annotation=f"translated by {self.model}",
+                confidence=confidence,
+                lost_capabilities=lost,
             )
 
         except Exception as exc:
@@ -372,6 +502,8 @@ class LLMRuleTranslator:
                 best_effort=True,
                 used_llm=False,
                 error=f"LLM call failed: {exc}",
+                confidence=confidence,
+                lost_capabilities=lost,
             )
 
 

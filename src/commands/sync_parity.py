@@ -348,6 +348,23 @@ def main() -> None:
     else:
         print(_format_report(source_data, targets))
 
+    # Item 25 — Feature parity upgrade alerts: warn when installed harness versions
+    # unlock new sync capabilities that were previously unavailable.
+    try:
+        from src.harness_version_compat import suggest_capability_upgrades
+        upgrade_suggestions = suggest_capability_upgrades(
+            project_dir=project_dir,
+            source_data=source_data,
+        )
+        if upgrade_suggestions:
+            print()
+            print("Feature Parity Upgrade Alerts:")
+            print("-" * 40)
+            for suggestion in upgrade_suggestions:
+                print(f"  + {suggestion}")
+    except Exception:
+        pass  # Non-critical; upgrade suggestions are informational
+
 
 if __name__ == "__main__":
     main()

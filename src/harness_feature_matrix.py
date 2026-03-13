@@ -849,6 +849,66 @@ class HarnessFeatureMatrix:
             )
         )
 
+    def format_report_card(self, target_list: list[str] | None = None) -> str:
+        """Render a visual capability gap report card for each harness.
+
+        Shows a letter grade (A-F) and coverage score per harness, listing
+        which Claude Code features have no equivalent and which are only
+        partially supported.  Helps users understand what they lose when
+        switching harnesses and motivates keeping Claude Code as primary.
+
+        Item 2 — Capability Gap Report Card.
+
+        Args:
+            target_list: Harnesses to include (default: all).
+
+        Returns:
+            Multi-line formatted report card string.
+        """
+        targets = [t for t in (target_list or ALL_HARNESSES) if t in ALL_HARNESSES]
+        if not targets:
+            return "No known harnesses to report on."
+
+        def _letter_grade(score: int) -> str:
+            if score >= 90:
+                return "A"
+            if score >= 75:
+                return "B"
+            if score >= 60:
+                return "C"
+            if score >= 45:
+                return "D"
+            return "F"
+
+        lines: list[str] = [
+            "Capability Gap Report Card",
+            "=" * 50,
+            f"{'Harness':<12}  {'Score':>5}  {'Grade'}  {'Gaps (unsupported features)'}",
+            "-" * 50,
+        ]
+
+        for harness in sorted(targets):
+            score = self.coverage_score(harness)
+            grade = _letter_grade(score)
+            gaps = self.get_support_gaps(harness)
+            partial = [
+                f for f in ALL_FEATURES
+                if _FEATURE_MATRIX.get(f, {}).get(harness) in ("partial", "adapter")
+            ]
+            gap_str = ", ".join(gaps) if gaps else "none"
+            lines.append(f"{harness:<12}  {score:>4}%  [{grade}]    {gap_str}")
+            if partial:
+                partial_str = ", ".join(partial)
+                lines.append(f"{'':12}  {'':>5}         Degraded: {partial_str}")
+
+        lines += [
+            "-" * 50,
+            "",
+            "Grades: A=90%+  B=75%+  C=60%+  D=45%+  F=<45%",
+            "Run /sync-gaps <harness> for per-harness remediation steps.",
+        ]
+        return "\n".join(lines)
+
     def get_cross_harness_gaps(
         self,
         min_support_level: str = "partial",

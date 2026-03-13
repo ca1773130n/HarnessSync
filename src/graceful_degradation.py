@@ -354,3 +354,248 @@ class GracefulDegradation:
     def get_known_feature_types(self) -> set[str]:
         """Return all feature types that have at least one profile."""
         return {ft for (ft, _) in self._profiles}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Item 26 — Agent Capability Downgrade Warnings
+# ──────────────────────────────────────────────────────────────────────────────
+
+import re as _re
+
+# Tools that Claude Code agents can declare — each maps to a human-readable capability
+_AGENT_TOOL_CAPABILITIES: dict[str, str] = {
+    "Bash":           "shell command execution",
+    "Read":           "file reading",
+    "Write":          "file writing",
+    "Edit":           "file editing",
+    "Glob":           "file pattern matching",
+    "Grep":           "content search",
+    "Agent":          "sub-agent delegation",
+    "TodoWrite":      "task tracking (TodoWrite)",
+    "TodoRead":       "task reading (TodoRead)",
+    "WebFetch":       "web page fetching",
+    "WebSearch":      "web search",
+    "NotebookEdit":   "Jupyter notebook editing",
+    "NotebookRead":   "Jupyter notebook reading",
+    "EnterPlanMode":  "plan mode transitions",
+    "ExitPlanMode":   "plan mode transitions",
+    "MultiEdit":      "multi-file editing",
+}
+
+# MCP tool pattern — any mcp__*__* reference
+_MCP_TOOL_PATTERN = _re.compile(r"mcp__(\w+)__(\w+)")
+
+# Per-harness: set of tool names that are silently unavailable
+_HARNESS_UNAVAILABLE_TOOLS: dict[str, frozenset[str]] = {
+    "codex": frozenset({
+        "Agent", "TodoWrite", "TodoRead", "EnterPlanMode", "ExitPlanMode",
+        "NotebookEdit", "NotebookRead", "WebFetch", "WebSearch",
+    }),
+    "gemini": frozenset({
+        "Agent", "TodoWrite", "TodoRead", "EnterPlanMode", "ExitPlanMode",
+        "NotebookEdit", "NotebookRead",
+    }),
+    "aider": frozenset({
+        "Agent", "TodoWrite", "TodoRead", "EnterPlanMode", "ExitPlanMode",
+        "NotebookEdit", "NotebookRead", "WebFetch", "WebSearch",
+        "Glob", "Grep",
+    }),
+    "cursor": frozenset({
+        "Agent", "TodoWrite", "TodoRead", "EnterPlanMode", "ExitPlanMode",
+        "NotebookEdit", "NotebookRead",
+    }),
+    "windsurf": frozenset({
+        "Agent", "TodoWrite", "TodoRead", "EnterPlanMode", "ExitPlanMode",
+        "NotebookEdit", "NotebookRead",
+    }),
+    "opencode": frozenset({
+        "Agent", "TodoWrite", "TodoRead", "EnterPlanMode", "ExitPlanMode",
+        "NotebookEdit", "NotebookRead",
+    }),
+    "cline": frozenset({
+        "Agent", "TodoWrite", "TodoRead", "EnterPlanMode", "ExitPlanMode",
+        "NotebookEdit", "NotebookRead",
+    }),
+    "continue": frozenset({
+        "Agent", "TodoWrite", "TodoRead", "EnterPlanMode", "ExitPlanMode",
+        "NotebookEdit", "NotebookRead", "WebFetch", "WebSearch",
+    }),
+    "zed": frozenset({
+        "Agent", "TodoWrite", "TodoRead", "EnterPlanMode", "ExitPlanMode",
+        "NotebookEdit", "NotebookRead", "WebFetch", "WebSearch",
+    }),
+    "neovim": frozenset({
+        "Agent", "TodoWrite", "TodoRead", "EnterPlanMode", "ExitPlanMode",
+        "NotebookEdit", "NotebookRead", "WebFetch", "WebSearch",
+    }),
+}
+
+# Harnesses that have no MCP support at all
+_NO_MCP_HARNESSES: frozenset[str] = frozenset({"aider", "continue", "zed", "neovim"})
+
+
+@dataclass
+class AgentCapabilityWarning:
+    """A warning about a Claude Code agent capability lost in a target harness."""
+
+    agent_name: str
+    target: str
+    lost_tool: str           # Tool or MCP server name
+    capability: str          # Human-readable capability description
+    severity: str            # "critical" | "warning" | "info"
+    suggestion: str = ""     # Actionable suggestion for the user
+
+    def format(self) -> str:
+        icon = {"critical": "✗", "warning": "~", "info": "i"}.get(self.severity, "?")
+        parts = [f"  [{icon}] {self.agent_name} → {self.target}: {self.capability} unavailable"]
+        if self.suggestion:
+            parts.append(f"      Suggestion: {self.suggestion}")
+        return "\n".join(parts)
+
+
+def _extract_tool_references(agent_content: str) -> tuple[list[str], list[str]]:
+    """Extract tool and MCP references from agent content.
+
+    Scans for Claude Code tool names and mcp__*__* patterns in the agent
+    definition YAML frontmatter and markdown body.
+
+    Returns:
+        (tool_names, mcp_servers) — lists of referenced names.
+    """
+    tool_names: list[str] = []
+    mcp_servers: list[str] = []
+
+    # Scan for known tool names as whole words
+    for tool in _AGENT_TOOL_CAPABILITIES:
+        if _re.search(rf"\b{tool}\b", agent_content):
+            tool_names.append(tool)
+
+    # Scan for allowed-tools YAML field (Claude Code agent frontmatter)
+    fm_match = _re.search(
+        r"allowed-tools\s*:\s*\[([^\]]+)\]|allowed-tools\s*:\s*\n((?:\s+-\s*.+\n?)+)",
+        agent_content,
+        _re.IGNORECASE,
+    )
+    if fm_match:
+        raw = fm_match.group(1) or fm_match.group(2) or ""
+        for item in _re.split(r"[,\n]", raw):
+            item = item.strip().strip("-").strip().strip("\"'")
+            if item and item not in tool_names:
+                tool_names.append(item)
+
+    # Scan for MCP tool references
+    for m in _MCP_TOOL_PATTERN.finditer(agent_content):
+        server = m.group(1)
+        if server not in mcp_servers:
+            mcp_servers.append(server)
+
+    return tool_names, mcp_servers
+
+
+def warn_agent_capability_loss(
+    agent_name: str,
+    agent_content: str,
+    target: str,
+    mcp_servers_available: list[str] | None = None,
+) -> list[AgentCapabilityWarning]:
+    """Inspect an agent definition and warn about capabilities lost in target.
+
+    Parses the agent's content for tool and MCP references, then cross-
+    references with what the target harness supports.  Returns a list of
+    warnings — one per lost capability — sorted by severity.
+
+    Args:
+        agent_name: Human-readable name of the agent (for reporting).
+        agent_content: Full agent definition file content (YAML + Markdown).
+        target: Target harness name.
+        mcp_servers_available: MCP server names configured in the target harness.
+                               If None, MCP availability is unknown (warn anyway).
+
+    Returns:
+        List of AgentCapabilityWarning, sorted critical first.
+    """
+    warnings: list[AgentCapabilityWarning] = []
+    unavailable_tools = _HARNESS_UNAVAILABLE_TOOLS.get(target, frozenset())
+    tool_names, mcp_servers = _extract_tool_references(agent_content)
+
+    for tool in tool_names:
+        if tool in unavailable_tools:
+            capability = _AGENT_TOOL_CAPABILITIES.get(tool, f"tool '{tool}'")
+            severity = "critical" if tool in {"Agent", "Bash", "Write", "Edit"} else "warning"
+            suggestion = ""
+            if tool == "Agent":
+                suggestion = f"Remove sub-agent delegation or provide a fallback in {target}."
+            elif tool in {"TodoWrite", "TodoRead"}:
+                suggestion = "Use comments in the agent output to track tasks instead."
+            elif tool in {"NotebookEdit", "NotebookRead"}:
+                suggestion = "Reference notebook cells as plain text in the agent prompt."
+            elif tool in {"WebFetch", "WebSearch"}:
+                suggestion = "Provide URLs or search results manually before invoking the agent."
+            warnings.append(AgentCapabilityWarning(
+                agent_name=agent_name,
+                target=target,
+                lost_tool=tool,
+                capability=capability,
+                severity=severity,
+                suggestion=suggestion,
+            ))
+
+    # MCP server availability
+    if mcp_servers:
+        if target in _NO_MCP_HARNESSES:
+            for server in mcp_servers:
+                warnings.append(AgentCapabilityWarning(
+                    agent_name=agent_name,
+                    target=target,
+                    lost_tool=f"mcp:{server}",
+                    capability=f"MCP server '{server}' (no MCP support in {target})",
+                    severity="critical",
+                    suggestion=f"Remove MCP tool calls from the {target} version of this agent.",
+                ))
+        elif mcp_servers_available is not None:
+            for server in mcp_servers:
+                if server not in mcp_servers_available:
+                    warnings.append(AgentCapabilityWarning(
+                        agent_name=agent_name,
+                        target=target,
+                        lost_tool=f"mcp:{server}",
+                        capability=f"MCP server '{server}' (not configured in {target})",
+                        severity="warning",
+                        suggestion=f"Add '{server}' MCP server to {target} config, or remove the tool call.",
+                    ))
+
+    # Sort: critical first, then warning, then info
+    _severity_order = {"critical": 0, "warning": 1, "info": 2}
+    warnings.sort(key=lambda w: _severity_order.get(w.severity, 3))
+    return warnings
+
+
+def format_agent_downgrade_report(
+    warnings_by_agent: dict[str, list[AgentCapabilityWarning]],
+) -> str:
+    """Format agent capability downgrade warnings as a human-readable report.
+
+    Args:
+        warnings_by_agent: Dict mapping agent_name -> list of warnings.
+
+    Returns:
+        Formatted string, or empty string if no warnings.
+    """
+    all_warnings = [w for wl in warnings_by_agent.values() for w in wl]
+    if not all_warnings:
+        return ""
+
+    lines = [
+        f"Agent Capability Downgrade Warnings ({len(all_warnings)} issue(s)):",
+        "=" * 60,
+    ]
+    for agent_name, agent_warnings in sorted(warnings_by_agent.items()):
+        if not agent_warnings:
+            continue
+        criticals = sum(1 for w in agent_warnings if w.severity == "critical")
+        lines.append(f"\n  {agent_name}  ({len(agent_warnings)} warning(s)"
+                     + (f", {criticals} critical" if criticals else "") + ")")
+        for w in agent_warnings:
+            lines.append(w.format())
+
+    return "\n".join(lines)

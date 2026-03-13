@@ -905,3 +905,251 @@ class ConflictDetector:
         warning += "\n\nThese changes will be overwritten. Run with --dry-run to preview changes."
 
         return warning
+
+
+# ---------------------------------------------------------------------------
+# Item 1 — Interactive Conflict Resolution Wizard
+# ---------------------------------------------------------------------------
+
+def _explain_conflict_in_plain_english(
+    source_content: str,
+    current_content: str,
+    file_path: str,
+    target: str,
+) -> str:
+    """Produce a plain-English explanation of what is in conflict.
+
+    Analyses the diff between source and current to explain *why* there is
+    a conflict and what the user likely changed, in language that does not
+    require reading raw diffs.
+
+    Args:
+        source_content: What HarnessSync would write.
+        current_content: Current file on disk.
+        file_path: Path to the file (for labelling).
+        target: Target harness name.
+
+    Returns:
+        Multi-line plain-English conflict summary string.
+    """
+    source_lines = source_content.splitlines()
+    current_lines = current_content.splitlines()
+
+    added: list[str] = []
+    removed: list[str] = []
+
+    matcher = difflib.SequenceMatcher(None, source_lines, current_lines, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "insert":
+            added.extend(current_lines[j1:j2])
+        elif tag == "delete":
+            removed.extend(source_lines[i1:i2])
+        elif tag == "replace":
+            removed.extend(source_lines[i1:i2])
+            added.extend(current_lines[j1:j2])
+
+    # Filter out blank lines and comment-only lines for human summary
+    def _meaningful(lines: list[str]) -> list[str]:
+        return [l.strip() for l in lines if l.strip() and not l.strip().startswith("<!--")]
+
+    meaningful_added = _meaningful(added)
+    meaningful_removed = _meaningful(removed)
+
+    parts: list[str] = []
+    fname = Path(file_path).name
+
+    parts.append(f"Conflict in {fname} ({target}):")
+
+    if not meaningful_added and not meaningful_removed:
+        parts.append("  The files differ only in whitespace or comments.")
+        return "\n".join(parts)
+
+    # `added`   = lines present in current but not in source (user manually added)
+    # `removed` = lines present in source but not in current (sync wants to restore)
+    if meaningful_added and not meaningful_removed:
+        parts.append(
+            f"  You manually added {len(meaningful_added)} line(s) that HarnessSync "
+            f"would overwrite. If you sync now, these will be removed."
+        )
+        for line in meaningful_added[:3]:
+            parts.append(f'    Your addition: \u201c{line[:80]}\u201d')
+        if len(meaningful_added) > 3:
+            parts.append(f"    \u2026 and {len(meaningful_added) - 3} more.")
+    elif meaningful_removed and not meaningful_added:
+        parts.append(
+            f"  You deleted {len(meaningful_removed)} line(s) from the synced config "
+            f"that HarnessSync wants to restore."
+        )
+        for line in meaningful_removed[:3]:
+            parts.append(f'    Sync wants to re-add: \u201c{line[:80]}\u201d')
+        if len(meaningful_removed) > 3:
+            parts.append(f"    \u2026 and {len(meaningful_removed) - 3} more.")
+    else:
+        parts.append(
+            f"  You changed {len(meaningful_added)} line(s) and HarnessSync would "
+            f"replace them with {len(meaningful_removed)} different line(s). Specifically:"
+        )
+        for user_line, sync_line in zip(meaningful_added[:3], meaningful_removed[:3]):
+            parts.append(f'    Your version: \u201c{user_line[:60]}\u201d')
+            parts.append(f'    Sync version: \u201c{sync_line[:60]}\u201d')
+        if max(len(meaningful_added), len(meaningful_removed)) > 3:
+            parts.append(f"    \u2026 and more differences.")
+
+    return "\n".join(parts)
+
+
+class ConflictResolutionWizard:
+    """Interactive conflict resolution wizard for HarnessSync.
+
+    Provides a guided terminal UI that:
+    1. Explains each conflict in plain English (no raw diffs unless requested).
+    2. Shows a side-by-side diff on demand.
+    3. Offers resolution choices: keep source, keep target, merge, skip.
+    4. Applies resolutions and returns the final content per file.
+
+    This is a higher-level wrapper around ConflictDetector.resolve_three_way_interactive()
+    that adds the plain-English explanation layer and a summary at the end.
+
+    Usage::
+
+        wizard = ConflictResolutionWizard(ConflictDetector(project_dir))
+        resolved = wizard.run(conflicts, source_data)
+        # resolved: dict[file_path -> resolution_choice]
+    """
+
+    RESOLUTION_KEEP_SOURCE = "source"   # Use HarnessSync's version
+    RESOLUTION_KEEP_TARGET = "keep"     # Preserve manual edits
+    RESOLUTION_SKIP = "skip"            # Leave file untouched this sync
+
+    def __init__(self, detector: "ConflictDetector") -> None:
+        self.detector = detector
+
+    def explain_conflict(
+        self,
+        conflict: dict,
+        source_content: str,
+        target: str,
+    ) -> str:
+        """Return a plain-English explanation of the conflict.
+
+        Args:
+            conflict: Conflict dict from ConflictDetector.check().
+            source_content: What HarnessSync would write to the file.
+            target: Target harness name.
+
+        Returns:
+            Plain-English summary string.
+        """
+        file_path = conflict.get("file_path", "")
+        current_content = ""
+        p = Path(file_path)
+        if p.exists():
+            try:
+                current_content = p.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+        return _explain_conflict_in_plain_english(
+            source_content, current_content, file_path, target
+        )
+
+    def run_interactive(
+        self,
+        conflicts_by_target: dict,
+        source_contents: dict | None = None,
+    ) -> dict:
+        """Run the interactive conflict resolution wizard on a TTY.
+
+        Args:
+            conflicts_by_target: Output of ConflictDetector.check_all() —
+                dict mapping target_name -> list of conflict dicts.
+            source_contents: Dict mapping file_path -> source content string.
+                             Used for plain-English explanations. Optional.
+
+        Returns:
+            Dict mapping (target, file_path) -> resolution choice string:
+            "source" | "keep" | "skip"
+        """
+        import sys
+
+        if not sys.stdin.isatty():
+            return {}
+
+        source_contents = source_contents or {}
+        resolutions: dict = {}
+        total_conflicts = sum(len(v) for v in conflicts_by_target.values())
+
+        if total_conflicts == 0:
+            print("No conflicts to resolve.")
+            return resolutions
+
+        print(f"\n{'=' * 70}")
+        print(f"HarnessSync Conflict Resolution Wizard")
+        print(f"{'=' * 70}")
+        print(f"Found {total_conflicts} conflict(s) across "
+              f"{sum(1 for v in conflicts_by_target.values() if v)} target(s).")
+        print("\nFor each conflict, you can:")
+        print("  s) Use sync source — let HarnessSync overwrite with the Claude Code version")
+        print("  k) Keep target    — preserve your manual edits, skip this file this sync")
+        print("  d) Show diff      — display a side-by-side diff before deciding")
+        print("  ?) Skip for now   — leave this conflict unresolved (file won't be synced)")
+        print()
+
+        conflict_num = 0
+        for target, conflict_list in conflicts_by_target.items():
+            if not conflict_list:
+                continue
+            for conflict in conflict_list:
+                conflict_num += 1
+                file_path = conflict.get("file_path", "")
+                source = source_contents.get(file_path, "")
+
+                print(f"\n[{conflict_num}/{total_conflicts}] ", end="")
+                print(self.explain_conflict(conflict, source, target))
+
+                choice = self._ask_resolution(conflict, source, target)
+                resolutions[(target, file_path)] = choice
+
+        print(f"\n{'=' * 70}")
+        print(f"Conflict resolution complete.")
+        sources = sum(1 for v in resolutions.values() if v == self.RESOLUTION_KEEP_SOURCE)
+        keeps = sum(1 for v in resolutions.values() if v == self.RESOLUTION_KEEP_TARGET)
+        skips = sum(1 for v in resolutions.values() if v == self.RESOLUTION_SKIP)
+        print(f"  Use sync source: {sources}")
+        print(f"  Keep target:     {keeps}")
+        print(f"  Skipped:         {skips}")
+
+        return resolutions
+
+    def _ask_resolution(
+        self,
+        conflict: dict,
+        source_content: str,
+        target: str,
+    ) -> str:
+        """Prompt the user for a resolution choice for one conflict.
+
+        Returns one of RESOLUTION_KEEP_SOURCE | RESOLUTION_KEEP_TARGET | RESOLUTION_SKIP.
+        """
+        file_path = conflict.get("file_path", "")
+
+        while True:
+            try:
+                raw = input("\n  Choice [s=sync, k=keep, d=diff, ?=skip]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print("\nCancelled — defaulting to 'skip'.")
+                return self.RESOLUTION_SKIP
+
+            if raw in ("s", "sync", "source"):
+                return self.RESOLUTION_KEEP_SOURCE
+            elif raw in ("k", "keep"):
+                return self.RESOLUTION_KEEP_TARGET
+            elif raw in ("d", "diff"):
+                try:
+                    three_way = self.detector.three_way_diff(conflict, source_content)
+                    print(self.detector.format_side_by_side_diff(three_way))
+                except Exception as exc:
+                    print(f"  (diff failed: {exc})")
+            elif raw in ("?", "skip"):
+                return self.RESOLUTION_SKIP
+            else:
+                print("  Enter 's', 'k', 'd', or '?'.")

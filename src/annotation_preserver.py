@@ -410,3 +410,128 @@ def extract_provenance(content: str) -> dict | None:
     if not m:
         return None
     return {"source": m.group(1), "synced": m.group(2)}
+
+
+# ---------------------------------------------------------------------------
+# Item 21 — Per-rule attribution and origin tracking
+# ---------------------------------------------------------------------------
+
+# Pattern for extracting individual rules from CLAUDE.md bullet lists
+_RULE_LINE_RE = re.compile(r"^(\s*[-*+]\s+|\s*\d+\.\s+)(.+)$")
+
+# Pattern for the per-rule attribution comment we inject
+_RULE_ATTRIBUTION_RE = re.compile(
+    r'\s*<!--\s*hs:rule\s+src="([^"]+)"\s+line="(\d+)"\s+modified="([^"]+)"\s*-->',
+)
+
+
+def build_rule_attribution(
+    source_file: str,
+    line_number: int,
+    modified_date: str,
+) -> str:
+    """Build a per-rule attribution comment.
+
+    Args:
+        source_file: Basename of the source file (e.g. "CLAUDE.md").
+        line_number: 1-based line number of the rule in the source file.
+        modified_date: ISO date string (YYYY-MM-DD).
+
+    Returns:
+        An HTML comment suitable for embedding after an individual rule line.
+    """
+    return (
+        f'<!-- hs:rule src="{source_file}" line="{line_number}" '
+        f'modified="{modified_date}" -->'
+    )
+
+
+def annotate_rules_with_attribution(
+    content: str,
+    source_file: str,
+    modified_date: str | None = None,
+) -> str:
+    """Annotate each rule line in content with its origin attribution.
+
+    Adds a compact attribution comment after each bullet-point rule so that
+    users reading translated harness files can trace any rule back to its
+    source in CLAUDE.md.
+
+    Attribution is appended as an inline HTML comment on the same line as
+    the rule.  Existing attribution comments are updated in-place so that
+    re-syncing does not accumulate duplicate comments.
+
+    Example output::
+
+        - Always use TypeScript <!-- hs:rule src="CLAUDE.md" line="42" modified="2026-03-13" -->
+        - Prefer named exports  <!-- hs:rule src="CLAUDE.md" line="43" modified="2026-03-13" -->
+
+    Args:
+        content: CLAUDE.md or rules section text.
+        source_file: Basename of the source file (e.g. "CLAUDE.md").
+        modified_date: ISO date to stamp (default: today).
+
+    Returns:
+        Content with attribution comments added/updated on each rule line.
+    """
+    if modified_date is None:
+        from datetime import date
+        modified_date = date.today().isoformat()
+
+    output_lines: list[str] = []
+    for lineno, raw_line in enumerate(content.splitlines(), start=1):
+        # Strip any existing attribution comment before re-adding
+        clean_line = _RULE_ATTRIBUTION_RE.sub("", raw_line).rstrip()
+
+        if _RULE_LINE_RE.match(clean_line):
+            attribution = build_rule_attribution(source_file, lineno, modified_date)
+            output_lines.append(f"{clean_line}  {attribution}")
+        else:
+            output_lines.append(raw_line)
+
+    return "\n".join(output_lines)
+
+
+def extract_rule_attributions(content: str) -> list[dict]:
+    """Extract all per-rule attribution records from a harness file.
+
+    Parses attribution comments embedded by annotate_rules_with_attribution()
+    and returns a structured list.
+
+    Args:
+        content: Content of a synced harness file.
+
+    Returns:
+        List of dicts with keys: ``rule_text``, ``source_file``, ``line``, ``modified``.
+    """
+    records: list[dict] = []
+    for raw_line in content.splitlines():
+        attr_match = _RULE_ATTRIBUTION_RE.search(raw_line)
+        if attr_match:
+            rule_text = _RULE_ATTRIBUTION_RE.sub("", raw_line).strip()
+            # Strip leading list marker
+            rule_match = _RULE_LINE_RE.match(rule_text)
+            if rule_match:
+                rule_text = rule_match.group(2).strip()
+            records.append({
+                "rule_text": rule_text,
+                "source_file": attr_match.group(1),
+                "line": int(attr_match.group(2)),
+                "modified": attr_match.group(3),
+            })
+    return records
+
+
+def strip_rule_attributions(content: str) -> str:
+    """Remove all per-rule attribution comments from content.
+
+    Useful when preparing content for display or for harnesses where
+    HTML comments are not supported.
+
+    Args:
+        content: Content with attribution comments.
+
+    Returns:
+        Content with attribution comments stripped.
+    """
+    return _RULE_ATTRIBUTION_RE.sub("", content)
