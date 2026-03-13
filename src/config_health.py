@@ -1020,6 +1020,66 @@ class SyncHealthTracker:
 
         return "\n".join(lines)
 
+    def lowest_scoring_harness(self, scores: list[HarnessHealthScore]) -> HarnessHealthScore | None:
+        """Return the harness with the lowest health score.
+
+        Args:
+            scores: List of HarnessHealthScore objects.
+
+        Returns:
+            The lowest-scoring HarnessHealthScore, or None if scores is empty.
+        """
+        if not scores:
+            return None
+        return min(scores, key=lambda s: s.score)
+
+    def format_dashboard_with_details(self, scores: list[HarnessHealthScore]) -> str:
+        """Render a detailed dashboard highlighting the lowest-scoring harness.
+
+        Extends format_dashboard() with:
+        - A focused section on the worst-performing harness
+        - Per-dimension breakdown for the lowest scorer
+        - Prioritised actionable improvements
+
+        Args:
+            scores: List of HarnessHealthScore from compute_score().
+
+        Returns:
+            Multi-line formatted string with detailed improvement guidance.
+        """
+        base = self.format_dashboard(scores)
+        if not scores:
+            return base
+
+        worst = self.lowest_scoring_harness(scores)
+        if worst is None or worst.score >= 85:
+            return base  # All healthy — no need for focused breakdown
+
+        lines = [base, "", "─" * 55, f"Focus: {worst.target} needs attention ({worst.score}/100)"]
+
+        if worst.dimensions:
+            lines.append("")
+            lines.append("Dimension breakdown:")
+            for dim, value in sorted(worst.dimensions.items(), key=lambda kv: kv[1]):
+                bar = _score_bar(value, width=10)
+                lines.append(f"  {dim:<20} {bar} {value:3d}/100")
+
+        # Specific improvement steps for the worst harness
+        lines.append("")
+        lines.append("Improvement steps:")
+        if worst.dimensions.get("sync_freshness", 100) < 50:
+            lines.append(f"  1. Run `/sync` to re-sync {worst.target} — freshness is low")
+        if worst.dimensions.get("rule_fidelity", 100) < 60:
+            lines.append(f"  2. Run `/sync-lint` to fix CLAUDE.md issues reducing rule fidelity")
+        if worst.dimensions.get("mcp_availability", 100) < 60:
+            lines.append(f"  3. Run `/sync-mcp-health` to diagnose MCP server availability")
+        if worst.dimensions.get("skills_coverage", 100) < 60:
+            lines.append(f"  4. Check skill compatibility — some skills may not sync to {worst.target}")
+        if worst.dimensions.get("settings_drift", 100) < 60:
+            lines.append(f"  5. Run `/sync-restore {worst.target}` to resolve config drift")
+
+        return "\n".join(lines)
+
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------

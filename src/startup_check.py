@@ -338,4 +338,14 @@ def full_startup_check(project_dir: Path | None = None) -> list[str]:
     if staleness_msg:
         notices.append(staleness_msg)
 
+    # Version compatibility warnings (item 11): detect installed versions and
+    # warn when a required feature needs a newer harness than what's installed.
+    try:
+        from src.harness_version_compat import format_installed_version_warnings
+        version_warnings = format_installed_version_warnings(project_dir)
+        for w in version_warnings[:3]:  # Cap at 3 to avoid startup noise
+            notices.append(f"[HarnessSync] {w}")
+    except Exception:
+        pass
+
     return notices

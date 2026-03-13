@@ -302,6 +302,25 @@ class SyncOrchestrator:
                 'scope': rf.get('scope', 'project'),
             })
 
+        # --- PRE-SYNC: RULE SOURCE ATTRIBUTION RECORDING ---
+        # Record provenance for each source rule file so users can trace synced
+        # rules back to their origin (file, line number, section heading).
+        if not self.dry_run and self.project_dir:
+            try:
+                from src.rule_source_attribution import RuleAttributor
+                _attributor = RuleAttributor(project_dir=self.project_dir)
+                for _rf in source_data.get('rules', []):
+                    if isinstance(_rf, dict):
+                        _rule_path = _rf.get('path')
+                        if _rule_path:
+                            _full_path = self.project_dir / _rule_path
+                            if _full_path.is_file():
+                                _attributor.record_from_file(_full_path)
+                if _attributor.rule_count > 0:
+                    _attributor.save_index()
+            except Exception:
+                pass  # Attribution recording is best-effort, never blocks sync
+
         # --- PRE-SYNC: PROJECT-TYPE ADAPTIVE SYNC ---
         # Auto-detect project type and apply relevant config filtering defaults.
         # Only applied when user hasn't manually set only_sections/skip_sections.

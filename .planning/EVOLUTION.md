@@ -3889,3 +3889,65 @@ _2026-03-13T11:03:52.703Z_
 - The rule_deduplicator.py contradiction detection reuses the same contradiction patterns that already existed in conflict_detector.py, suggesting these patterns should be extracted to a shared constants module to avoid divergence.
 
 ---
+## Iteration 59
+_2026-03-13T11:22:27.021Z_
+
+### Items Attempted
+
+- **Interactive Harness Onboarding Wizard** — pass
+- **Semantic Drift Alerts** — pass
+- **Live Harness Capability Matrix** — pass
+- **Per-Project Sync Profiles** — pass
+- **MCP Server Discovery Bridge** — pass
+- **Skill Compatibility Linter** — pass
+- **Harness-Agnostic Skill Authoring Format** — pass
+- **Sync History Timeline** — pass
+- **Conflict Resolution UI** — pass
+- **Team Config Broadcast** — pass
+- **Harness Health Monitor** — pass
+- **Rule Priority & Override Mapping** — pass
+- **Env Variable Vault with Per-Harness Secrets** — pass
+- **Auto Harness Version Detection** — pass
+- **Claude Code Plugin → Extension Bridge** — pass
+- **Git Commit Hook Auto-Sync** — pass
+- **Selective Partial Sync** — pass
+- **Harness Behavior Benchmark Report** — pass
+- **Config Annotation System** — pass
+- **Shared MCP Server Catalog** — pass
+- **Sync Impact Estimator** — pass
+- **Sync Analytics Dashboard** — pass
+- **Rollback with Change Context** — pass
+- **New Harness Install Scaffold** — pass
+- **Natural Language Rule Translator** — pass
+- **CI/CD Sync Validation Gate** — pass
+- **Harness Usage Hints from Activity** — pass
+- **Cross-Harness Session Handoff** — pass
+
+### Decisions Made
+
+- Added /sync-wizard command (src/commands/sync_wizard.py) using scan_all() from harness_detector for detection — scan_all() returns presence info without version so detect_version() is called separately per harness for the version display
+- Added SemanticDriftAlert, analyze_semantic_drift(), and semantic_drift_summary() to drift_watcher.py using keyword-based intent classification (allow/block keywords) rather than LLM calls to keep it fast and offline-safe
+- Added /sync-analytics command (src/commands/sync_analytics.py) as a thin wrapper over SyncMetricsExporter.get_summary() with ASCII bar charts for sync totals, drift events, and health scores
+- Added annotate_backup_context() and get_backup_context() to backup_manager.py to store trigger/changed_sections/changed_rule in .harnesssync-snapshot.json — always writes metadata now (not just when a label is set)
+- Added --context flag to sync_rollback.py --list output that calls get_backup_context() per backup to display what triggered the change — addresses Item 23's 'blind rollback' problem
+- Added estimated_files_per_target and high_impact_targets fields to SyncImpactReport plus _estimate_file_counts() method using a conservative static file-count table per section per harness
+- Added suggest_idle_harness_removal() and format_idle_harness_suggestions() to harness_adoption.py — surfaces concrete /sync-setup --remove commands with idle-day context rather than just mentioning staleness
+- Added translate_env_var() and list_translatable_env_vars() to env_var_matrix.py as convenience wrappers over the existing ENV_VAR_REGISTRY — extracts the first ALL_CAPS token from the note field for MAPPED vars
+
+### Patterns Discovered
+
+- Codebase follows a consistent command pattern: PLUGIN_ROOT injection via sys.path, shlex argument parsing, argparse, then delegation to src/ modules — new commands should follow this exactly
+- Many modules are very large (800-1600 lines) with multiple dataclasses and top-level functions — good to add new functionality at the bottom of the file rather than interleaving to minimize diff noise
+- The .harnesssync-snapshot.json metadata file was only written conditionally (when a label was provided) — changed to always write it to ensure rollback context is always available
+- BackupManager.backup_target already had an `import json` inside a conditional block; the new unconditional metadata write uses `import json` already present at the module top level
+- ENV_VAR_REGISTRY note fields use a convention of 'MAPPED_VAR_NAME — description' but this is not enforced — the regex extraction of the first ALL_CAPS token is a fragile heuristic that could miss edge cases
+
+### Takeaways
+
+- Many of the 28 product-ideation items already have substantial implementations in dedicated modules — the main gap is surfacing them via slash commands and wiring them together
+- scan_all() in harness_detector.py does not include a 'found' key or 'version' key — callers need to combine in_path/config_dir/via_pkg_mgr flags and call detect_version() separately
+- SyncImpactReport.format() previously had no newline before the return statement after 'Notes:' — fixed incidentally when adding the files-to-change section
+- The semantic drift analyzer uses keyword matching which will produce false positives if a rule says 'never block bash' (both block and allow keywords present) — the dual-keyword case correctly returns 'neutral' intent
+- backup_manager.py had `import json` at the top level but also had a redundant `import json` inside the conditional metadata block — cleaned up by making the write unconditional and removing the inner import
+
+---

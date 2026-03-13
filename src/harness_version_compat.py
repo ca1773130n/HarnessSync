@@ -1631,3 +1631,91 @@ def _version_lt(v1: str, v2: str) -> bool:
         return _parts(v1) < _parts(v2)
     except Exception:
         return False
+
+
+def format_installed_version_warnings(project_dir: Path | None = None) -> list[str]:
+    """Compare detected installed versions against feature requirements and return warnings.
+
+    For each installed harness, detects the actual installed CLI version, then
+    checks whether any features used in the current config require a newer version.
+    Returns actionable warnings like:
+        'Gemini CLI 0.3.1 installed — MCP servers require >= 1.0. Upgrade to unlock sync.'
+
+    Args:
+        project_dir: Project root directory.
+
+    Returns:
+        List of warning strings (empty if all installed versions are sufficient).
+    """
+    installed = detect_all_installed_versions(project_dir)
+    warnings: list[str] = []
+
+    for target, detected_version in installed.items():
+        if not detected_version:
+            continue
+
+        features = VERSIONED_FEATURES.get(target, {})
+        for feature_name, (min_version, description) in features.items():
+            if _version_lt(detected_version, min_version):
+                warnings.append(
+                    f"{target} {detected_version} installed — {description} "
+                    f"requires >= {min_version}. Upgrade to unlock full sync."
+                )
+
+    return warnings
+
+
+def get_installed_vs_required_table(project_dir: Path | None = None) -> str:
+    """Render a table comparing installed harness versions to feature requirements.
+
+    Shows each harness, its installed version, and any features that need a
+    newer version. Useful for diagnosing silent sync failures.
+
+    Args:
+        project_dir: Project root directory.
+
+    Returns:
+        Formatted table string.
+    """
+    installed = detect_all_installed_versions(project_dir)
+    if not installed:
+        return "No harnesses detected. Install a target harness CLI and retry."
+
+    lines = [
+        "Harness Version Compatibility",
+        "=" * 60,
+        f"  {'Target':<12} {'Installed':<12} {'Status':<10} Notes",
+        "-" * 60,
+    ]
+
+    for target in sorted(installed.keys()):
+        version = installed[target]
+        if not version:
+            lines.append(f"  {target:<12} {'not found':<12} {'—':<10}")
+            continue
+
+        features = VERSIONED_FEATURES.get(target, {})
+        blocking: list[str] = []
+        for feature_name, (min_version, description) in features.items():
+            if _version_lt(version, min_version):
+                blocking.append(f"{description} (needs {min_version})")
+
+        if blocking:
+            status = "outdated"
+            note = blocking[0][:40]
+        else:
+            status = "ok"
+            note = ""
+
+        lines.append(f"  {target:<12} {version:<12} {status:<10} {note}")
+
+    lines.append("-" * 60)
+    warnings = format_installed_version_warnings(project_dir)
+    if warnings:
+        lines.append(f"\n{len(warnings)} compatibility issue(s) found:")
+        for w in warnings:
+            lines.append(f"  ⚠  {w}")
+    else:
+        lines.append("\nAll installed harnesses meet feature requirements.")
+
+    return "\n".join(lines)
