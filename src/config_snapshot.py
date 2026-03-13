@@ -574,3 +574,236 @@ class NamedCheckpointStore:
             notes = f"  — {entry['notes']}" if entry["notes"] else ""
             lines.append(f"  {tag:<30} {created}{notes}")
         return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Sync Audit Log
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+_AUDIT_LOG_PATH = Path.home() / ".harnesssync" / "sync-audit.jsonl"
+_AUDIT_LOG_MAX_ENTRIES = 1000  # Rolling window — oldest entries pruned
+
+
+class SyncAuditLog:
+    """Append-only audit log recording every sync operation.
+
+    Solves the 'when did this rule change and who/what triggered it?' problem.
+    Every call to ``record()`` appends a JSON line to the audit log file so
+    there is a complete history of all sync operations.  Unlike named
+    checkpoints (which users create manually), the audit log is written
+    automatically by the orchestrator on every sync.
+
+    Each log entry contains:
+    - ``timestamp``: ISO-8601 UTC timestamp
+    - ``trigger``: What initiated the sync (e.g. "command", "hook", "ci")
+    - ``targets``: List of harness targets synced
+    - ``sections``: Sections synced (empty = all)
+    - ``dry_run``: Whether this was a dry-run
+    - ``totals``: Dict with synced/skipped/failed counts
+    - ``source_hash``: SHA-256 of CLAUDE.md at sync time (for diff detection)
+    - ``project``: Project directory basename
+
+    Args:
+        log_path: Path to the JSONL audit log file.
+                  Default: ``~/.harnesssync/sync-audit.jsonl``.
+        max_entries: Maximum entries to keep before pruning oldest.
+    """
+
+    def __init__(
+        self,
+        log_path: Path | None = None,
+        max_entries: int = _AUDIT_LOG_MAX_ENTRIES,
+    ):
+        self.log_path = log_path or _AUDIT_LOG_PATH
+        self.max_entries = max_entries
+
+    def record(
+        self,
+        targets: list[str],
+        totals: dict,
+        project: str = "",
+        trigger: str = "command",
+        sections: list[str] | None = None,
+        dry_run: bool = False,
+        source_hash: str = "",
+    ) -> dict:
+        """Append a sync operation to the audit log.
+
+        Args:
+            targets: Harness targets that were synced.
+            totals: Dict with 'synced', 'skipped', 'failed' counts.
+            project: Project directory basename (for multi-project users).
+            trigger: What triggered the sync: "command", "hook", "ci", "schedule".
+            sections: Sections synced (None/empty = all sections).
+            dry_run: True if this was a preview-only sync.
+            source_hash: SHA-256 of CLAUDE.md (first 12 chars is enough).
+
+        Returns:
+            The log entry dict that was written.
+        """
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "trigger": trigger,
+            "targets": list(targets),
+            "sections": list(sections) if sections else [],
+            "dry_run": dry_run,
+            "totals": {
+                "synced": totals.get("synced", 0),
+                "skipped": totals.get("skipped", 0),
+                "failed": totals.get("failed", 0),
+            },
+            "source_hash": source_hash[:12] if source_hash else "",
+            "project": project,
+        }
+
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Append new entry
+        try:
+            with open(self.log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, separators=(",", ":")) + "\n")
+        except OSError:
+            pass
+
+        # Prune if over limit
+        self._maybe_prune()
+
+        return entry
+
+    def tail(self, n: int = 20) -> list[dict]:
+        """Return the last *n* audit log entries (most recent last).
+
+        Args:
+            n: Number of entries to return (default: 20).
+
+        Returns:
+            List of entry dicts, ordered oldest→newest.
+        """
+        return self._read_all()[-n:]
+
+    def full_log(self) -> list[dict]:
+        """Return all audit log entries, oldest first."""
+        return self._read_all()
+
+    def since(self, iso_timestamp: str) -> list[dict]:
+        """Return entries with timestamps >= *iso_timestamp*.
+
+        Args:
+            iso_timestamp: ISO-8601 timestamp string (e.g. "2025-01-01T00:00:00Z").
+
+        Returns:
+            Filtered list of entry dicts.
+        """
+        return [e for e in self._read_all() if e.get("timestamp", "") >= iso_timestamp]
+
+    def format_tail(self, n: int = 20) -> str:
+        """Format the last *n* entries as a human-readable table.
+
+        Args:
+            n: Number of entries to display.
+
+        Returns:
+            Formatted string suitable for terminal output.
+        """
+        entries = self.tail(n)
+        if not entries:
+            return "No sync history found."
+
+        lines = [f"Sync Audit Log — last {min(n, len(entries))} entries", "=" * 60]
+        for e in entries:
+            ts = e.get("timestamp", "")[:19].replace("T", " ")
+            targets = ", ".join(e.get("targets", [])[:4]) or "all"
+            if len(e.get("targets", [])) > 4:
+                targets += f" +{len(e['targets']) - 4}"
+            totals = e.get("totals", {})
+            synced = totals.get("synced", 0)
+            skipped = totals.get("skipped", 0)
+            failed = totals.get("failed", 0)
+            trigger = e.get("trigger", "?")
+            dry_note = " [dry-run]" if e.get("dry_run") else ""
+            fail_note = f" ✗{failed}" if failed else ""
+            lines.append(
+                f"  {ts}  {trigger:<8}  {targets:<30}  "
+                f"+{synced} ~{skipped}{fail_note}{dry_note}"
+            )
+        return "\n".join(lines)
+
+    def stats(self) -> dict:
+        """Return aggregate statistics over the full log.
+
+        Returns:
+            Dict with keys:
+            - total_syncs: int
+            - total_synced: int
+            - total_skipped: int
+            - total_failed: int
+            - targets_seen: sorted list of unique target names
+            - first_sync: ISO timestamp or ""
+            - last_sync: ISO timestamp or ""
+        """
+        entries = self._read_all()
+        if not entries:
+            return {
+                "total_syncs": 0,
+                "total_synced": 0,
+                "total_skipped": 0,
+                "total_failed": 0,
+                "targets_seen": [],
+                "first_sync": "",
+                "last_sync": "",
+            }
+        total_synced = sum(e.get("totals", {}).get("synced", 0) for e in entries)
+        total_skipped = sum(e.get("totals", {}).get("skipped", 0) for e in entries)
+        total_failed = sum(e.get("totals", {}).get("failed", 0) for e in entries)
+        all_targets: set[str] = set()
+        for e in entries:
+            all_targets.update(e.get("targets", []))
+        return {
+            "total_syncs": len(entries),
+            "total_synced": total_synced,
+            "total_skipped": total_skipped,
+            "total_failed": total_failed,
+            "targets_seen": sorted(all_targets),
+            "first_sync": entries[0].get("timestamp", ""),
+            "last_sync": entries[-1].get("timestamp", ""),
+        }
+
+    def clear(self) -> None:
+        """Delete the audit log file (destructive — use with care)."""
+        if self.log_path.exists():
+            self.log_path.unlink()
+
+    # ── Internal helpers ──────────────────────────────────────────────────────
+
+    def _read_all(self) -> list[dict]:
+        """Read and parse all JSONL entries from the log file."""
+        if not self.log_path.exists():
+            return []
+        entries: list[dict] = []
+        try:
+            with open(self.log_path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass  # Skip corrupt lines
+        except OSError:
+            pass
+        return entries
+
+    def _maybe_prune(self) -> None:
+        """Remove oldest entries if the log exceeds max_entries."""
+        entries = self._read_all()
+        if len(entries) <= self.max_entries:
+            return
+        keep = entries[-self.max_entries:]
+        try:
+            with open(self.log_path, "w", encoding="utf-8") as f:
+                for entry in keep:
+                    f.write(json.dumps(entry, separators=(",", ":")) + "\n")
+        except OSError:
+            pass

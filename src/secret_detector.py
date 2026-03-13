@@ -87,6 +87,14 @@ SECRET_KEYWORDS = [
     'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY',
     'GOOGLE_API_KEY', 'COHERE_API_KEY', 'MISTRAL_API_KEY',
     'AZURE_OPENAI_API_KEY', 'AWS_SECRET_ACCESS_KEY',
+    # Modern AI providers
+    'HUGGINGFACE_API_KEY', 'HF_TOKEN', 'HF_API_TOKEN',
+    'REPLICATE_API_TOKEN', 'GROQ_API_KEY', 'TOGETHER_API_KEY',
+    'PERPLEXITY_API_KEY', 'FIREWORKS_API_KEY', 'VOYAGE_API_KEY',
+    'PINECONE_API_KEY', 'WEAVIATE_API_KEY', 'QDRANT_API_KEY',
+    'DEEPSEEK_API_KEY', 'DEEPINFRA_API_KEY',
+    'VERTEX_AI_TOKEN', 'VERTEX_AI_KEY',
+    'DATABRICKS_TOKEN', 'DATABRICKS_API_TOKEN',
     # VCS & CI
     'GITHUB_TOKEN', 'GITLAB_TOKEN', 'GH_TOKEN', 'CI_TOKEN',
     'NPM_TOKEN', 'PYPI_TOKEN',
@@ -96,6 +104,9 @@ SECRET_KEYWORDS = [
     # Generic credential names
     'CREDENTIAL', 'CREDENTIALS', 'CERT', 'CERTIFICATE',
     'CLIENT_SECRET', 'APP_SECRET',
+    # Cloud provider extras
+    'SENDGRID_API_KEY', 'TWILIO_AUTH_TOKEN', 'STRIPE_SECRET_KEY',
+    'CLOUDFLARE_API_TOKEN', 'DIGITALOCEAN_TOKEN',
 ]
 
 # Patterns that look like inline secrets in file content (e.g. CLAUDE.md)
@@ -128,6 +139,32 @@ KNOWN_SECRET_FORMATS: list[re.Pattern] = [
     re.compile(r'\bsk_(?:live|test)_[a-zA-Z0-9]{24,}\b'),
     # Google API key
     re.compile(r'\bAIza[0-9A-Za-z_\-]{35}\b'),
+    # HuggingFace token: hf_...
+    re.compile(r'\bhf_[a-zA-Z0-9]{34,}\b'),
+    # Cohere API key: starts with alphanumeric, 40 chars typical
+    re.compile(r'\b[A-Za-z0-9]{40}\b(?=[^a-zA-Z0-9]|$)'),
+    # Anthropic API key new format: sk-ant-...
+    re.compile(r'\bsk-ant-api\d{2}-[a-zA-Z0-9_\-]{90,}\b'),
+    # Azure OpenAI key: 32 hex chars
+    re.compile(r'\b[0-9a-f]{32}\b'),
+    # npm publish token: npm_...
+    re.compile(r'\bnpm_[a-zA-Z0-9]{36}\b'),
+    # GitLab PAT: glpat-...
+    re.compile(r'\bglpat-[a-zA-Z0-9\-_]{20,}\b'),
+    # Databricks token: dapi...
+    re.compile(r'\bdapi[a-zA-Z0-9]{32,}\b'),
+    # Twilio auth token: 32 hex
+    re.compile(r'\b[0-9a-f]{32}\b'),
+    # Vertex AI / Google service account JSON key indicator
+    re.compile(r'"private_key_id"\s*:\s*"[a-zA-Z0-9]{40}"'),
+    # SendGrid API key
+    re.compile(r'\bSG\.[a-zA-Z0-9_\-]{22,}\.[a-zA-Z0-9_\-]{43,}\b'),
+    # Pinecone API key: uuid-like format
+    re.compile(r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b'),
+    # Replicate API token
+    re.compile(r'\br8_[a-zA-Z0-9]{40}\b'),
+    # Mistral AI key
+    re.compile(r'\b[A-Za-z0-9]{32,}(?=.*[A-Z])(?=.*[0-9])[A-Za-z0-9]{8,}\b'),
 ]
 
 # Safe prefixes to whitelist (testing/example values)

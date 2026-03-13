@@ -42,6 +42,7 @@ Usage:
 """
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 # ── Support level type alias ────────────────────────────────────────────────
@@ -995,7 +996,6 @@ class HarnessFeatureMatrix:
                 note = _FEATURE_NOTES.get((feat, harness), "")
                 title_attr = f' title="{_esc(note)}"' if note else ""
                 cells += f'<td style="{style}"{title_attr}>{_esc(label)}</td>'
-            score = self.coverage_score(harness)  # noqa: F821 — reuse last harness for demo
             rows_html.append(f"<tr><td><strong>{_esc(feat)}</strong></td>{cells}</tr>")
 
         # Build coverage score row
