@@ -143,6 +143,80 @@ exit 0
 PRE_COMMIT_MARKER = "# harnesssync-pre-commit-v1"
 
 
+# Drift-check hook: fails the commit when target harness configs are out of sync.
+# Unlike the pre-commit hook (which syncs silently), this hook BLOCKS the commit
+# and prints actionable diagnostics so the team notices config drift before it ships.
+DRIFT_CHECK_HOOK_TEMPLATE = """\
+#!/bin/sh
+# HarnessSync drift-check pre-commit hook
+# Fails the commit if harness configs (AGENTS.md, GEMINI.md, etc.) are out of sync
+# with CLAUDE.md. Run /sync or harnesssync to update before committing.
+# Installed by: /sync-git-hook install --drift-check
+# Remove with:  /sync-git-hook uninstall --drift-check
+
+HARNESSSYNC_DRIFT_MARKER="# harnesssync-drift-check-v1"
+$HARNESSSYNC_DRIFT_MARKER
+
+# Only run when CLAUDE.md or .claude/ is staged — no Claude config, no check needed
+staged=$(git diff --cached --name-only 2>/dev/null)
+claude_staged=0
+for pattern in CLAUDE.md .claude/ .mcp.json; do
+    if echo "$staged" | grep -q "^$pattern"; then
+        claude_staged=1
+        break
+    fi
+done
+
+if [ "$claude_staged" -eq 0 ]; then
+    exit 0
+fi
+
+# Locate HarnessSync
+if [ -n "$CLAUDE_PLUGIN_ROOT" ]; then
+    HS_ROOT="$CLAUDE_PLUGIN_ROOT"
+elif [ -f "$HOME/.claude/plugins/harness-sync/src/commands/sync_status.py" ]; then
+    HS_ROOT="$HOME/.claude/plugins/harness-sync"
+else
+    exit 0
+fi
+
+PY=$(command -v python3 || command -v python)
+if [ -z "$PY" ]; then
+    exit 0
+fi
+
+# Run sync in dry-run mode to check for drift without writing
+drift_output=$("$PY" "$HS_ROOT/src/commands/sync.py" --dry-run --scope all 2>&1)
+exit_code=$?
+
+if echo "$drift_output" | grep -qiE "(would (write|update|create)|drift detected|out.of.sync|CONFLICT)"; then
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║  HarnessSync: COMMIT BLOCKED — harness configs are drifted   ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "  Your CLAUDE.md changed but target harness configs are out of sync."
+    echo "  Committing now would leave teammates with inconsistent AI tooling."
+    echo ""
+    echo "  Fix options:"
+    echo "    1) Run /sync (inside Claude Code) to sync all targets, then re-commit"
+    echo "    2) Run: harnesssync force"
+    echo "    3) Skip this check: git commit --no-verify  (not recommended for shared repos)"
+    echo ""
+    if [ -n "$drift_output" ]; then
+        echo "  Drift summary (first 10 lines):"
+        echo "$drift_output" | head -10 | sed 's/^/    /'
+        echo ""
+    fi
+    exit 1
+fi
+
+exit 0
+"""
+
+DRIFT_CHECK_MARKER = "# harnesssync-drift-check-v1"
+
+
 def find_git_dir(start: Path) -> Path | None:
     """Walk up from start to find .git directory.
 
@@ -694,3 +768,95 @@ def is_post_checkout_hook_installed(project_dir: Path) -> bool:
     if not hook_path.exists():
         return False
     return POST_CHECKOUT_HOOK_MARKER in hook_path.read_text(encoding="utf-8")
+
+
+def install_drift_check_hook(project_dir: Path) -> tuple[bool, str]:
+    """Install a pre-commit hook that FAILS the commit when harness configs are drifted.
+
+    Unlike the auto-sync pre-commit hook (which silently syncs and stages),
+    this hook acts as a gate: it checks for drift and blocks the commit with
+    a clear error message and instructions to fix. Intended for teams who
+    version their Claude Code config and need CI-like enforcement locally.
+
+    The check only triggers when CLAUDE.md or .claude/ files are staged,
+    so it doesn't add overhead to normal code commits.
+
+    Args:
+        project_dir: Project directory to start searching for git repo.
+
+    Returns:
+        (success, message) tuple.
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False, "Not inside a git repository"
+
+    hooks_dir = git_dir / "hooks"
+    hooks_dir.mkdir(exist_ok=True)
+    hook_path = hooks_dir / "pre-commit"
+
+    if hook_path.exists():
+        existing = hook_path.read_text(encoding="utf-8")
+        if DRIFT_CHECK_MARKER in existing:
+            return True, f"Drift-check hook already installed at {hook_path}"
+        # Append to existing hook
+        with open(hook_path, "a", encoding="utf-8") as f:
+            f.write("\n" + DRIFT_CHECK_HOOK_TEMPLATE)
+        _make_executable(hook_path)
+        return True, f"HarnessSync drift-check hook appended to {hook_path}"
+
+    hook_path.write_text(DRIFT_CHECK_HOOK_TEMPLATE, encoding="utf-8")
+    _make_executable(hook_path)
+    return True, f"Drift-check pre-commit hook installed at {hook_path}"
+
+
+def uninstall_drift_check_hook(project_dir: Path) -> tuple[bool, str]:
+    """Remove the HarnessSync drift-check hook block from the pre-commit hook.
+
+    Args:
+        project_dir: Project directory.
+
+    Returns:
+        (success, message) tuple.
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False, "Not inside a git repository"
+
+    hook_path = git_dir / "hooks" / "pre-commit"
+    if not hook_path.exists():
+        return True, "No pre-commit hook found (nothing to remove)"
+
+    content = hook_path.read_text(encoding="utf-8")
+    if DRIFT_CHECK_MARKER not in content:
+        return True, "Drift-check hook not found in pre-commit hook"
+
+    lines = content.splitlines(keepends=True)
+    non_dc_lines = [l for l in lines if DRIFT_CHECK_MARKER not in l
+                    and not l.strip().startswith("# HarnessSync drift-check")]
+    new_content = "".join(non_dc_lines).strip()
+
+    if not new_content or new_content == "#!/bin/sh":
+        hook_path.unlink()
+        return True, f"Drift-check hook removed (file deleted)"
+
+    hook_path.write_text(new_content + "\n", encoding="utf-8")
+    return True, f"HarnessSync drift-check block removed from {hook_path}"
+
+
+def is_drift_check_hook_installed(project_dir: Path) -> bool:
+    """Check if the HarnessSync drift-check pre-commit hook is installed.
+
+    Args:
+        project_dir: Project directory.
+
+    Returns:
+        True if the drift-check hook block is present in the pre-commit hook.
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False
+    hook_path = git_dir / "hooks" / "pre-commit"
+    if not hook_path.exists():
+        return False
+    return DRIFT_CHECK_MARKER in hook_path.read_text(encoding="utf-8")

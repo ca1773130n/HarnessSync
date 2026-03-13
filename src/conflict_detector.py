@@ -198,6 +198,93 @@ class SemanticConflictDetector:
             return []
         return self.scan(content)
 
+    def check_temporal_drift(
+        self,
+        current_content: str,
+        snapshot_content: str,
+    ) -> list[SemanticConflict]:
+        """Detect semantic drift between current rules and a previously-synced snapshot.
+
+        Identifies rules added to ``current_content`` since the snapshot was
+        taken that now logically contradict rules present in the snapshot.
+        This catches the "rule #47 contradicts rule #12" problem where rules
+        accumulate over time without the user noticing the contradiction.
+
+        Algorithm:
+          1. Extract lines present in current but NOT in snapshot (new rules).
+          2. For each new rule line, check if it contradicts any snapshot rule
+             using the same ``_CONTRADICTION_PATTERNS`` as ``scan()``.
+          3. Return conflicts where one side is new (post-snapshot) and the
+             other is from the snapshot.
+
+        Args:
+            current_content: Current CLAUDE.md content.
+            snapshot_content: Previously-synced content (baseline).
+
+        Returns:
+            List of SemanticConflict where rule_a is from the snapshot and
+            rule_b is the newly-added contradicting rule.
+        """
+        snapshot_lines = set(l.strip() for l in snapshot_content.splitlines() if l.strip())
+        current_rule_lines = _extract_rule_lines(current_content)
+        snapshot_rule_lines = _extract_rule_lines(snapshot_content)
+
+        # New rules are lines in current but not in snapshot (by content)
+        new_rules = [(ln, text) for ln, text in current_rule_lines
+                     if text not in snapshot_lines]
+
+        if not new_rules:
+            return []
+
+        conflicts: list[SemanticConflict] = []
+        seen_types: set[str] = set()
+
+        for pat_a, pat_b, ctype, explanation in _CONTRADICTION_PATTERNS:
+            if ctype in seen_types:
+                continue
+
+            # Find snapshot lines matching pattern A
+            snap_matches_a = [(ln, t) for ln, t in snapshot_rule_lines if pat_a.search(t)]
+            snap_matches_b = [(ln, t) for ln, t in snapshot_rule_lines if pat_b.search(t)]
+
+            # Check if any NEW rule contradicts existing snapshot rules
+            new_matches_b = [(ln, t) for ln, t in new_rules if pat_b.search(t)]
+            new_matches_a = [(ln, t) for ln, t in new_rules if pat_a.search(t)]
+
+            if snap_matches_a and new_matches_b:
+                ln_a, text_a = snap_matches_a[0]
+                ln_b, text_b = new_matches_b[0]
+                if ln_a != ln_b:
+                    conflicts.append(SemanticConflict(
+                        rule_a=text_a[:120],
+                        line_a=ln_a,
+                        rule_b=text_b[:120],
+                        line_b=ln_b,
+                        conflict_type=f"drift:{ctype}",
+                        explanation=f"[TEMPORAL DRIFT] {explanation} "
+                                    f"The existing rule (line {ln_a}) was synced weeks ago; "
+                                    f"the contradicting rule (line {ln_b}) was added recently.",
+                    ))
+                    seen_types.add(ctype)
+
+            elif snap_matches_b and new_matches_a:
+                ln_a, text_a = new_matches_a[0]
+                ln_b, text_b = snap_matches_b[0]
+                if ln_a != ln_b:
+                    conflicts.append(SemanticConflict(
+                        rule_a=text_a[:120],
+                        line_a=ln_a,
+                        rule_b=text_b[:120],
+                        line_b=ln_b,
+                        conflict_type=f"drift:{ctype}",
+                        explanation=f"[TEMPORAL DRIFT] {explanation} "
+                                    f"The new rule (line {ln_a}) contradicts an older "
+                                    f"rule (line {ln_b}) that was already synced.",
+                    ))
+                    seen_types.add(ctype)
+
+        return conflicts
+
     def format_report(self, conflicts: list[SemanticConflict]) -> str:
         """Format detected conflicts for terminal output.
 
@@ -782,6 +869,7 @@ class ConflictDetector:
         self,
         three_way: dict,
         width: int = 80,
+        colorize: bool = False,
     ) -> str:
         """Render a side-by-side terminal diff from three_way_diff() output.
 
@@ -796,11 +884,27 @@ class ConflictDetector:
             three_way: Dict from ``three_way_diff()`` containing source_lines,
                        current_lines, and unified_source_vs_current.
             width: Total terminal width in characters. Default: 80.
+            colorize: If True, use ANSI escape codes to color removed lines red
+                      and added lines green. Disable for non-TTY output.
 
         Returns:
             Multi-line formatted string suitable for terminal display.
         """
         import difflib
+        import os
+
+        # Auto-detect color capability when not explicitly set
+        _use_color = colorize and (os.environ.get("NO_COLOR") is None)
+
+        # ANSI color helpers
+        _RED = "\033[31m"
+        _GREEN = "\033[32m"
+        _CYAN = "\033[36m"
+        _BOLD = "\033[1m"
+        _RESET = "\033[0m"
+
+        def _c(text: str, code: str) -> str:
+            return f"{code}{text}{_RESET}" if _use_color else text
 
         col_w = max(20, (width // 2) - 3)
         file_path = three_way.get("file_path", "")
@@ -813,11 +917,11 @@ class ConflictDetector:
         sep = "─" * width
         header_l = _trunc("SYNC SOURCE (HarnessSync)", col_w)
         header_r = _trunc(f"CURRENT ({file_path})", col_w)
-        header = f"  {header_l:<{col_w}}  │  {header_r}"
+        header = f"  {_c(header_l, _BOLD):<{col_w}}  │  {_c(header_r, _BOLD)}"
 
         lines: list[str] = [
             sep,
-            f"SIDE-BY-SIDE DIFF: {file_path}",
+            _c(f"SIDE-BY-SIDE DIFF: {file_path}", _CYAN),
             sep,
             header,
             "─" * width,
@@ -835,7 +939,7 @@ class ConflictDetector:
                     right = _trunc(current_lines[j1 + k], col_w)
                     lines.append(f"  {left:<{col_w}}  │  {right}")
             elif tag == "replace":
-                # Show deletions on left, insertions on right
+                # Show deletions on left (red), insertions on right (green)
                 left_block = source_lines[i1:i2]
                 right_block = current_lines[j1:j2]
                 max_len = max(len(left_block), len(right_block))
@@ -846,24 +950,28 @@ class ConflictDetector:
                     right = _trunc(right_raw, col_w - 2)
                     l_indicator = "-" if left_raw else " "
                     r_indicator = "+" if right_raw else " "
-                    lines.append(
-                        f"{l_indicator} {left:<{col_w - 1}}  │  {r_indicator} {right}"
-                    )
+                    left_col = _c(f"{l_indicator} {left}", _RED) if left_raw else f"  {left}"
+                    right_col = _c(f"{r_indicator} {right}", _GREEN) if right_raw else f"  {right}"
+                    lines.append(f"{left_col:<{col_w + (len(_RED) + len(_RESET) if _use_color and left_raw else 0) + 1}}  │  {right_col}")
             elif tag == "delete":
                 for k in range(i2 - i1):
                     left = _trunc(source_lines[i1 + k], col_w - 2)
-                    lines.append(f"- {left:<{col_w - 1}}  │  {'':>{col_w}}")
+                    colored = _c(f"- {left}", _RED)
+                    lines.append(f"{colored:<{col_w + (len(_RED) + len(_RESET) if _use_color else 0)}}  │  {'':>{col_w}}")
             elif tag == "insert":
                 for k in range(j2 - j1):
                     right = _trunc(current_lines[j1 + k], col_w - 2)
-                    lines.append(f"  {'':>{col_w - 1}}  │  + {right}")
+                    colored = _c(f"+ {right}", _GREEN)
+                    lines.append(f"  {'':>{col_w - 1}}  │  {colored}")
 
         lines.append(sep)
         has_conflict = three_way.get("has_real_conflict", True)
         if not has_conflict:
             lines.append("  (no differences — files are identical)")
         else:
-            lines.append("  Legend:  - = sync would overwrite  + = your manual edit")
+            legend_del = _c("- = sync would overwrite", _RED)
+            legend_add = _c("+ = your manual edit", _GREEN)
+            lines.append(f"  Legend:  {legend_del}  {legend_add}")
             lines.append(
                 "  Resolve: s) use sync source  k) keep current  e) edit manually"
             )

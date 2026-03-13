@@ -79,6 +79,11 @@ def main() -> None:
         metavar="OUTPUT_FILE",
         help="Export full sync history as CSV (for spreadsheet analysis) to OUTPUT_FILE",
     )
+    parser.add_argument(
+        "--ascii-timeline",
+        action="store_true",
+        help="Render a visual ASCII bar chart showing sync event density by day",
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -135,6 +140,10 @@ def main() -> None:
 
     if not entries:
         print("No entries match the filter.")
+        return
+
+    if getattr(args, "ascii_timeline", False):
+        print(_render_ascii_timeline(entries))
         return
 
     if getattr(args, "interactive", False) and sys.stdin.isatty():
@@ -247,6 +256,63 @@ def _run_interactive_timeline(entries: list[str], project_dir: Path) -> None:
                     input("Press Enter to continue...")
 
     print("Timeline closed.")
+
+
+def _render_ascii_timeline(entries: list[str], width: int = 72) -> str:
+    """Render a visual ASCII bar chart showing sync frequency by date.
+
+    Parses ISO dates from changelog entries and produces a bar chart where
+    each row represents a day and the bar length indicates how many syncs
+    occurred on that day. The last 30 days are shown.
+
+    Args:
+        entries: List of changelog entry strings.
+        width: Total character width for the chart (label + bar + count).
+
+    Returns:
+        Formatted ASCII timeline string.
+    """
+    import re
+    from collections import Counter
+
+    # Extract dates from each entry (first YYYY-MM-DD match)
+    date_re = re.compile(r"\d{4}-\d{2}-\d{2}")
+    date_counts: Counter = Counter()
+    for entry in entries:
+        m = date_re.search(entry)
+        if m:
+            date_counts[m.group()] += 1
+
+    if not date_counts:
+        return "No dated sync entries found in the log."
+
+    # Show only the most-recent 30 days that have entries, sorted ascending
+    sorted_dates = sorted(date_counts.keys())[-30:]
+    max_count = max(date_counts[d] for d in sorted_dates) or 1
+    label_w = 10   # "YYYY-MM-DD"
+    count_w = 4    # " (N)"
+    bar_w = max(10, width - label_w - count_w - 4)
+
+    lines: list[str] = [
+        "HarnessSync — Sync Events Timeline",
+        "=" * width,
+        f"{'Date':<{label_w}}  {'Events':>{bar_w + count_w}}",
+        "─" * width,
+    ]
+
+    bar_chars = "█"
+    for date in sorted_dates:
+        count = date_counts[date]
+        filled = max(1, round(count / max_count * bar_w))
+        bar = bar_chars * filled
+        lines.append(f"{date:<{label_w}}  {bar:<{bar_w}} ({count})")
+
+    lines.append("─" * width)
+    total = sum(date_counts[d] for d in sorted_dates)
+    lines.append(f"Total: {total} sync event(s) across {len(sorted_dates)} day(s)")
+    if len(date_counts) > 30:
+        lines.append(f"(Showing most recent 30 of {len(date_counts)} days)")
+    return "\n".join(lines)
 
 
 def _split_entries(content: str) -> list[str]:

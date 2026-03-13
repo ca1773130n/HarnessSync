@@ -629,3 +629,152 @@ def write_skill_usage_heatmap(
     html = render_skill_usage_heatmap_html(skill_names, targets, usage_matrix, title)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Capability Gap Report (item 2)
+# ---------------------------------------------------------------------------
+
+def generate_capability_gap_report(
+    gap_data: dict[str, list[dict]],
+    title: str = "HarnessSync Capability Gap Report",
+    include_workarounds: bool = True,
+) -> str:
+    """Generate a self-contained HTML capability gap report.
+
+    Produces a shareable single-file HTML report showing which Claude Code
+    features have no equivalent in each target harness, along with optional
+    workaround suggestions. Helps teams understand what they're giving up
+    before committing to a target harness.
+
+    Args:
+        gap_data: Dict mapping target_name -> list of gap dicts.
+            Each gap dict has keys:
+              - "feature": str — Claude Code feature name (e.g. "Skills")
+              - "status": str — "unsupported" | "partial" | "workaround"
+              - "description": str — What's missing
+              - "workaround": str — Optional workaround suggestion
+        title: HTML page title.
+        include_workarounds: If False, omit the workaround column.
+
+    Returns:
+        Self-contained HTML string (no external dependencies).
+    """
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    _STATUS_COLORS = {
+        "unsupported": ("#ff6b6b", "#3a1010"),
+        "partial": ("#ffd93d", "#3a3010"),
+        "workaround": ("#6bcb77", "#103a15"),
+    }
+
+    def _status_badge(status: str) -> str:
+        bg, fg = _STATUS_COLORS.get(status.lower(), ("#888", "#222"))
+        label = _escape(status.upper())
+        return (
+            f'<span style="background:{bg};color:{fg};padding:2px 8px;'
+            f'border-radius:4px;font-size:0.8em;font-weight:bold">{label}</span>'
+        )
+
+    # Build per-target sections
+    target_sections = []
+    all_targets = sorted(gap_data.keys())
+    for target in all_targets:
+        gaps = gap_data[target]
+        if not gaps:
+            target_sections.append(
+                f'<section><h2>{_escape(target.capitalize())}</h2>'
+                f'<p style="color:#6bcb77">✓ No capability gaps detected.</p></section>'
+            )
+            continue
+
+        unsupported = sum(1 for g in gaps if g.get("status") == "unsupported")
+        partial = sum(1 for g in gaps if g.get("status") == "partial")
+        workaround = sum(1 for g in gaps if g.get("status") == "workaround")
+
+        summary = (
+            f'<p><strong>{len(gaps)} gap(s):</strong> '
+            f'{unsupported} unsupported, {partial} partial, {workaround} with workaround</p>'
+        )
+
+        wk_col = '<th>Workaround</th>' if include_workarounds else ''
+        rows = []
+        for gap in gaps:
+            feature = _escape(gap.get("feature", ""))
+            status = gap.get("status", "unsupported")
+            desc = _escape(gap.get("description", ""))
+            wk = _escape(gap.get("workaround", "—"))
+            wk_cell = f'<td>{wk}</td>' if include_workarounds else ''
+            rows.append(
+                f'<tr><td>{feature}</td><td>{_status_badge(status)}</td>'
+                f'<td>{desc}</td>{wk_cell}</tr>'
+            )
+
+        rows_html = "\n".join(rows)
+        target_sections.append(f'''<section>
+<h2>{_escape(target.capitalize())}</h2>
+{summary}
+<table>
+  <thead><tr><th>Feature</th><th>Status</th><th>Description</th>{wk_col}</tr></thead>
+  <tbody>{rows_html}</tbody>
+</table>
+</section>''')
+
+    sections_html = "\n".join(target_sections)
+    total_gaps = sum(len(v) for v in gap_data.values())
+
+    nav_links = " | ".join(
+        f'<a href="#{t}" style="color:#58a6ff">{_escape(t.capitalize())}</a>'
+        for t in all_targets
+    )
+
+    return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{_escape(title)}</title>
+<style>
+body {{
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+  background: #0d1117; color: #c9d1d9;
+  margin: 0; padding: 20px; line-height: 1.6;
+}}
+h1 {{ color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 10px; }}
+h2 {{ color: #79c0ff; margin-top: 30px; border-left: 4px solid #30363d; padding-left: 12px; }}
+table {{ width: 100%; border-collapse: collapse; margin: 12px 0; }}
+th {{ background: #161b22; color: #58a6ff; padding: 8px 12px; text-align: left; border: 1px solid #30363d; }}
+td {{ padding: 8px 12px; border: 1px solid #21262d; vertical-align: top; }}
+tr:nth-child(even) td {{ background: #161b22; }}
+section {{ margin-bottom: 40px; }}
+.meta {{ color: #8b949e; font-size: 0.9em; margin-bottom: 20px; }}
+.nav {{ margin-bottom: 24px; }}
+</style>
+</head>
+<body>
+<h1>{_escape(title)}</h1>
+<div class="meta">Generated: {now} &nbsp;|&nbsp; {total_gaps} total gap(s) across {len(all_targets)} target(s)</div>
+<div class="nav">{nav_links}</div>
+{sections_html}
+</body>
+</html>'''
+
+
+def write_capability_gap_report(
+    gap_data: dict[str, list[dict]],
+    output_path: Path,
+    title: str = "HarnessSync Capability Gap Report",
+    include_workarounds: bool = True,
+) -> None:
+    """Write the capability gap HTML report to a file.
+
+    Args:
+        gap_data: Dict mapping target_name -> list of gap dicts (see
+                  ``generate_capability_gap_report`` for schema).
+        output_path: Path to write the HTML file.
+        title: Page title.
+        include_workarounds: If False, omit the workaround column.
+    """
+    content = generate_capability_gap_report(gap_data, title, include_workarounds)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(content, encoding="utf-8")

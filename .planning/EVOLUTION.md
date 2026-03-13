@@ -4094,3 +4094,77 @@ _2026-03-13T11:53:19.834Z_
 - Cursor import correctly skips harnesssync.mdc (files we wrote) by checking for 'harnesssync' in filename — this prevents content loops where we import our own output
 
 ---
+## Iteration 62
+_2026-03-13T12:11:43.656Z_
+
+### Items Attempted
+
+- **Sync Conflict Resolution Wizard** — pass
+- **Live Capability Matrix Dashboard** — pass
+- **MCP Server Portability Advisor** — pass
+- **Team Config Broadcast** — pass
+- **Permission Model Translator** — pass
+- **Selective Sync Profiles** — pass
+- **Config Health Score** — pass
+- **Reverse Import Wizard** — pass
+- **Rules Deduplication Analyzer** — pass
+- **Git Branch-Aware Sync** — pass
+- **Cross-Harness Response Benchmark** — pass
+- **Secret & Credential Scrubber** — pass
+- **CI/CD Sync Validator** — pass
+- **Plugin Ecosystem Bridge** — pass
+- **Visual Rollback Timeline** — pass
+- **Context Window Budget Advisor** — pass
+- **Harness-Native Config Linter** — pass
+- **Personal vs. Project Config Segmentation UI** — pass
+- **Sync Webhook & Notification System** — pass
+- **Agent Capability Gap Report** — pass
+- **Zero-Drift Guarantee Mode** — pass
+- **Skill Usage Heatmap** — pass
+- **Config Version Pinning** — pass
+- **Natural Language Sync Rules** — pass
+- **AI Request Cost Estimator** — pass
+- **Shareable Config Bundles** — pass
+- **Experimental Harness Sandbox** — pass
+- **Model-Specific Instruction Tuning** — pass
+- **Auto-Migration on Harness Updates** — pass
+- **Cross-Harness Memory Sync** — pass
+- **Inline Sync Impact on Edit** — pass
+- **Per-Harness Testing Mode** — pass
+
+### Decisions Made
+
+- Added format_heatmap() to SkillUsageAnalytics in harness_adoption.py — builds a 2D grid (skills × harnesses) using invocation counts, with a dead-skills list below; chose ASCII '#'/'.' cells for terminal compatibility across all environments
+- Added ZeroDriftGuarantee class to drift_watcher.py — uses a background polling thread (2s interval) rather than OS file-system watchers (inotify/kqueue) to stay cross-platform and avoid optional deps; reverts by writing file_content_snapshots from state
+- Added NaturalLanguageSyncFilter to nl_config_generator.py — parses 'except/but not/excluding' clauses via regex splitting, maps aliases to canonical section names, and identifies sensitive-content exclusion keywords; kept offline/deterministic with no LLM calls
+- Added AgentCapabilityGapReport + build_agent_gap_report() to skill_gap_analyzer.py — covers 10 capability dimensions across 10 harnesses with workaround suggestions; hardcoded matrix is the right call since capability data changes slowly and has no runtime source
+- Added suggest_alternatives() + format_portability_advice() to mcp_tool_compat.py — curates a database of MCP server → harness-native equivalents (github, filesystem, playwright, context7, sqlite, brave-search, memory) with per-harness install hints
+- Added compare_security_models() to permission_translator.py — surfaces how shell_execution/file_write/network_access/env_var_exposure behave differently per harness, with explicit WARNING flags for codex sandbox exits and gemini grounding auto-calls
+- Added PreSyncSecretScanResult + pre_sync_secret_scan() to secret_detector.py — designed as a drop-in gate for the sync orchestrator; allow_secrets=True escape hatch for CI environments that intentionally embed test secrets
+- Added format_side_by_side() to BenchmarkReport in prompt_benchmark.py — renders up to 3 harnesses in adjacent columns with per-harness rule/tool/skill breakdowns; width parameter allows adaptation to narrow terminals
+- Added export_harnessbundle() + import_harnessbundle() to ConfigBundle in config_bundle.py — uses .harnessbundle as a ZIP extension, stores bundle.json manifest + individual files + redacted MCP config; dry_run mode for safe preview
+- Added ConfigVersionPin + pin_config_version() + check_pin_drift() + list_pins() + remove_pin() to harness_version_compat.py — pins stored in ~/.harnesssync/version_pins.json; supports 'all' harness wildcard for blanket pinning
+- Added diff_memories() + format_diff_summary() to CrossHarnessMemorySync — previews which memories are new/changed/unchanged before a destructive sync operation; uses content-presence heuristic since memory files vary in format
+- Added extract_model_variant() + inject_model_variant() + list_model_variants() to model_routing.py — uses <!-- model:X --> ... <!-- /model:X --> marker syntax so model-specific variants live inline in CLAUDE.md without extra files
+
+### Patterns Discovered
+
+- All existing modules follow the pattern of appending new functionality at the end of files — extending rather than restructuring keeps git diffs minimal and avoids merge conflicts with the evolve loop
+- The codebase consistently uses dataclasses for result types and standalone functions for analysis logic, keeping classes lean and testable in isolation
+- Logger is injected via constructor parameter with a default fallback — this pattern enables testing without mocking the global logger while keeping production code simple
+- Optional imports are deferred inside functions (e.g. 'from pathlib import Path as _Path' inside pre_sync_secret_scan) to avoid circular imports and keep module-level imports clean
+- Secret detection reuses SecretDetector() throughout the codebase — the pre-sync scan correctly delegates to the existing class rather than re-implementing detection logic
+- The harness matrix data (capabilities, transport support, feature versions) is hardcoded as module-level constants rather than loaded from config — appropriate since this data reflects external harness specs that change infrequently
+- Background threads use daemon=True universally so they don't prevent clean process exit — important for CLI tools where users may Ctrl-C at any time
+- The NaturalLanguageSyncFilter uses a @dataclass inner class (FilterRule) inside the outer class — this is idiomatic Python for grouping related types without polluting the module namespace
+
+### Takeaways
+
+- The evolve loop has built a remarkably complete module surface — almost every product-ideation item had a corresponding module already. Future iterations should focus on integration (wiring modules together via the orchestrator) rather than adding more standalone classes
+- The state_manager's file_content_snapshots field is the right mechanism for ZeroDriftGuarantee to work, but it's unclear from the codebase whether adapters actually populate this field — a follow-up should audit adapter write paths
+- The .harnessbundle format needs a spec document or at least a version field in bundle.json to enable forward/backward compatibility as the format evolves
+- The model_routing.py model-specific tuning feature adds markup to CLAUDE.md files — the transform_engine.py and source_reader.py will need to be updated to strip these markers when building harness-specific output
+- pre_sync_secret_scan() auto-discovers config files using a hardcoded list — this should eventually delegate to source_reader.py's discovery logic to stay in sync as new config file types are added
+- The harness adoption module has grown to 1400+ lines with multiple independent classes — UsageAttributionAnalyzer, SkillUsageAnalytics, MultiProjectDashboard are candidates for extraction into separate focused modules
+
+---
