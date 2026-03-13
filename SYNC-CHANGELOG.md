@@ -966,3 +966,19 @@
 - **windsurf** ✓  synced=0 skipped=1 failed=0
 - **zed** ✓  synced=0 skipped=6 failed=0
 
+## 2026-03-13T16:51:04   scope=all
+
+<!-- attribution: author: Cameleon X <ca1773130n@gmail.com> | commit: 36cf581 — evolve(iteration-46): miscellaneous -->
+
+- **aider** ✓  synced=1 skipped=3 failed=0
+  - `.aider.conf.yml`
+- **cline** ✓  synced=0 skipped=5 failed=0
+- **codex** ✓  synced=0 skipped=1 failed=0
+- **continue** ✓  synced=0 skipped=6 failed=0
+- **cursor** ✓  synced=0 skipped=6 failed=0
+- **gemini** ✓  synced=0 skipped=1 failed=0
+- **neovim** ✓  synced=0 skipped=6 failed=0
+- **opencode** ✓  synced=0 skipped=1 failed=0
+- **windsurf** ✓  synced=0 skipped=1 failed=0
+- **zed** ✓  synced=0 skipped=6 failed=0
+

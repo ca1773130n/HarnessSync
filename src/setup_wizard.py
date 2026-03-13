@@ -386,8 +386,8 @@ class SetupWizard:
         print(f"  Syncing sections: {display_sections}")
         print()
 
-        # Step 4: Confirm and write config
-        print("[4/4] Summary")
+        # Step 4: Preview diff and confirm
+        print("[4/4] Configuration preview")
         config: dict = {}
         if len(chosen_targets) < len(all_targets):
             config["only_targets"] = chosen_targets
@@ -395,10 +395,57 @@ class SetupWizard:
             config["only_sections"] = chosen_sections
         config["_guided_setup"] = True
 
-        print(f"  Targets:  {', '.join(chosen_targets)}")
-        print(f"  Sections: {display_sections}")
         harnesssync_path = cwd / ".harnesssync"
-        print(f"  Config:   {harnesssync_path}")
+
+        # Build the merged config to preview
+        existing: dict = {}
+        if harnesssync_path.exists():
+            try:
+                existing = json.loads(harnesssync_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                pass
+        merged_preview = dict(existing)
+        merged_preview.update({k: v for k, v in config.items() if not k.startswith("_")})
+
+        # Show the diff between current and proposed config
+        import difflib
+        old_text = json.dumps(existing, indent=2) if existing else "(no existing config)"
+        new_text = json.dumps(merged_preview, indent=2)
+
+        print(f"  Config file: {harnesssync_path}")
+        print()
+        if existing:
+            diff_lines = list(difflib.unified_diff(
+                old_text.splitlines(),
+                new_text.splitlines(),
+                fromfile="current .harnesssync",
+                tofile="proposed .harnesssync",
+                lineterm="",
+            ))
+            if diff_lines:
+                print("  Changes to .harnesssync:")
+                for line in diff_lines:
+                    prefix = "  "
+                    if line.startswith("+") and not line.startswith("+++"):
+                        prefix = "+ "
+                    elif line.startswith("-") and not line.startswith("---"):
+                        prefix = "- "
+                    print(f"    {prefix}{line}")
+            else:
+                print("  No changes to .harnesssync (already up to date).")
+        else:
+            print("  New .harnesssync will be created:")
+            for line in new_text.splitlines():
+                print(f"    {line}")
+
+        # Explain each mapping decision
+        print()
+        print("  Mapping decisions:")
+        for target in chosen_targets:
+            syncs = display_sections if display_sections != "all" else "all sections"
+            print(f"    · {target}: will receive {syncs}")
+        for target in not_found:
+            print(f"    · {target}: skipped (not detected on this machine)")
         print()
 
         confirm = input("Write configuration and run first sync? [Y/n]: ").strip().lower()
@@ -406,16 +453,9 @@ class SetupWizard:
             print("Setup cancelled.")
             return None
 
-        # Merge with existing .harnesssync if present
-        existing: dict = {}
-        if harnesssync_path.exists():
-            try:
-                existing = json.loads(harnesssync_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                pass
-        existing.update({k: v for k, v in config.items() if not k.startswith("_")})
+        # Write merged config
         harnesssync_path.write_text(
-            json.dumps(existing, indent=2) + "\n", encoding="utf-8"
+            json.dumps(merged_preview, indent=2) + "\n", encoding="utf-8"
         )
         print(f"\n.harnesssync written to {harnesssync_path}")
         print("Run /sync to perform your first sync.")

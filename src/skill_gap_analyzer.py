@@ -98,6 +98,142 @@ class SkillGapReport:
             )
         return "\n".join(lines)
 
+    def format_with_suggestions(self) -> str:
+        """Format skill gap report including actionable workaround suggestions.
+
+        For each missing skill × target combination, appends a plain-English
+        suggestion explaining how the user can manually fill the gap in that
+        harness — making the invisible visible.
+
+        Returns:
+            Extended report string with suggestions appended after each gap.
+        """
+        # Import here to avoid circular dependency at module level
+        from src.skill_gap_analyzer import suggest_skill_workaround
+
+        lines = ["## Skill Gap Analysis with Suggestions", ""]
+
+        if not self.source_skills:
+            lines.append("No skills found in Claude Code source.")
+            return "\n".join(lines)
+
+        lines.append(f"Source skills: {len(self.source_skills)}")
+        if self.unsupported_targets:
+            lines.append(
+                f"Targets without skill sync: {', '.join(sorted(self.unsupported_targets))}"
+            )
+        lines.append("")
+
+        gaps_with_missing = [g for g in self.gaps if g.missing_in]
+        if gaps_with_missing:
+            lines.append("### Skills missing in some targets (with suggestions):")
+            for gap in sorted(gaps_with_missing, key=lambda g: g.skill_name):
+                lines.append(f"\n  **{gap.skill_name}**")
+                for target in sorted(gap.missing_in):
+                    lines.append(f"    Missing in: {target}")
+                    suggestion = suggest_skill_workaround(target, gap.skill_name)
+                    # Indent suggestion text
+                    for sline in suggestion.split(". "):
+                        sline = sline.strip()
+                        if sline:
+                            lines.append(f"      → {sline.rstrip('.')}.")
+            lines.append("")
+
+        orphaned = [g for g in self.gaps if g.orphaned_in]
+        if orphaned:
+            lines.append("### Orphaned skills (in target but not in source):")
+            for gap in sorted(orphaned, key=lambda g: g.skill_name):
+                lines.append(f"  {gap.skill_name}")
+                lines.append(f"    Orphaned in: {', '.join(sorted(gap.orphaned_in))}")
+                lines.append(
+                    "    → Consider adding this skill to ~/.claude/skills/ "
+                    "so it's managed by HarnessSync."
+                )
+            lines.append("")
+
+        if not gaps_with_missing and not orphaned:
+            lines.append("All skills are in sync across all active targets.")
+
+        if self.total_gaps > 0:
+            lines.append(
+                f"Total gaps: {self.total_gaps} (skill × target combinations "
+                "where skill is missing)"
+            )
+        return "\n".join(lines)
+
+
+# Per-target suggestions for skills that can't be synced natively.
+# Explains how users can manually fill the gap for unsupported harnesses.
+_TARGET_SKILL_WORKAROUNDS: dict[str, str] = {
+    "aider": (
+        "Aider doesn't support skills natively. "
+        "Embed the skill's SKILL.md content in your system prompt via "
+        ".aider.conf.yml 'read' key, or add it to CONVENTIONS.md so Aider "
+        "picks it up as project context."
+    ),
+    "codex": (
+        "Codex supports skills via AGENTS.md. "
+        "Add the skill instructions to your AGENTS.md under a dedicated heading, "
+        "or place the skill file in .agents/skills/ so HarnessSync can sync it."
+    ),
+    "gemini": (
+        "Gemini CLI supports skills via .gemini/skills/. "
+        "Ensure the skill directory is present under ~/.claude/skills/ and run /sync."
+    ),
+    "opencode": (
+        "OpenCode supports skills via .opencode/skills/. "
+        "Ensure the skill directory is present and run /sync."
+    ),
+    "cursor": (
+        "Cursor supports skills as .mdc rule files under .cursor/rules/skills/. "
+        "Run /sync to propagate skills, or manually create a .mdc file with "
+        "the skill content and alwaysApply: false."
+    ),
+    "windsurf": (
+        "Windsurf maps skills to .windsurf/memories/ files. "
+        "Run /sync to propagate, or manually create a .md file in .windsurf/memories/ "
+        "with the skill content."
+    ),
+    "cline": (
+        "Cline supports rule files under .roo/rules/skills/. "
+        "Add skill content as a rule file to expose it to Cline sessions."
+    ),
+    "continue": (
+        "Continue supports rule files under .continue/rules/skills/. "
+        "Add skill content as a rule file and run /sync."
+    ),
+    "zed": (
+        "Zed supports prompts under .zed/prompts/skills/. "
+        "Add the skill as a .md prompt file for use in Zed AI sessions."
+    ),
+    "neovim": (
+        "Neovim/Avante supports rules under .avante/rules/skills/. "
+        "Add the skill content as a rule file for your Avante setup."
+    ),
+}
+
+
+def suggest_skill_workaround(target: str, skill_name: str) -> str:
+    """Return a human-readable suggestion for bridging a skill gap.
+
+    When a skill exists in Claude Code but a target harness doesn't support
+    it natively, this function explains how to manually fill the gap.
+
+    Args:
+        target: Target harness name (e.g. "aider", "codex").
+        skill_name: Name of the skill that is missing.
+
+    Returns:
+        Suggestion string. Falls back to a generic message if no specific
+        guidance exists for this target.
+    """
+    base = _TARGET_SKILL_WORKAROUNDS.get(
+        target,
+        f"{target} may not support skills. Check {target}'s documentation for "
+        "how to inject persistent instructions or system prompt content.",
+    )
+    return f"Skill '{skill_name}' gap in {target}: {base}"
+
 
 class SkillGapAnalyzer:
     """Analyzes skill coverage gaps across sync targets.
@@ -176,6 +312,32 @@ class SkillGapAnalyzer:
                     ))
 
         return report
+
+    def suggest_all(
+        self,
+        source_skills: dict[str, Path] = None,
+        active_targets: list[str] = None,
+    ) -> list[str]:
+        """Run gap analysis and return a flat list of actionable suggestions.
+
+        Each entry in the returned list is a plain-English suggestion for how
+        to fill a specific skill × target gap.  Users don't know what they're
+        missing — this makes the invisible visible.
+
+        Args:
+            source_skills: Pre-loaded skills dict (see analyze()).
+            active_targets: List of active targets (see analyze()).
+
+        Returns:
+            List of suggestion strings, one per skill × target gap.
+            Empty list if no gaps found.
+        """
+        report = self.analyze(source_skills=source_skills, active_targets=active_targets)
+        suggestions: list[str] = []
+        for gap in report.gaps:
+            for target in gap.missing_in:
+                suggestions.append(suggest_skill_workaround(target, gap.skill_name))
+        return suggestions
 
     def _discover_source_skills(self) -> dict[str, Path]:
         """Discover skills from ~/.claude/skills/ directory."""

@@ -2996,3 +2996,69 @@ _2026-03-13T07:26:11.979Z_
 - The deepeval package in the test environment is incompatible with Python 3.9 (uses X | None union syntax). Tests must be run with -p no:deepeval to avoid collection errors. This is a pre-existing environment issue, not caused by this iteration's changes.
 
 ---
+## Iteration 46
+_2026-03-13T07:39:43.544Z_
+
+### Items Attempted
+
+- **Sync Conflict Resolution Wizard** — pass
+- **Live Capability Gap Dashboard** — pass
+- **One-Command New Harness Bootstrap** — pass
+- **Sync Profiles (Work / Personal / Team)** — pass
+- **Dry-Run Sync Preview** — pass
+- **Team Config Broadcast via Git** — pass
+- **MCP Server Portability Checker** — pass
+- **Rules Effectiveness Heatmap** — pass
+- **Harness Version Compatibility Guard** — pass
+- **Natural Language Rule Optimizer** — pass
+- **Sync History & Time-Travel Restore** — pass
+- **CI/CD Sync Verification Action** — pass
+- **Community Skill Translation Library** — pass
+- **Secret & Credential Leak Prevention** — pass
+- **Per-Project Sync Override Files** — pass
+- **Sync Event Webhooks** — pass
+- **Aider / Cursor / Windsurf Adapters** — pass
+- **Auto-Discovery of Installed Harnesses** — pass
+- **Sync Impact Predictor** — pass
+- **Offline Sync Queue** — pass
+- **Config Quality Linter** — pass
+- **Sync Annotations in Source Files** — pass
+- **Harness-Specific Rule Sections** — pass
+- **Plugin Ecosystem Bridge** — pass
+- **Model-Aware Rule Translation** — pass
+- **Weekly Sync Health Digest** — pass
+- **Remote Machine Sync via SSH** — pass
+- **Rule Deduplication & Consolidation** — pass
+- **Harness Usage Analytics** — pass
+- **Dotfiles Repo Integration** — pass
+- **Project-Switch Auto-Sync** — pass
+- **Import Config from Other Harnesses** — pass
+
+### Decisions Made
+
+- Extended offline_queue._TARGET_CONFIG_DIRS to include cursor, aider, cline, continue, zed, neovim — each mapped to its user-level config home. Zed uses platform-aware path (macOS Library vs Linux .config). Also expanded project_scoped set to include cline, continue, and zed since those harnesses store project rules inside the project directory.
+- Added portability_score() and format_portability_report() to mcp_tool_compat.py. Errors deduct 50 points, warnings deduct 15 points, floor at 0. Harnesses with no MCP transport (aider, vscode) get 0 unconditionally. This surfaces a per-harness numeric score instead of requiring users to interpret raw CompatIssue lists.
+- Added format_capability_gap_dashboard() to HarnessFeatureMatrix. Classifies gaps as BLOCKING (unsupported) vs ADVISORY (partial/adapter) with per-feature workaround hints for the most common gaps (skills in zed/neovim, commands in gemini/aider, etc.). This directly addresses the 'why does this behave differently?' problem.
+- Enhanced KNOWN_SECRET_FORMATS in secret_detector.py with regex patterns for Anthropic API keys (sk-ant-*), OpenAI keys (sk-*), GitHub PATs (ghp_*), AWS keys (AKIA*), JWTs, Slack tokens, Stripe keys, and Google API keys. scan_content() now runs both the _INLINE_SECRET_RE pass and a KNOWN_SECRET_FORMATS pass, deduplicating by line+offset.
+- Added profile inheritance via 'extends' key in ProfileManager.get_profile(). Inheritance resolves recursively up to depth 5 as a cycle guard. Child keys take precedence over parent. This lets teams define a 'base' profile and 'work'/'personal' profiles that extend it — solving separation-of-concerns without duplicating config.
+- Expanded _HARNESS_PREFERENCES in sync_impact_predictor.py for gemini (slash commands, skill invocations), windsurf, cline, continue, zed, and neovim. Also added 9 more MCP server tool patterns (slack, jira, linear, aws, docker, kubernetes, playwright) so MCP impact reports enumerate realistic tool names.
+- Added format_consolidation_plan() to RuleDeduplicator. For each duplicate cluster, it generates numbered steps: add canonical to CLAUDE.md if not already there, then remove duplicates from other files. This converts the read-only report into actionable guidance.
+- Created src/commands/sync_add_harness.py implementing /sync-add-harness. Uses cli_only_targets to target a single harness, auto-detects unconfigured harnesses via scan_all(), checks if already configured before overwriting, and guides the user through a 4-step flow. Added matching commands/sync-add-harness.md.
+
+### Patterns Discovered
+
+- Most product-ideation items already had skeleton implementations. Improvements were enhancements: adding missing harness entries to dicts, adding new analysis methods, adding inheritance logic to existing classes.
+- The orchestrator accepts cli_only_targets: set[str] to restrict which adapters run — a clean way to add per-harness commands without duplicating sync logic.
+- The pattern of adding both a Python command module in src/commands/ and a markdown command file in commands/ is consistent across all slash commands.
+- Secret detection uses two independent passes (keyword+regex, then known-format patterns) rather than one combined regex — this is more maintainable and allows different confidence levels per detection type.
+- Profile inheritance uses recursive resolution with a depth guard instead of iterative merging — simpler code but requires the guard to prevent infinite cycles.
+
+### Takeaways
+
+- The project has excellent coverage of the feature list — most items had existing files. Future iteration value is in depth (more patterns, more harnesses, better UX) rather than breadth.
+- scan_all() in harness_detector.py returns dict[str, dict] but the 'detected' value is a dict not a bool. sync_add_harness.py uses truthiness of the dict which works since empty dicts are falsy.
+- _TARGET_CONFIG_DIRS in offline_queue.py was missing 6 of the 10 supported harnesses, meaning offline queueing silently fell through to 'assume available' for cursor, aider, cline, continue, zed, neovim.
+- Profile manager's get_profile() only returned a shallow copy — the new inheritance layer adds non-trivial behavior at a single call site, which is ideal (callers don't need to change).
+- format_capability_gap_dashboard() fills a real gap: harness_feature_matrix.py had all the raw data but no 'gap report' entry point. The dashboard aggregates blocking vs advisory in a user-facing format.
+
+---
