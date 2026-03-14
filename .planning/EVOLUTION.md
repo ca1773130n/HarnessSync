@@ -4578,3 +4578,68 @@ _2026-03-13T13:47:56.069Z_
 - The skill browser HTML page fills a visibility gap: currently users must grep multiple directories to understand what's configured where. A visual browser makes the multi-harness config ecosystem tangible.
 
 ---
+## Iteration 69
+_2026-03-13T14:35:59.387Z_
+
+### Items Attempted
+
+- **Interactive Harness Onboarding** — pass
+- **Interactive Conflict Resolution** — pass
+- **Harness-Specific Override Blocks in CLAUDE.md** — pass
+- **Background Sync Watchdog** — pass
+- **Capability Gap Alerts on Sync** — pass
+- **MCP Server Compatibility Matrix** — pass
+- **Named Sync Profiles** — pass
+- **Team Config Broadcast via Git** — pass
+- **Harness Performance Benchmark** — pass
+- **Auto Sync Changelog** — pass
+- **Harness Health Score Dashboard** — pass
+- **PR Sync Preview Comment** — pass
+- **Environment Variable Safety Scanner** — pass
+- **Project-Scoped Sync Rules** — pass
+- **Sync Undo / Time Travel** — pass
+- **Harness-Specific Skill Variants** — pass
+- **Community Adapter Registry** — pass
+- **Config Smoke Test Runner** — pass
+- **Config Coverage Heatmap** — pass
+- **Rule Dependency Graph** — pass
+- **Auto-Detect Installed Harnesses** — pass
+- **Adaptive Sync Frequency** — pass
+- **Shareable Config Bundles** — pass
+- **Inline Translation Hints in CLAUDE.md** — pass
+- **Local Sync Metrics Dashboard** — pass
+- **Pre-Commit Sync Validation Hook** — pass
+- **AI-Assisted Rule Porting** — pass
+- **Harness A/B Task Routing** — pass
+- **Config Version Pinning** — pass
+- **Cross-Harness Session Handoff** — pass
+- **Plugin Ecosystem Sync** — pass
+- **Rule Scope Labels (#global #codex-only)** — pass
+
+### Decisions Made
+
+- Implemented inline harness block parsing (<!-- harness:X -->...<!-- /harness:X -->) in harness_override.py using a single compiled regex with a named backreference to enforce matching open/close tags — more robust than split-and-scan approaches that can misparse nested or malformed blocks
+- Added parse_inline_harness_blocks(), extract_inline_block(), strip_all_inline_blocks(), and inject_inline_block() as module-level functions (not methods) since they are pure text transforms with no state dependency — easier to test and compose
+- Wired inline block extraction into the orchestrator sync pipeline after the existing file-based override step, with a try/except guard so a malformed CLAUDE.md block never aborts an otherwise-successful sync
+- Added get_inline_harness_block() and get_all_inline_harness_blocks() to SourceReader to follow the existing reader abstraction pattern — callers go through SourceReader rather than calling harness_override functions directly
+- Added undo_n(steps) to HarnessUndoStack as a simple loop over undo() with early-exit on failure — reuses all existing single-step undo logic including redo stack management and dry_run support rather than duplicating that logic
+- Added undo_n() to SyncUndoManager as a thin facade delegation to HarnessUndoStack.undo_n() to maintain the multi-harness facade pattern already established in that class
+- Added --steps N flag to sync_rollback command that dispatches to SyncUndoManager rather than the file-based backup system — the two rollback mechanisms (undo stack vs. file backups) are kept distinct to avoid conflating them
+- post_sync_capability_report() wraps existing build_agent_gap_report() and returns empty string (not None) when there are no gaps so callers can print it unconditionally without an extra None check
+
+### Patterns Discovered
+
+- The codebase consistently uses module-level functions for stateless transforms and classes for stateful managers (e.g. HarnessOverride, ConflictDetector) — new code follows this pattern
+- Best-effort try/except around integration points in orchestrator.py is the established pattern for optional features that should not break the core sync path
+- Commands (src/commands/*.py) parse args with argparse and delegate immediately to src/*.py library functions — logic lives in the library, not the command
+- The SourceReader abstraction is the canonical read path for all project config — new source reading methods should be added there rather than reading files directly in commands or the orchestrator
+- Return types are consistently dataclasses or simple primitives (str, list, dict) — never raw JSON strings from library functions
+
+### Takeaways
+
+- The codebase has extremely broad feature coverage (100+ modules) but some features exist as library code without command-level entry points — a useful future pass would be to audit which library functions are reachable from any slash command
+- The inline harness block feature fills a real gap: CLAUDE.codex.md files require maintaining separate files, while inline blocks let users keep all harness context in one place — this reduces the maintenance surface for users with 2-3 targets
+- post_sync_capability_report() has high discoverability value — surfacing capability gaps immediately after sync means users see them when they're most relevant rather than needing to run a separate /sync-gaps command
+- The undo stack (HarnessUndoStack) and the file-based backup system (BackupManager) serve different recovery granularities — undo stack for sequential step-back, backups for point-in-time restores; keeping them separate avoids confusion in the UX
+
+---
