@@ -1036,3 +1036,385 @@ def is_commit_annotate_hook_installed(project_dir: Path) -> bool:
     if not hook_path.exists():
         return False
     return COMMIT_ANNOTATE_MARKER in hook_path.read_text(encoding="utf-8")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Post-Merge Hook — Team Config Broadcast (item 3)
+# Fires after `git merge` or `git pull` completes.  Detects when CLAUDE.md
+# or related HarnessSync files changed in the merge and auto-syncs so all
+# harnesses immediately reflect the team config without manual intervention.
+# ──────────────────────────────────────────────────────────────────────────────
+
+POST_MERGE_HOOK_MARKER = "# harnesssync-post-merge-v1"
+
+POST_MERGE_HOOK_TEMPLATE = """\
+#!/bin/sh
+# HarnessSync post-merge hook
+# Automatically syncs config after git pull/merge when team config files change.
+# Installed by: /sync-git-hook install --post-merge
+# Remove with:  /sync-git-hook uninstall --post-merge
+
+# harnesssync-post-merge-v1
+
+# Find HarnessSync plugin root
+if [ -n "$CLAUDE_PLUGIN_ROOT" ]; then
+    HS_ROOT="$CLAUDE_PLUGIN_ROOT"
+elif [ -f "$HOME/.claude/plugins/harness-sync/src/commands/sync.py" ]; then
+    HS_ROOT="$HOME/.claude/plugins/harness-sync"
+else
+    exit 0
+fi
+
+PY=$(command -v python3 || command -v python)
+if [ -z "$PY" ]; then
+    exit 0
+fi
+
+# Only sync if HarnessSync-managed files changed in the merge.
+# MERGE_HEAD is set during merge; compare HEAD~1..HEAD for pull, ORIG_HEAD..HEAD for merge.
+if [ -f "$(git rev-parse --git-dir)/ORIG_HEAD" ]; then
+    BASE=$(git rev-parse ORIG_HEAD 2>/dev/null)
+else
+    BASE=$(git rev-parse HEAD~1 2>/dev/null)
+fi
+
+if [ -z "$BASE" ]; then
+    exit 0
+fi
+
+changed=$(git diff --name-only "$BASE" HEAD 2>/dev/null)
+triggers=0
+for pattern in CLAUDE.md AGENTS.md GEMINI.md .mcp.json .harness-sync/ .claude/settings.json; do
+    if echo "$changed" | grep -qF "$pattern"; then
+        triggers=1
+        break
+    fi
+done
+
+if [ "$triggers" -eq 0 ]; then
+    exit 0
+fi
+
+# Run sync in foreground so git pull output shows the result.
+echo "[HarnessSync] Team config changed — syncing to all harnesses..."
+"$PY" "$HS_ROOT/src/commands/sync.py" --scope all
+
+exit 0
+"""
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pre-Push Sync Enforcement Hook (item 4 — Pre-Push Sync Enforcement)
+#
+# Blocks `git push` when any synced harness target is out of date with CLAUDE.md.
+# Teams can enforce that nobody pushes CLAUDE.md changes without also committing
+# the synced AGENTS.md, GEMINI.md, etc., preventing config debt in shared repos.
+#
+# The hook only activates when HarnessSync-managed source files (CLAUDE.md,
+# .claude/, .mcp.json) differ between local HEAD and the remote tracking branch,
+# so it adds zero overhead to pushes that don't touch Claude config.
+# ──────────────────────────────────────────────────────────────────────────────
+
+PRE_PUSH_HOOK_MARKER = "# harnesssync-pre-push-v1"
+
+PRE_PUSH_HOOK_TEMPLATE = """\
+#!/bin/sh
+# HarnessSync pre-push sync enforcement hook
+# Blocks push when harness configs are out of date with CLAUDE.md.
+# Installed by: /sync-git-hook install --pre-push
+# Remove with:  /sync-git-hook uninstall --pre-push
+
+HARNESSSYNC_PRE_PUSH_MARKER="# harnesssync-pre-push-v1"
+$HARNESSSYNC_PRE_PUSH_MARKER
+
+# git pre-push receives remote name and URL as args; commits to push on stdin.
+# We read stdin to discover the local..remote range being pushed.
+remote="$1"
+url="$2"
+
+range=""
+while read local_ref local_sha remote_ref remote_sha; do
+    if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+        # New branch — compare against empty tree
+        range="${local_sha}"
+    else
+        range="${remote_sha}..${local_sha}"
+    fi
+    break  # Only need the first ref range
+done
+
+if [ -z "$range" ]; then
+    exit 0
+fi
+
+# Check if HarnessSync-managed files are in the push range
+changed=$(git diff --name-only "$range" 2>/dev/null)
+triggers=0
+for pattern in CLAUDE.md .claude/ .mcp.json .harness-sync/; do
+    if echo "$changed" | grep -q "^$pattern"; then
+        triggers=1
+        break
+    fi
+done
+
+if [ "$triggers" -eq 0 ]; then
+    exit 0
+fi
+
+# Find HarnessSync plugin root
+if [ -n "$CLAUDE_PLUGIN_ROOT" ]; then
+    HS_ROOT="$CLAUDE_PLUGIN_ROOT"
+elif [ -f "$HOME/.claude/plugins/harness-sync/src/commands/sync_status.py" ]; then
+    HS_ROOT="$HOME/.claude/plugins/harness-sync"
+else
+    # HarnessSync not installed — allow push
+    exit 0
+fi
+
+PY=$(command -v python3 || command -v python)
+if [ -z "$PY" ]; then
+    exit 0
+fi
+
+# Run sync in dry-run mode to detect drift without writing
+drift_output=$("$PY" "$HS_ROOT/src/commands/sync.py" --dry-run --scope all 2>&1)
+
+if echo "$drift_output" | grep -qiE "(would (write|update|create)|drift detected|out.of.sync|CONFLICT)"; then
+    echo "" >&2
+    echo "╔══════════════════════════════════════════════════════════════╗" >&2
+    echo "║  HarnessSync: PUSH BLOCKED — harness configs are out of sync ║" >&2
+    echo "╚══════════════════════════════════════════════════════════════╝" >&2
+    echo "" >&2
+    echo "  Your push includes CLAUDE.md changes but target harness files" >&2
+    echo "  (AGENTS.md, GEMINI.md, etc.) are not yet synced." >&2
+    echo "" >&2
+    echo "  Fix: run /sync, commit the updated harness files, then push again." >&2
+    echo "    1) /sync" >&2
+    echo "    2) git add AGENTS.md GEMINI.md opencode.json codex.toml" >&2
+    echo "    3) git commit -m 'sync: update harness configs'" >&2
+    echo "    4) git push" >&2
+    echo "" >&2
+    echo "  To bypass (not recommended): git push --no-verify" >&2
+    echo "" >&2
+    if [ -n "$drift_output" ]; then
+        echo "  Drift details (first 8 lines):" >&2
+        echo "$drift_output" | head -8 | sed 's/^/    /' >&2
+        echo "" >&2
+    fi
+    exit 1
+fi
+
+exit 0
+"""
+
+
+def install_pre_push_hook(project_dir: Path) -> tuple[bool, str]:
+    """Install a pre-push hook that blocks push when harness configs are out of sync.
+
+    The hook fires before ``git push`` transmits any data to the remote.
+    When CLAUDE.md or related source files are in the push range and the
+    synced harness targets are stale, the push is blocked with a clear
+    message and instructions to sync and commit first.
+
+    This closes the gap where developers push CLAUDE.md changes without
+    also committing the synced AGENTS.md, GEMINI.md, etc., accumulating
+    config debt that diverges teammates' harnesses.
+
+    If a pre-push hook already exists, the HarnessSync block is appended
+    rather than replacing the existing hook.
+
+    Args:
+        project_dir: Starting directory for git repo discovery.
+
+    Returns:
+        Tuple of (success: bool, message: str).
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False, "Not inside a git repository"
+
+    hooks_dir = git_dir / "hooks"
+    hooks_dir.mkdir(exist_ok=True)
+    hook_path = hooks_dir / "pre-push"
+
+    if hook_path.exists() and PRE_PUSH_HOOK_MARKER in hook_path.read_text(encoding="utf-8"):
+        return True, f"Pre-push hook already installed at {hook_path}"
+
+    if hook_path.exists():
+        existing = hook_path.read_text(encoding="utf-8")
+        new_content = existing.rstrip() + "\n\n" + PRE_PUSH_HOOK_TEMPLATE
+    else:
+        new_content = PRE_PUSH_HOOK_TEMPLATE
+
+    try:
+        hook_path.write_text(new_content, encoding="utf-8")
+        _make_executable(hook_path)
+        return True, f"Pre-push sync enforcement hook installed at {hook_path}"
+    except OSError as e:
+        return False, f"Failed to install pre-push hook: {e}"
+
+
+def uninstall_pre_push_hook(project_dir: Path) -> tuple[bool, str]:
+    """Remove the HarnessSync block from the git pre-push hook.
+
+    Removes only the HarnessSync-managed block. If the hook has other
+    content, it is preserved. If the hook becomes empty after removal,
+    the hook file is deleted.
+
+    Args:
+        project_dir: Starting directory for git repo discovery.
+
+    Returns:
+        Tuple of (success: bool, message: str).
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False, "No git repository found"
+
+    hook_path = git_dir / "hooks" / "pre-push"
+    if not hook_path.exists():
+        return True, "Pre-push hook not installed"
+
+    content = hook_path.read_text(encoding="utf-8")
+    if PRE_PUSH_HOOK_MARKER not in content:
+        return True, "HarnessSync pre-push hook block not found"
+
+    lines = content.splitlines(keepends=True)
+    out: list[str] = []
+    in_block = False
+    for line in lines:
+        if PRE_PUSH_HOOK_MARKER in line:
+            in_block = True
+        if not in_block:
+            out.append(line)
+        elif line.strip() == "exit 0" and in_block:
+            in_block = False
+
+    remaining = "".join(out).strip()
+    if not remaining or remaining == "#!/bin/sh":
+        hook_path.unlink()
+        return True, "Pre-push hook removed (file deleted)"
+
+    try:
+        hook_path.write_text(remaining + "\n", encoding="utf-8")
+        return True, f"HarnessSync pre-push block removed from {hook_path}"
+    except OSError as e:
+        return False, f"Failed to update pre-push hook: {e}"
+
+
+def is_pre_push_hook_installed(project_dir: Path) -> bool:
+    """Return True if the HarnessSync pre-push sync enforcement hook is installed.
+
+    Args:
+        project_dir: Starting directory for git repo discovery.
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False
+    hook_path = git_dir / "hooks" / "pre-push"
+    if not hook_path.exists():
+        return False
+    return PRE_PUSH_HOOK_MARKER in hook_path.read_text(encoding="utf-8")
+
+
+def install_post_merge_hook(project_dir: Path) -> tuple[bool, str]:
+    """Install a git post-merge hook that auto-syncs after git pull/merge.
+
+    The hook fires after ``git merge`` completes (including ``git pull``).
+    When CLAUDE.md, settings.json, .mcp.json, or other HarnessSync-managed
+    files changed in the merge, HarnessSync runs automatically so all team
+    members' harnesses stay in sync without manual intervention.
+
+    This closes the gap where a developer pulls changes that update the team
+    CLAUDE.md but forgets to run /sync, leaving their harnesses stale.
+
+    If a post-merge hook already exists, the HarnessSync block is appended
+    rather than replacing the existing hook.
+
+    Args:
+        project_dir: Starting directory for git repo discovery.
+
+    Returns:
+        Tuple of (success: bool, message: str).
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False, "No git repository found"
+
+    hook_path = git_dir / "hooks" / "post-merge"
+
+    if hook_path.exists() and POST_MERGE_HOOK_MARKER in hook_path.read_text(encoding="utf-8"):
+        return True, f"Post-merge hook already installed at {hook_path}"
+
+    if hook_path.exists():
+        existing = hook_path.read_text(encoding="utf-8")
+        new_content = existing.rstrip() + "\n\n" + POST_MERGE_HOOK_TEMPLATE
+    else:
+        new_content = POST_MERGE_HOOK_TEMPLATE
+
+    try:
+        hook_path.write_text(new_content, encoding="utf-8")
+        _make_executable(hook_path)
+        return True, f"Post-merge hook installed at {hook_path}"
+    except OSError as e:
+        return False, f"Failed to install post-merge hook: {e}"
+
+
+def uninstall_post_merge_hook(project_dir: Path) -> tuple[bool, str]:
+    """Remove the HarnessSync block from the git post-merge hook.
+
+    Removes only the HarnessSync-managed block. If the hook has other
+    content, it is preserved. If the hook becomes empty after removal,
+    the hook file is deleted.
+
+    Args:
+        project_dir: Starting directory for git repo discovery.
+
+    Returns:
+        Tuple of (success: bool, message: str).
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False, "No git repository found"
+
+    hook_path = git_dir / "hooks" / "post-merge"
+    if not hook_path.exists():
+        return True, "Post-merge hook not installed"
+
+    content = hook_path.read_text(encoding="utf-8")
+    if POST_MERGE_HOOK_MARKER not in content:
+        return True, "HarnessSync post-merge hook block not found"
+
+    lines = content.splitlines(keepends=True)
+    out: list[str] = []
+    in_block = False
+    for line in lines:
+        if POST_MERGE_HOOK_MARKER in line:
+            in_block = True
+        if not in_block:
+            out.append(line)
+        elif line.strip() == "exit 0" and in_block:
+            in_block = False  # End of block; resume collecting
+    new_content = "".join(out).strip()
+
+    if not new_content or new_content == "#!/bin/sh":
+        hook_path.unlink()
+        return True, "Post-merge hook removed (file deleted)"
+
+    hook_path.write_text(new_content + "\n", encoding="utf-8")
+    return True, f"HarnessSync post-merge block removed from {hook_path}"
+
+
+def is_post_merge_hook_installed(project_dir: Path) -> bool:
+    """Return True if the HarnessSync post-merge hook is installed.
+
+    Args:
+        project_dir: Starting directory for git repo discovery.
+    """
+    git_dir = find_git_dir(project_dir)
+    if not git_dir:
+        return False
+    hook_path = git_dir / "hooks" / "post-merge"
+    if not hook_path.exists():
+        return False
+    return POST_MERGE_HOOK_MARKER in hook_path.read_text(encoding="utf-8")

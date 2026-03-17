@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 """
-/sync-merge slash command — interactive merge conflict resolution.
+/sync-merge slash command — interactive 3-way merge conflict resolution.
 
 When a sync target has been manually edited since the last sync, this command
-presents a structured merge UI showing both versions side by side, letting
-the user choose per-block which content to keep.
+presents a 3-way merge UI: source (what HarnessSync would write), base
+(the last-synced version — the common ancestor), and current (what is in the
+target file right now). Showing all three versions makes it clear which
+changes came from HarnessSync and which were made manually.
 
 Usage:
-    /sync-merge [TARGET] [--auto-ours] [--auto-theirs] [--dry-run] [--project-dir PATH]
+    /sync-merge [TARGET] [--auto-ours] [--auto-theirs] [--dry-run] [--3way] [--project-dir PATH]
 
 Options:
     TARGET            Target to check and merge (codex, gemini, opencode, ...).
                       If omitted, checks all targets with conflicts.
     --auto-ours       Automatically keep the HarnessSync (source) version for all conflicts
     --auto-theirs     Automatically keep the manually-edited (target) version for all conflicts
+    --3way            Show the full 3-way diff (source / base / current) for each conflict.
+                      Default when on a TTY.
     --dry-run         Show conflicts without writing any resolution
     --project-dir PATH  Project directory (default: cwd)
 """
@@ -32,13 +36,68 @@ from src.conflict_detector import ConflictDetector
 from src.state_manager import StateManager
 
 
-def _format_conflict_block(conflict: dict, index: int) -> str:
-    """Format a single conflict for display."""
+def _format_conflict_block(conflict: dict, index: int, show_three_way: bool = False) -> str:
+    """Format a single conflict for display.
+
+    When show_three_way=True, shows the full 3-way diff (source / base / current)
+    using ConflictDetector.three_way_diff().  When False, falls back to the
+    simpler side-by-side view (source vs current).
+    """
     lines = [
         f"\n{'─' * 60}",
         f"Conflict #{index + 1}: {conflict.get('file_path', '(unknown)')}",
         f"{'─' * 60}",
     ]
+
+    if show_three_way:
+        source = conflict.get("source_content", "")
+        try:
+            detector = ConflictDetector(state_manager=StateManager())
+            three_way = detector.three_way_diff(
+                source_content=source,
+                conflict=conflict,
+                base_content=conflict.get("base_content") or conflict.get("stored_content"),
+            )
+            has_base = bool(three_way.get("base_lines"))
+            lines.append("")
+            if has_base:
+                lines.append("  [ 3-Way diff — base: last-synced, ours: sync source, theirs: manual edits ]")
+                lines.append("")
+                lines.append("  Changes: last-synced -> manual edits (YOUR changes):")
+                udiff_btc = three_way.get("unified_base_vs_current", "")
+                if udiff_btc.strip():
+                    for dl in udiff_btc.splitlines()[:30]:
+                        lines.append(f"    {dl}")
+                    if len(udiff_btc.splitlines()) > 30:
+                        lines.append(f"    ... ({len(udiff_btc.splitlines()) - 30} more lines)")
+                else:
+                    lines.append("    (no changes from base)")
+                lines.append("")
+                lines.append("  Changes: last-synced -> sync source (HARNESSSYNC changes):")
+                udiff_bts = three_way.get("unified_base_vs_source", "")
+                if udiff_bts.strip():
+                    for dl in udiff_bts.splitlines()[:30]:
+                        lines.append(f"    {dl}")
+                    if len(udiff_bts.splitlines()) > 30:
+                        lines.append(f"    ... ({len(udiff_bts.splitlines()) - 30} more lines)")
+                else:
+                    lines.append("    (no changes from base)")
+            else:
+                lines.append("  [ 2-Way diff — no prior baseline available ]")
+                lines.append("")
+                udiff_stc = three_way.get("unified_source_vs_current", "")
+                if udiff_stc.strip():
+                    for dl in udiff_stc.splitlines()[:40]:
+                        lines.append(f"    {dl}")
+                    if len(udiff_stc.splitlines()) > 40:
+                        lines.append(f"    ... ({len(udiff_stc.splitlines()) - 40} more lines)")
+                else:
+                    lines.append("    (files are identical)")
+            return "\n".join(lines)
+        except Exception:
+            pass  # Fall through to simple display on error
+
+    # Simple 2-way display (fallback)
     source = conflict.get("source_content", "")
     current = conflict.get("current_content", "")
     if source and current:
@@ -55,10 +114,10 @@ def _format_conflict_block(conflict: dict, index: int) -> str:
         if len(cur_lines) > 20:
             lines.append(f"  ... ({len(cur_lines) - 20} more lines)")
     elif conflict.get("note") == "deleted":
-        lines.append("  File was deleted manually — HarnessSync would recreate it.")
+        lines.append("  File was deleted manually -- HarnessSync would recreate it.")
     else:
-        lines.append(f"  Stored hash: {conflict.get('stored_hash', '')[:16]}…")
-        lines.append(f"  Current hash: {conflict.get('current_hash', '')[:16]}…")
+        lines.append(f"  Stored hash: {conflict.get('stored_hash', '')[:16]}")
+        lines.append(f"  Current hash: {conflict.get('current_hash', '')[:16]}")
     return "\n".join(lines)
 
 
@@ -102,6 +161,14 @@ def main():
                         help="Auto-keep manually-edited version for all conflicts")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show conflicts without writing any resolution")
+    parser.add_argument(
+        "--3way", dest="three_way", action="store_true",
+        help=(
+            "Show the full 3-way diff (source / last-synced baseline / current) for "
+            "each conflict. Makes it clear which changes came from HarnessSync vs. "
+            "your manual edits. Enabled by default on a TTY."
+        ),
+    )
     parser.add_argument("--project-dir", default=None)
     parser.add_argument("--json", dest="output_json", action="store_true")
 
@@ -138,10 +205,13 @@ def main():
     total = sum(len(v) for v in all_conflicts.values())
     print(f"Found {total} conflict(s) across {len(all_conflicts)} target(s):\n")
 
+    # Enable 3-way diff by default on TTY; also when explicitly requested.
+    use_three_way = getattr(args, "three_way", False) or sys.stdout.isatty()
+
     for target, conflicts in all_conflicts.items():
         print(f"\n[{target.upper()}] {len(conflicts)} conflict(s)")
         for i, conflict in enumerate(conflicts):
-            print(_format_conflict_block(conflict, i))
+            print(_format_conflict_block(conflict, i, show_three_way=use_three_way))
 
     if args.dry_run:
         print("\n[dry-run] No changes written.")

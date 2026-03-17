@@ -14,6 +14,12 @@ Gate hook:          blocks commits when harness configs are stale
 Post-checkout hook: auto-syncs when switching branches or pulling team
                     config changes (removes need to remember /sync after
                     git checkout or git pull)
+Post-merge hook:    auto-syncs after git merge / git pull when team config
+                    files (CLAUDE.md, .mcp.json, etc.) changed in the merge
+                    (item 3 — Team Config Broadcast via Git)
+Pre-push hook:      blocks git push when harness configs are out of sync
+                    with CLAUDE.md, preventing teams from pushing config
+                    debt (item 4 — Pre-Push Sync Enforcement)
 
 Usage:
     /sync-git-hook                            # show status
@@ -21,10 +27,14 @@ Usage:
     /sync-git-hook install --pre-commit       # install pre-commit sync + auto-stage
     /sync-git-hook install --gate             # install pre-commit gate (blocking)
     /sync-git-hook install --post-checkout    # install post-checkout branch-sync hook
+    /sync-git-hook install --post-merge       # install post-merge team-config hook
+    /sync-git-hook install --pre-push         # install pre-push sync enforcement hook
     /sync-git-hook uninstall                  # remove post-commit hook
     /sync-git-hook uninstall --pre-commit     # remove pre-commit hook
     /sync-git-hook uninstall --gate           # remove gate hook
     /sync-git-hook uninstall --post-checkout  # remove post-checkout hook
+    /sync-git-hook uninstall --post-merge     # remove post-merge hook
+    /sync-git-hook uninstall --pre-push       # remove pre-push hook
 """
 
 import os
@@ -49,6 +59,12 @@ from src.git_hook_installer import (
     install_post_checkout_hook,
     uninstall_post_checkout_hook,
     is_post_checkout_hook_installed,
+    install_post_merge_hook,
+    uninstall_post_merge_hook,
+    is_post_merge_hook_installed,
+    install_pre_push_hook,
+    uninstall_pre_push_hook,
+    is_pre_push_hook_installed,
 )
 
 
@@ -88,6 +104,26 @@ def main() -> None:
         help=(
             "Install/remove post-checkout hook that auto-syncs when switching branches "
             "or pulling team config changes (non-blocking, background sync)"
+        ),
+    )
+    parser.add_argument(
+        "--post-merge",
+        action="store_true",
+        dest="post_merge",
+        help=(
+            "Install/remove post-merge hook that auto-syncs after git merge/pull when "
+            "team config files (CLAUDE.md, .mcp.json, settings.json) changed "
+            "(item 3: Team Config Broadcast via Git)"
+        ),
+    )
+    parser.add_argument(
+        "--pre-push",
+        action="store_true",
+        dest="pre_push",
+        help=(
+            "Install/remove pre-push enforcement hook that blocks push when harness "
+            "configs are out of sync with CLAUDE.md. Prevents teams from pushing "
+            "CLAUDE.md changes without also committing the synced harness files."
         ),
     )
     parser.add_argument("--project-dir", type=str, default=None)

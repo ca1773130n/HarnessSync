@@ -82,15 +82,31 @@ def _python_path() -> str:
     return "python3"
 
 
-def _build_cron_line(project_dir: Path, cron_expr: str, scope: str) -> str:
-    """Build the full cron line for a scheduled sync."""
+def _build_cron_line(
+    project_dir: Path,
+    cron_expr: str,
+    scope: str,
+    target: str | None = None,
+) -> str:
+    """Build the full cron line for a scheduled sync.
+
+    Args:
+        project_dir: Project root directory.
+        cron_expr:   Cron schedule expression (e.g. "0 * * * *").
+        scope:       Sync scope: user | project | all.
+        target:      Optional harness name to sync only this target
+                     (e.g. "cursor"). When None, syncs all targets.
+    """
     py = _python_path()
     sync_script = Path(PLUGIN_ROOT) / "src" / "commands" / "sync.py"
-    log_path = project_dir / ".harness-sync" / "schedule.log"
+    # Use target-specific log file when scheduling a single harness.
+    log_name = f"schedule-{target}.log" if target else "schedule.log"
+    log_path = project_dir / ".harness-sync" / log_name
 
+    target_flag = f" --only-targets {target}" if target else ""
     cmd = (
         f'cd "{project_dir}" && '
-        f'"{py}" "{sync_script}" --scope {scope} '
+        f'"{py}" "{sync_script}" --scope {scope}{target_flag} '
         f'>> "{log_path}" 2>&1'
     )
     return (
@@ -132,8 +148,19 @@ def _write_crontab(content: str) -> bool:
         return False
 
 
-def _install_cron_job(project_dir: Path, cron_expr: str, scope: str) -> bool:
+def _install_cron_job(
+    project_dir: Path,
+    cron_expr: str,
+    scope: str,
+    target: str | None = None,
+) -> bool:
     """Install or replace the cron job for this project.
+
+    Args:
+        project_dir: Project root directory.
+        cron_expr:   Cron schedule expression.
+        scope:       Sync scope.
+        target:      Optional single harness name to schedule independently.
 
     Returns True on success.
     """
@@ -141,7 +168,7 @@ def _install_cron_job(project_dir: Path, cron_expr: str, scope: str) -> bool:
     existing = _read_crontab()
     cleaned = _remove_project_from_crontab(existing, project_dir)
 
-    new_entry = _build_cron_line(project_dir, cron_expr, scope)
+    new_entry = _build_cron_line(project_dir, cron_expr, scope, target=target)
     new_crontab = cleaned.rstrip() + "\n" + new_entry + "\n"
 
     # Ensure log directory exists
@@ -239,6 +266,17 @@ def main():
     parser.add_argument("--every", default=None, metavar="INTERVAL",
                         help="Sync interval: 30m, 1h, 6h, 12h, 1d, etc.")
     parser.add_argument("--scope", default="all", choices=["user", "project", "all"])
+    parser.add_argument(
+        "--target",
+        default=None,
+        metavar="HARNESS",
+        help=(
+            "Schedule sync for a single harness only "
+            "(e.g. --target cursor). Creates an independent cron job "
+            "with its own interval, separate from the global schedule. "
+            "When omitted, all harnesses are synced together."
+        ),
+    )
     parser.add_argument("--project-dir", default=None)
     parser.add_argument("--list", dest="list_jobs", action="store_true",
                         help="List all HarnessSync scheduled syncs")
@@ -299,19 +337,23 @@ def main():
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    cron_line = _build_cron_line(project_dir, cron_expr, args.scope)
+    _target = getattr(args, "target", None) or None
+    cron_line = _build_cron_line(project_dir, cron_expr, args.scope, target=_target)
 
     if args.dry_run:
         print("Cron entry that would be installed:")
         print(cron_line)
         return
 
-    if _install_cron_job(project_dir, cron_expr, args.scope):
+    if _install_cron_job(project_dir, cron_expr, args.scope, target=_target):
         print(f"Scheduled HarnessSync every {args.every} for:")
         print(f"  Project: {project_dir}")
         print(f"  Scope:   {args.scope}")
+        if _target:
+            print(f"  Target:  {_target} (independent per-harness schedule)")
         print(f"  Cron:    {cron_expr}")
-        print(f"  Log:     {project_dir / '.harness-sync' / 'schedule.log'}")
+        log_name = f"schedule-{_target}.log" if _target else "schedule.log"
+        print(f"  Log:     {project_dir / '.harness-sync' / log_name}")
         print()
         print("To remove: /sync-schedule --remove")
         print("To list:   /sync-schedule --list")

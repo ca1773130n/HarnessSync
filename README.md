@@ -2,7 +2,7 @@
 
 **Configure Claude Code once, sync everywhere.**
 
-HarnessSync automatically synchronizes your Claude Code configuration — rules, skills, agents, commands, MCP servers, and settings — to OpenAI Codex CLI, Gemini CLI, and OpenCode. No manual duplication. No format translation. Just use Claude Code normally.
+HarnessSync automatically synchronizes your Claude Code configuration — rules, skills, agents, commands, MCP servers, and settings — to 12 AI harnesses. No manual duplication. No format translation.
 
 ```
          ┌──────────────────┐
@@ -12,195 +12,108 @@ HarnessSync automatically synchronizes your Claude Code configuration — rules,
                   │
          ┌────────┴─────────┐
          │   HarnessSync    │  ← Automatic
-         └──┬─────┬─────┬───┘
-            │     │     │
-     ┌──────┘     │     └──────┐
-     ▼            ▼            ▼
-┌─────────┐ ┌─────────┐ ┌──────────┐
-│  Codex  │ │ Gemini  │ │ OpenCode │
-│ ~/.codex│ │~/.gemini│ │~/.config/│
-│         │ │         │ │ opencode │
-└─────────┘ └─────────┘ └──────────┘
+         └──┬──┬──┬──┬──┬───┘
+            │  │  │  │  │
+     ┌──────┘  │  │  │  └──────┐
+     ▼         ▼  ▼  ▼         ▼
+  Codex    Gemini  Cursor  Windsurf  ... 7 more
 ```
+
+## Supported Targets
+
+Aider, Cline, Codex, Continue, Cursor, Gemini, Neovim, OpenCode, VS Code, Windsurf, Zed
 
 ## Quickstart
 
-### Install as Claude Code Plugin (Recommended)
-
 ```bash
-/plugin install github:YOUR_USERNAME/HarnessSync
-```
+# Install as Claude Code plugin
+claude plugin install github:ca1773130n/HarnessSync
 
-That's it. HarnessSync will automatically sync your config whenever Claude Code edits a configuration file.
-
-### Install from Source
-
-```bash
-git clone https://github.com/YOUR_USERNAME/HarnessSync.git
-cd HarnessSync
-bash scripts/install.sh
-```
-
-Then restart your shell:
-
-```bash
-source ~/.zshrc   # or ~/.bashrc
-```
-
-### Verify Installation
-
-Inside Claude Code, run:
-
-```
+# Verify
 /sync-status
-```
 
-Or from the terminal:
-
-```bash
-harnesssync status
-```
-
-### Run Your First Sync
-
-```
+# Run first sync
 /sync
 ```
 
-From this point forward, syncing happens automatically. Every time Claude Code edits your `CLAUDE.md`, `settings.json`, `.mcp.json`, or any file in `.claude/`, HarnessSync detects the change and syncs to all targets.
+After this, syncing happens automatically via PostToolUse hooks whenever Claude Code edits config files.
 
 ## What Gets Synced
 
-| Claude Code | Codex | Gemini CLI | OpenCode |
-|---|---|---|---|
-| `CLAUDE.md` (rules) | `AGENTS.md` | `GEMINI.md` | `AGENTS.md` |
-| `.claude/skills/` | `.codex/skills/` (symlink) | Inlined in `GEMINI.md` | `.opencode/skills/` (symlink) |
-| `.claude/agents/` | `skills/agent-{name}/` | Inlined in `GEMINI.md` | `.opencode/agents/` (symlink) |
-| `.claude/commands/` | `skills/cmd-{name}/` | Summarized in `GEMINI.md` | `.opencode/commands/` (symlink) |
-| `.mcp.json` | `config.toml [mcp_servers]` | `settings.json` | `opencode.json` |
-| `settings.json` (env) | `config.toml [env]` | `.gemini/.env` | `opencode.json [env]` |
+| Claude Code | Target |
+|---|---|
+| `CLAUDE.md` (rules) | `AGENTS.md` / `GEMINI.md` / format-specific equivalent |
+| `.claude/skills/` | Symlinked or inlined per target capability |
+| `.claude/agents/` | Symlinked or inlined per target capability |
+| `.claude/commands/` | Symlinked or summarized per target capability |
+| `.mcp.json` | `config.toml`, `settings.json`, or equivalent |
+| `settings.json` (env) | Target-specific env format |
 
 Both **user scope** (`~/.claude/`) and **project scope** (`.claude/`, `CLAUDE.md`) are supported.
 
 ## How It Works
 
-HarnessSync triggers automatically via three mechanisms:
-
-1. **PostToolUse Hook** — When Claude Code edits a config file (CLAUDE.md, settings.json, .mcp.json, skills/, agents/, commands/), the hook fires and syncs immediately.
-
-2. **Shell Wrappers** — Running `codex`, `gemini`, or `opencode` in your terminal auto-syncs before launch (with a 5-minute cooldown to avoid redundant work).
-
-3. **Manual Commands** — `/sync` inside Claude Code, or `harnesssync` in your terminal.
-
-You just use Claude Code normally. Everything else follows.
+1. **PostToolUse Hook** — fires on Edit/Write/MultiEdit of config files, syncs immediately
+2. **Shell Wrappers** — `codex`, `gemini`, `opencode` auto-sync before launch (5-min cooldown)
+3. **Manual** — `/sync` inside Claude Code, or `harnesssync` in terminal
 
 ## Commands
-
-### Inside Claude Code
 
 | Command | Description |
 |---|---|
 | `/sync` | Sync all config to all targets |
-| `/sync --scope user` | Sync only user-level config |
-| `/sync --scope project` | Sync only project-level config |
 | `/sync --dry-run` | Preview changes without writing |
-| `/sync-status` | Show sync status and drift detection |
+| `/sync-status` | Sync status and drift detection |
+| `/sync-diff` | Show config differences across targets |
+| `/sync-health` | Health check for sync pipeline |
+| `/sync-lint` | Lint config for issues |
+| `/sync-scope` | Rule scope hierarchy and conflict detection |
+| `/sync-preset` | Browse and install sync profile presets |
+| `/sync-dashboard` | Visual sync dashboard |
+| `/sync-rollback` | Undo last sync |
+| `/sync-restore` | Restore from backup |
+| `/sync-capabilities` | Show per-target capability support |
+| `/sync-gaps` | Feature gap analysis across targets |
+| `/sync-matrix` | Full compatibility matrix |
+| `/sync-parity` | Config parity report |
+| `/sync-permissions` | Permission mapping visualization |
+| `/sync-map` | Config dependency map |
+| `/sync-log` | Sync history log |
+| `/sync-report` | Generate sync report |
+| `/sync-memory` | Cross-harness memory sync |
+| `/sync-setup` | Multi-account setup |
+| `/sync-add-harness` | Add a new harness target |
+| `/sync-activate` | Activate/deactivate targets |
+| `/sync-schedule` | Configure sync schedule |
+| `/sync-sandbox` | Test sync in sandbox |
+| `/sync-git-hook` | Install git hooks |
+| `/sync-cloud` | Cloud sync |
+| `/sync-pr-comment` | PR sync preview comment |
 
 ### Terminal
 
-| Command | Description |
-|---|---|
-| `harnesssync` | Sync now |
-| `harnesssync status` | Show sync status per target |
-| `harnesssync force` | Force sync (skip cooldown) |
-| `harnesssync help` | Show help |
+```bash
+harnesssync          # sync now
+harnesssync status   # show status
+harnesssync force    # skip cooldown
+```
 
-### MCP Tools
+## Safety
 
-HarnessSync exposes an MCP server with three tools for programmatic access:
-
-| Tool | Description |
-|---|---|
-| `sync_all` | Sync all config to all targets |
-| `sync_target` | Sync to a specific target (codex/gemini/opencode) |
-| `get_status` | Get sync status as structured JSON |
-
-## Safety Features
-
-- **Secret Detection** — Scans environment variables for API keys, tokens, and passwords. Blocks sync when secrets are found (override with `--allow-secrets`).
-- **Conflict Detection** — Warns when target files were manually edited since last sync.
-- **Backup & Rollback** — Backs up target files before overwriting. Automatic rollback on failure.
-- **Broken Symlink Cleanup** — Removes stale symlinks from previous syncs.
-- **Compatibility Reports** — Shows per-target breakdown when config items are adapted or skipped.
+- **Secret Detection** — blocks sync when API keys/tokens found in env vars
+- **Conflict Detection** — warns when target files were manually edited
+- **Backup & Rollback** — snapshots before overwriting, auto-rollback on failure
+- **Permission Safety** — Claude Code `"deny"` permissions are never downgraded
 
 ## Configuration
-
-### Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
 | `HARNESSSYNC_COOLDOWN` | `300` | Seconds between auto-syncs |
 | `HARNESSSYNC_VERBOSE` | `0` | Show output during auto-sync |
-| `CODEX_HOME` | `~/.codex` | Codex home directory |
-
-### Permissions
-
-HarnessSync follows conservative security defaults:
-
-- Claude Code `"deny"` permissions are **never** downgraded in targets
-- Denied tools are skipped entirely rather than mapped to a lower permission
-- Gemini `yolo` mode is **never** auto-enabled, even if Claude Code has auto-approval
 
 ## Requirements
 
 - Python 3.10+
 - No external dependencies (stdlib only)
 - macOS, Linux, or Windows (WSL2/Git Bash)
-
-## Project Structure
-
-```
-HarnessSync/
-├── .claude-plugin/
-│   ├── plugin.json          # Plugin manifest
-│   └── marketplace.json     # Marketplace distribution
-├── commands/                # Slash commands
-│   ├── sync.md
-│   └── sync-status.md
-├── hooks/                   # PostToolUse hook
-│   └── hooks.json
-├── src/                     # Python sync engine (~4,200 lines)
-│   ├── orchestrator.py      # Central coordinator
-│   ├── source_reader.py     # Claude Code config discovery
-│   ├── state_manager.py     # Drift detection & state tracking
-│   ├── adapters/            # Target adapters
-│   │   ├── codex.py
-│   │   ├── gemini.py
-│   │   └── opencode.py
-│   ├── mcp/                 # MCP server (JSON-RPC over stdio)
-│   │   └── server.py
-│   └── utils/               # Logging, hashing, paths
-├── scripts/
-│   ├── install.sh           # Cross-platform installer
-│   ├── shell-integration.sh # Shell wrappers (codex/gemini/opencode)
-│   └── com.cc2all.sync.plist
-├── tests/                   # Verification & integration tests
-└── .github/workflows/
-    └── validate.yml         # CI validation (3 platforms x 2 Python versions)
-```
-
-## Troubleshooting
-
-**"No config found"** — Make sure `~/.claude/` exists. Run Claude Code at least once to create it.
-
-**Gemini doesn't show my skills** — Gemini CLI has no skill system. Skills are inlined into `GEMINI.md`. Check with `cat ~/.gemini/GEMINI.md`.
-
-**Sync not triggering automatically** — Verify the plugin is installed: `/sync-status`. For shell wrappers, check your shell RC file for the `HarnessSync` source line.
-
-**Secrets blocking sync** — HarnessSync detects API keys in env vars by default. Use `/sync --allow-secrets` to override, or remove secrets from `settings.json`.
-
-**Windows symlink errors** — HarnessSync uses junction points on Windows (no admin required). Ensure you're running from Git Bash or WSL2.
-
-## License
-
-MIT

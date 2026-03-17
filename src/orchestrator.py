@@ -466,6 +466,54 @@ class SyncOrchestrator:
         except Exception:
             pass  # Version compat check is informational, never blocks
 
+        # --- PRE-SYNC: PERMISSION ESCALATION GUARD ---
+        # Detect when sync would grant targets MORE permissions than the source.
+        try:
+            from src.permission_escalation_guard import check_escalation
+            _source_settings = source_data.get('settings', {}) or {}
+            if _source_settings:
+                _esc_report = check_escalation(_source_settings)
+                if _esc_report.has_blocks:
+                    self.logger.warn("Permission escalation guard: BLOCK-level escalations detected:")
+                    for _esc_w in _esc_report.warnings:
+                        if _esc_w.severity == "block":
+                            self.logger.warn(f"  {_esc_w.format()}")
+                    self.logger.warn(
+                        "Tip: Use /sync-override to set per-harness restrictions, "
+                        "or /sync-permissions to review the full report."
+                    )
+                elif _esc_report.has_escalations:
+                    self.logger.warn("Permission escalation guard: potential permission gaps:")
+                    for _esc_w in _esc_report.warnings:
+                        self.logger.warn(f"  {_esc_w.format()}")
+        except Exception:
+            pass  # Escalation guard is best-effort, never blocks sync
+
+        # --- PRE-SYNC: POLICY ENFORCEMENT (item 25) ---
+        # Check org/team policy before any writes; block if must_not_sync violated.
+        try:
+            from src.sync_policy import PolicyEnforcer
+            _policy = PolicyEnforcer(project_dir=self.project_dir)
+            if _policy.has_policy:
+                _policy_result = _policy.check_all(source_data, targets=targets)
+                if _policy_result.any_blocked:
+                    self.logger.warn("Sync blocked by policy:")
+                    for _pr in _policy_result.reports:
+                        if _pr.blocked:
+                            for _pv in _pr.violations:
+                                if _pv.severity == "error":
+                                    self.logger.warn(f"  [{_pv.target}] {_pv.section}: {_pv.message}")
+                    return {
+                        '_blocked': True,
+                        '_reason': 'policy_violation',
+                        '_warnings': _policy_result.format(),
+                    }
+                for _pr in _policy_result.reports:
+                    for _w in _pr.warnings:
+                        self.logger.warn(f"Policy [{_pr.target}]: {_w}")
+        except Exception:
+            pass  # Policy check is best-effort, never crashes sync
+
         # --- PRE-SYNC: CONFLICT DETECTION ---
         # Run conflict detection (non-blocking, informational)
         conflicts = {}
@@ -816,6 +864,42 @@ class SyncOrchestrator:
             except Exception as e:
                 self.logger.warn(f"Changelog update failed: {e}")
 
+        # --- POST-SYNC: TAMPER-EVIDENT AUDIT LOG (item 28) ---
+        if not self.dry_run:
+            try:
+                from src.audit_log import AuditLog
+                from src.utils.hashing import hash_file_sha256
+                _audit = AuditLog(project_dir=self.project_dir)
+                _synced_targets = [
+                    t for t in results
+                    if not t.startswith("_") and isinstance(results[t], dict)
+                ]
+                _files_changed: list[str] = []
+                for _t in _synced_targets:
+                    _t_results = results[_t]
+                    for _section_result in _t_results.values():
+                        if hasattr(_section_result, "files_written"):
+                            _files_changed.extend(
+                                str(p) for p in (_section_result.files_written or [])
+                            )
+                _source_hash = ""
+                if self.project_dir:
+                    _claude_md = self.project_dir / "CLAUDE.md"
+                    if _claude_md.is_file():
+                        try:
+                            _source_hash = hash_file_sha256(_claude_md)
+                        except Exception:
+                            pass
+                _audit.record(
+                    event="sync",
+                    targets=_synced_targets,
+                    files_changed=_files_changed,
+                    source_hash=_source_hash,
+                    scope=self.scope or "all",
+                )
+            except Exception as _ae:
+                self.logger.warn(f"Audit log update failed: {_ae}")
+
         # --- POST-SYNC: WEBHOOK NOTIFICATION ---
         if not self.dry_run:
             try:
@@ -937,6 +1021,56 @@ class SyncOrchestrator:
                         self.logger.info(cap_report)
             except Exception:
                 pass  # Capability report is informational, never blocks
+
+        # --- POST-SYNC: SYNC HEALTH SCORE (item 7) ---
+        # Compute per-harness 0-100 health score after sync and persist trend data.
+        if not self.dry_run:
+            try:
+                from src.config_health import SyncHealthTracker
+                _tracker = SyncHealthTracker(cc_home=self.cc_home)
+                _health_scores: dict[str, dict] = {}
+                _synced_targets_health = [
+                    t for t in results
+                    if not t.startswith("_")
+                    and isinstance(results[t], dict)
+                    and "error" not in results[t]
+                ]
+                for _ht in _synced_targets_health:
+                    try:
+                        _ht_results = results[_ht]
+                        # Estimate fidelity from coverage/fidelity scores if available
+                        _cov = (results.get("_coverage_scores") or {}).get(_ht, 1.0)
+                        _fid = (results.get("_fidelity_scores") or {}).get(_ht, 1.0)
+                        if isinstance(_cov, (int, float)):
+                            _cov = min(1.0, max(0.0, _cov / 100.0 if _cov > 1 else _cov))
+                        else:
+                            _cov = 1.0
+                        if isinstance(_fid, (int, float)):
+                            _fid = min(1.0, max(0.0, _fid / 100.0 if _fid > 1 else _fid))
+                        else:
+                            _fid = 1.0
+                        # Skills coverage: fraction of skills synced (not skipped)
+                        _skills_synced = sum(
+                            r.synced for r in _ht_results.values()
+                            if hasattr(r, "synced") and getattr(r, "__class__", None)
+                            and r.__class__.__name__ == "SyncResult"
+                        )
+                        _hs_score = _tracker.compute_score(
+                            target=_ht,
+                            rule_fidelity=_fid,
+                            skills_coverage=_cov,
+                        )
+                        _health_scores[_ht] = {
+                            "score": _hs_score.score,
+                            "label": _hs_score.label,
+                            "trend": _hs_score.trend,
+                        }
+                    except Exception:
+                        pass  # Per-target scoring is best-effort
+                if _health_scores:
+                    results["_health_scores"] = _health_scores
+            except Exception:
+                pass  # Health tracking is informational, never blocks
 
         return results
 
