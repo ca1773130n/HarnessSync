@@ -613,3 +613,102 @@ class ConfigTimeMachine:
         lines.append("")
         lines.append("Tip: /sync-restore --from-commit <SHA> to roll back a harness.")
         return "\n".join(lines)
+
+    def search_timeline(
+        self,
+        query: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        author: str | None = None,
+        file_filter: str | None = None,
+        max_commits: int = 50,
+    ) -> list[ConfigCommit]:
+        """Search the config history by text, date range, author, or file.
+
+        Fetches the full timeline and applies filters client-side so that
+        searches work even without a git ``--grep`` flag.
+
+        Args:
+            query:       Case-insensitive substring to match against commit
+                         subjects.  Matches any part of the subject line.
+            since:       ISO date string — include only commits on or after this
+                         date (e.g. "2025-01-01").
+            until:       ISO date string — include only commits on or before
+                         this date (e.g. "2025-06-30").
+            author:      Case-insensitive substring to match against author name.
+            file_filter: Case-insensitive substring to match against changed
+                         filenames (e.g. "skills/" to find skill-related commits).
+            max_commits: Maximum commits to fetch from git history before
+                         applying filters.
+
+        Returns:
+            List of ConfigCommit matching all supplied filters, newest first.
+
+        Example::
+
+            tm = ConfigTimeMachine(Path("."))
+            # Find all commits that changed skills in 2026
+            results = tm.search_timeline(
+                file_filter="skills/",
+                since="2026-01-01",
+                until="2026-12-31",
+            )
+        """
+        commits = self.timeline(max_commits=max_commits)
+        results: list[ConfigCommit] = []
+
+        for c in commits:
+            if query and query.lower() not in c.subject.lower():
+                continue
+            if author and author.lower() not in c.author.lower():
+                continue
+            if since and c.date < since:
+                continue
+            if until and c.date > until:
+                continue
+            if file_filter:
+                if not any(file_filter.lower() in f.lower() for f in c.files_changed):
+                    continue
+            results.append(c)
+
+        return results
+
+    def format_search_results(
+        self,
+        results: list[ConfigCommit],
+        query: str | None = None,
+    ) -> str:
+        """Format search results as a human-readable summary.
+
+        Args:
+            results: Output from :meth:`search_timeline`.
+            query:   The search query string (included in header for context).
+
+        Returns:
+            Formatted string suitable for terminal display.
+        """
+        header = "Config Timeline Search"
+        if query:
+            header += f" — '{query}'"
+        lines = [header, "=" * len(header), ""]
+
+        if not results:
+            lines.append(
+                "  No commits matched your search.\n"
+                "  Try a different query, date range, or broaden the file filter."
+            )
+            return "\n".join(lines)
+
+        for c in results:
+            lines.append(f"  {c.sha}  {c.date}  {c.subject}")
+            lines.append(f"         by {c.author}")
+            if c.files_changed:
+                files_str = ", ".join(c.files_changed[:4])
+                if len(c.files_changed) > 4:
+                    files_str += f" (+{len(c.files_changed) - 4})"
+                lines.append(f"         files: {files_str}")
+            lines.append("")
+
+        lines.append(f"{len(results)} match(es) found.")
+        lines.append("Tip: /sync-restore --from-commit <SHA> to restore any version.")
+        return "\n".join(lines)

@@ -11,6 +11,8 @@ Flags:
   --ci                       Machine-readable JSON output; exit 0=ok, 1=warnings, 2=errors
   --fix                      Apply safe auto-fixes to CLAUDE.md and report changes
   --format text|json         Output format (--ci implies json)
+  --dead                     Detect dead/orphaned config items (unused rules, skills, etc.)
+  --dead-days N              Staleness threshold for --dead (default: 30 days)
 """
 
 import json
@@ -25,6 +27,7 @@ sys.path.insert(0, PLUGIN_ROOT)
 from pathlib import Path
 from src.config_linter import ConfigLinter
 from src.source_reader import SourceReader
+from src.dead_config_detector import DeadConfigDetector, UsageTracker
 
 
 def _find_claude_md(project_dir: Path) -> Path | None:
@@ -71,6 +74,22 @@ def main() -> None:
         ),
     )
     parser.add_argument("--project-dir", type=str, default=None)
+    parser.add_argument(
+        "--dead",
+        action="store_true",
+        help=(
+            "Detect dead/orphaned config items: skills, rules, agents, and commands "
+            "that are unused or have no active sync target."
+        ),
+    )
+    parser.add_argument(
+        "--dead-days",
+        type=int,
+        default=30,
+        dest="dead_days",
+        metavar="N",
+        help="Staleness threshold in days for usage-based dead detection (default: 30)",
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -82,6 +101,8 @@ def main() -> None:
     apply_fixes: bool = args.fix
     scope: str = args.scope
     check_skills: bool = getattr(args, "skills", False)
+    check_dead: bool = getattr(args, "dead", False)
+    dead_days: int = getattr(args, "dead_days", 30)
     project_dir = Path(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
 
     if not ci_mode:
@@ -194,9 +215,66 @@ def main() -> None:
         else:
             print("\nSkill portability: No skills found to check.")
 
+    # Dead config detection (--dead flag)
+    dead_report = None
+    stale_items: list[dict] = []
+    if check_dead:
+        try:
+            detector = DeadConfigDetector(project_dir=project_dir)
+            dead_report = detector.detect(source_data=source_data, stale_days=dead_days)
+
+            # Usage-based staleness via UsageTracker
+            tracker = UsageTracker()
+            names: dict[str, list[str]] = {}
+            for cat in ("skill", "agent", "command"):
+                items = source_data.get(cat + "s", {})
+                if items:
+                    names[cat] = list(items.keys())
+            if names:
+                stale_items = tracker.find_stale(names, days=dead_days)
+        except Exception as exc:
+            if not ci_mode:
+                print(f"\nDead config detection error: {exc}", file=sys.stderr)
+
+        if output_json:
+            dead_payload: dict = {
+                "dead_config": {
+                    "total_issues": dead_report.total_issues if dead_report else 0,
+                    "source_no_target": [
+                        {"category": i.category, "name": i.name, "detail": i.detail}
+                        for i in (dead_report.source_no_target if dead_report else [])
+                    ],
+                    "target_orphans": [
+                        {"category": i.category, "name": i.name, "detail": i.detail}
+                        for i in (dead_report.target_orphans if dead_report else [])
+                    ],
+                    "stale_items": stale_items,
+                }
+            }
+            # Merge into existing payload or print separately
+            print(json.dumps(dead_payload, indent=2))
+        else:
+            print()
+            if dead_report:
+                print(dead_report.format())
+            if stale_items:
+                print(f"\nUsage-stale items (not used in {dead_days}+ days):")
+                for item in stale_items:
+                    ago = item.get("last_used_days_ago")
+                    age_str = f"{ago:.0f}d ago" if ago is not None else "never used"
+                    print(f"  [{item['category']}] {item['name']}  ({age_str})")
+                print(
+                    "\nRemove unused items or run /sync to reset the usage counter.\n"
+                    "Re-run with --dead-days N to adjust the staleness threshold."
+                )
+            elif dead_report and dead_report.is_clean() and not stale_items:
+                pass  # already printed clean message from dead_report.format()
+
     if has_errors:
         sys.exit(2)
     if has_issues or skill_portability_issues:
+        sys.exit(1)
+    if dead_report and not dead_report.is_clean():
         sys.exit(1)
     sys.exit(0)
 

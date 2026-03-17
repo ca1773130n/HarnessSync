@@ -232,8 +232,9 @@ def run(argv: list[str] | None = None) -> int:
     _print_harness_banner(target, version)
 
     # Report what source config sections are available
-    print("  [1/4] Reading Claude Code source config...")
+    print("  [1/5] Reading Claude Code source config...")
     from src.source_reader import SourceReader
+    source_data: dict = {}
     try:
         reader = SourceReader(project_dir=project_dir)
         source_data = reader.discover_all()
@@ -248,8 +249,12 @@ def run(argv: list[str] | None = None) -> int:
     except Exception:
         print("     (Could not pre-read source config — sync will discover it automatically.)")
 
+    # Show capability matrix for the target harness so the user knows what will/won't sync
+    print(f"  [2/5] Capability matrix for '{target}':")
+    _print_capability_matrix(target, source_data)
+
     # Run sync targeting only the new harness
-    print(f"  [2/4] Translating config to {target} native format...")
+    print(f"  [3/5] Translating config to {target} native format...")
     orchestrator = SyncOrchestrator(
         project_dir=project_dir,
         dry_run=args.dry_run,
@@ -266,15 +271,15 @@ def run(argv: list[str] | None = None) -> int:
         return 1
 
     if args.dry_run:
-        print(f"  [3/4] Skipping write (dry-run mode).")
-        print(f"  [4/4] Skipping verification (dry-run mode).")
+        print(f"  [4/5] Skipping write (dry-run mode).")
+        print(f"  [5/5] Skipping verification (dry-run mode).")
         print(
             f"\n  Dry run complete. Run without --dry-run to apply changes."
         )
         return 0
 
     # Report on what was written
-    print(f"  [3/4] Writing {target} config files...")
+    print(f"  [4/5] Writing {target} config files...")
     # Report any files written (result dict maps target -> results)
     target_result = result.get(target) if isinstance(result, dict) else None
     if target_result and isinstance(target_result, dict):
@@ -285,7 +290,7 @@ def run(argv: list[str] | None = None) -> int:
         print(f"     Config written to {target} target directory.")
 
     # Verify the output
-    print(f"  [4/4] Verifying {target} config...")
+    print(f"  [5/5] Verifying {target} config...")
     # Basic verification: check that at least one expected indicator file now exists
     if _check_already_configured(target, project_dir):
         print(f"     Verification passed — {target} config is present.")

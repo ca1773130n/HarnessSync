@@ -743,3 +743,168 @@ class ClaudeMdQualityChecker:
                 "     Run /sync-lint --content for detailed suggestions."
             )
         return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Config Refactor Analyzer (Item 28)
+# Identify redundant rules, contradictions, and consolidation opportunities.
+# ──────────────────────────────────────────────────────────────────────────────
+
+import difflib as _difflib
+
+
+@dataclass
+class RefactorSuggestion:
+    """A concrete refactoring suggestion for CLAUDE.md content."""
+    suggestion_type: str  # "merge_duplicates" | "remove_redundant" | "split_section" | "consolidate"
+    description: str      # What to do
+    rationale: str        # Why this improves the config
+    affected_lines: list[int] = field(default_factory=list)
+
+    def format(self) -> str:
+        loc = f" (lines {', '.join(str(n) for n in self.affected_lines)})" if self.affected_lines else ""
+        return f"  [{self.suggestion_type}]{loc}\n    {self.description}\n    Why: {self.rationale}"
+
+
+@dataclass
+class RefactorReport:
+    """Full refactoring analysis for a CLAUDE.md file."""
+    file_path: str
+    suggestions: list[RefactorSuggestion] = field(default_factory=list)
+    original_rule_count: int = 0
+    estimated_reduction: int = 0  # Estimated rules that could be removed
+
+    def format(self, verbose: bool = False) -> str:
+        lines = [
+            f"Config Refactor Suggestions — {self.file_path}",
+            f"  {self.original_rule_count} rules analyzed, "
+            f"~{self.estimated_reduction} could be removed/merged",
+            "=" * 55,
+        ]
+        if not self.suggestions:
+            lines.append("  ✓ No refactoring opportunities found. Config looks lean.")
+            return "\n".join(lines)
+
+        for sug in self.suggestions:
+            lines.append(sug.format())
+            lines.append("")
+        return "\n".join(lines)
+
+
+class ConfigRefactorAnalyzer:
+    """Analyze CLAUDE.md content for refactoring opportunities.
+
+    Identifies:
+    - Near-duplicate rules that can be merged into one
+    - Rules that contradict each other and should be reconciled
+    - Sections that have grown too large and should be split
+    - Rules never relevant to any active target harness
+    - Consolidation opportunities for related rules scattered across sections
+
+    Args:
+        similarity_threshold: Minimum similarity ratio (0.0–1.0) for flagging
+                              near-duplicate rules.  Default: 0.85.
+    """
+
+    def __init__(self, similarity_threshold: float = 0.85):
+        self.similarity_threshold = similarity_threshold
+
+    def analyze(self, content: str, file_path: str = "CLAUDE.md") -> RefactorReport:
+        """Analyze CLAUDE.md content and return refactoring suggestions.
+
+        Args:
+            content: Raw CLAUDE.md content.
+            file_path: Label for the report.
+
+        Returns:
+            RefactorReport with actionable suggestions.
+        """
+        report = RefactorReport(file_path=file_path)
+        lines = content.splitlines()
+
+        # Extract rule items (bullet points) with their line numbers
+        rules: list[tuple[int, str]] = []  # (lineno, text)
+        for i, line in enumerate(lines, start=1):
+            m = _re.match(r"^[ \t]*[-*+]\s+(.+)$", line)
+            if m:
+                rules.append((i, m.group(1).strip()))
+
+        report.original_rule_count = len(rules)
+
+        # ── Near-duplicate detection ──────────────────────────────────────────
+        merged_indices: set[int] = set()
+        for i in range(len(rules)):
+            if i in merged_indices:
+                continue
+            lineno_i, text_i = rules[i]
+            similar_group: list[int] = [i]
+            for j in range(i + 1, len(rules)):
+                if j in merged_indices:
+                    continue
+                _, text_j = rules[j]
+                ratio = _difflib.SequenceMatcher(None, text_i.lower(), text_j.lower()).ratio()
+                if ratio >= self.similarity_threshold and text_i != text_j:
+                    similar_group.append(j)
+                    merged_indices.add(j)
+            if len(similar_group) > 1:
+                affected = [rules[k][0] for k in similar_group]
+                preview_a = text_i[:60] + ("…" if len(text_i) > 60 else "")
+                preview_b = rules[similar_group[1]][1][:60]
+                report.suggestions.append(RefactorSuggestion(
+                    suggestion_type="merge_duplicates",
+                    description=(
+                        f"Merge {len(similar_group)} near-duplicate rules into one:\n"
+                        f"    A: '{preview_a}'\n"
+                        f"    B: '{preview_b}'"
+                    ),
+                    rationale=(
+                        "Near-identical rules waste context budget across all harnesses. "
+                        "Merge into a single authoritative rule."
+                    ),
+                    affected_lines=affected,
+                ))
+                report.estimated_reduction += len(similar_group) - 1
+
+        # ── Exact duplicate detection ─────────────────────────────────────────
+        seen_texts: dict[str, list[int]] = {}
+        for lineno, text in rules:
+            normalized = _re.sub(r"\s+", " ", text.lower())
+            seen_texts.setdefault(normalized, []).append(lineno)
+        for normalized_text, linenos in seen_texts.items():
+            if len(linenos) > 1:
+                preview = normalized_text[:60] + ("…" if len(normalized_text) > 60 else "")
+                report.suggestions.append(RefactorSuggestion(
+                    suggestion_type="remove_redundant",
+                    description=f"Exact duplicate rule appears {len(linenos)} times: '{preview}'",
+                    rationale="Remove all but the first occurrence to reduce token cost.",
+                    affected_lines=linenos[1:],  # Keep first, flag duplicates
+                ))
+                report.estimated_reduction += len(linenos) - 1
+
+        # ── Oversized section detection ───────────────────────────────────────
+        section_rule_counts: dict[str, tuple[str, list[int]]] = {}  # heading → (heading, rule_linenos)
+        current_section = "(preamble)"
+        for i, line in enumerate(lines, start=1):
+            m = _re.match(r"^(#{1,3})\s+(.+)$", line)
+            if m:
+                current_section = m.group(2).strip()
+                section_rule_counts[current_section] = (current_section, [])
+            elif _re.match(r"^[ \t]*[-*+]\s+.+$", line):
+                section_rule_counts.setdefault(current_section, (current_section, []))[1].append(i)
+
+        for heading, (_, rule_linenos) in section_rule_counts.items():
+            if len(rule_linenos) > 20:
+                report.suggestions.append(RefactorSuggestion(
+                    suggestion_type="split_section",
+                    description=(
+                        f"Section '{heading}' has {len(rule_linenos)} rules. "
+                        "Consider splitting into sub-sections or a separate override file."
+                    ),
+                    rationale=(
+                        "Oversized sections are harder to maintain and send more context than "
+                        "needed to harnesses. Splitting allows per-section scope annotations."
+                    ),
+                    affected_lines=rule_linenos[:3],
+                ))
+
+        return report

@@ -62,4 +62,4 @@ Prefer these over Bash for file reads and large output operations:
 - Claude Code `"deny"` permissions are never downgraded in targets
 
 
-*Last synced by HarnessSync: 2026-03-17 22:43:08 UTC*
+*Last synced by HarnessSync: 2026-03-17 23:47:10 UTC*

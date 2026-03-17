@@ -893,8 +893,9 @@ class ConflictDetector:
         import difflib
         import os
 
-        # Auto-detect color capability when not explicitly set
-        _use_color = colorize and (os.environ.get("NO_COLOR") is None)
+        # When colorize is explicitly requested, honour it unconditionally.
+        # NO_COLOR only applies to programs that auto-detect color support.
+        _use_color = colorize
 
         # ANSI color helpers
         _RED = "\033[31m"
@@ -1466,5 +1467,152 @@ class SyncConflictWizard:
         lines.append("")
         lines.append(f"Total: {len(three_ways)} file(s) to resolve.")
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Item 1 — TUI Conflict Resolution Wizard
+# ---------------------------------------------------------------------------
+
+class TuiConflictWizard:
+    """TTY-based interactive conflict resolution wizard with side-by-side diff.
+
+    When a target file has been manually edited since the last sync, this
+    wizard surfaces a rich diff showing:
+      LEFT  = Claude Code source (what HarnessSync would write)
+      RIGHT = Target file (what the user manually edited)
+
+    The user picks per-file: [o]verwrite, [m]erge (union), [k]eep, [s]kip.
+
+    Works with or without a TTY — falls back to the non-interactive
+    ``SyncConflictWizard`` with strategy="union" when stdin is not a
+    terminal.
+
+    Args:
+        detector: ConflictDetector to use for three-way diffs.
+        auto_strategy: Strategy to use when not on a TTY. Default: 'union'.
+        color: Whether to use ANSI color codes in diff output.
+    """
+
+    CHOICES = {"o": "overwrite", "m": "merge", "k": "keep", "s": "skip"}
+
+    def __init__(
+        self,
+        detector: "ConflictDetector | None" = None,
+        auto_strategy: str = "union",
+        color: bool = True,
+    ) -> None:
+        self.detector = detector or ConflictDetector()
+        self.auto_strategy = auto_strategy
+        self.color = color
+
+    @staticmethod
+    def _is_tty() -> bool:
+        import sys
+        return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+
+    def run(
+        self,
+        conflicts: dict[str, list[dict]],
+        source_content: str,
+    ) -> dict[str, str]:
+        """Run the wizard on a dict of detected conflicts.
+
+        Args:
+            conflicts: Output from ``ConflictDetector.check_all()``.
+            source_content: The Claude Code source (what HarnessSync would write).
+
+        Returns:
+            Dict mapping file_path -> resolution ('overwrite'|'merge'|'keep'|'skip').
+            'overwrite' means use HarnessSync source; 'keep' means leave target unchanged.
+        """
+        if not self._is_tty():
+            auto = SyncConflictWizard(strategy=self.auto_strategy)
+            resolutions: dict[str, str] = {}
+            for target_name, target_conflicts in conflicts.items():
+                for conflict in target_conflicts:
+                    fp = conflict.get("file_path", target_name)
+                    three_way = self.detector.three_way_diff(conflict, source_content)
+                    label, _ = auto.auto_resolve(three_way)
+                    resolutions[fp] = label
+            return resolutions
+
+        resolutions: dict[str, str] = {}
+        all_conflicts = [
+            (conflict.get("file_path", target), conflict)
+            for target, clist in conflicts.items()
+            for conflict in clist
+        ]
+
+        if not all_conflicts:
+            return resolutions
+
+        print(f"\n{'=' * 60}")
+        print(f"  HarnessSync Conflict Resolution Wizard")
+        print(f"  {len(all_conflicts)} file(s) have manual edits")
+        print(f"{'=' * 60}\n")
+
+        for idx, (fp, conflict) in enumerate(all_conflicts, 1):
+            print(f"\n[{idx}/{len(all_conflicts)}] {fp}")
+            print("-" * 55)
+
+            three_way = self.detector.three_way_diff(conflict, source_content)
+            self._show_diff(three_way, fp)
+
+            choice = self._prompt_choice(fp)
+            resolutions[fp] = choice
+
+        self._print_summary(resolutions)
+        return resolutions
+
+    def _show_diff(self, three_way: dict, label: str) -> None:
+        """Print a side-by-side diff for the given three-way dict."""
+        try:
+            diff_text = self.detector.format_side_by_side_diff(
+                three_way, color=self.color
+            )
+            print(diff_text)
+        except Exception:
+            # Fall back to simple unified diff
+            source_lines = three_way.get("source_lines", [])
+            current_lines = three_way.get("current_lines", [])
+            import difflib
+            diff = list(difflib.unified_diff(
+                current_lines, source_lines,
+                fromfile=f"{label} (current)",
+                tofile=f"{label} (HarnessSync)",
+                lineterm="",
+            ))
+            for line in diff[:60]:
+                print(line)
+            if len(diff) > 60:
+                print(f"  ... ({len(diff) - 60} more lines)")
+
+    def _prompt_choice(self, fp: str) -> str:
+        """Ask the user to choose a resolution. Returns the resolution string."""
+        prompt = (
+            "  Resolution: [o]verwrite with HarnessSync source  "
+            "[m]erge (union)  [k]eep manual edits  [s]kip\n"
+            "  Choice [o/m/k/s, default=o]: "
+        )
+        try:
+            raw = input(prompt).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  Cancelled — using 'keep' for remaining files.")
+            return "keep"
+
+        if not raw:
+            return "overwrite"
+        return self.CHOICES.get(raw[0], "overwrite")
+
+    def _print_summary(self, resolutions: dict[str, str]) -> None:
+        """Print a one-line summary of all resolutions made."""
+        print(f"\n{'─' * 55}")
+        print("  Resolution summary:")
+        counts: dict[str, int] = {}
+        for action in resolutions.values():
+            counts[action] = counts.get(action, 0) + 1
+        for action, count in sorted(counts.items()):
+            print(f"    {action:<12} {count} file(s)")
+        print(f"{'─' * 55}\n")
 
         return new_content

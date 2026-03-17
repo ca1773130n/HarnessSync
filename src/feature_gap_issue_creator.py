@@ -601,3 +601,177 @@ class GapUpvoteTracker:
             )
 
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Feature Gap Advisor — actionable workarounds per capability gap (Item 5)
+# ---------------------------------------------------------------------------
+
+# Per-(harness, feature) workarounds: specific, actionable steps users can take
+# to partially recover missing capabilities.  Goes beyond just listing gaps.
+_WORKAROUNDS: dict[tuple[str, str], list[str]] = {
+    ("aider", "skills"): [
+        "Create a skills/ directory with .md files alongside your project.",
+        "Pass skill files as read-only context: `aider --read skills/my-skill.md`.",
+        "Alias frequent skill invocations in a Makefile: `make fix-types` → `aider --read skills/fix-types.md`.",
+    ],
+    ("aider", "mcp"): [
+        "Run MCP tools as standalone CLI processes and pipe their output to Aider.",
+        "Use aider's `--exec` flag to run a helper script before each session.",
+        "Store MCP output in a temp file and add it via `--read` at session start.",
+    ],
+    ("aider", "agents"): [
+        "Use Aider's `--architect` mode as a lightweight two-agent pattern.",
+        "Chain multiple aider invocations in a shell script to simulate agent handoffs.",
+    ],
+    ("aider", "commands"): [
+        "Define shell aliases or Makefile targets for each common slash command.",
+        "Add a `scripts/` directory with one script per command (e.g., `scripts/fix-types.sh`).",
+    ],
+    ("codex", "skills"): [
+        "Embed skill content directly in AGENTS.md under a '## Skills' heading.",
+        "Use Codex's `--profile` flag to load project-specific rule subsets.",
+    ],
+    ("codex", "agents"): [
+        "Use Codex's built-in multi-turn conversation to simulate agent handoffs manually.",
+        "Split complex tasks into separate AGENTS.md sections gated by task context.",
+    ],
+    ("cursor", "agents"): [
+        "Use Cursor's Composer in 'Long Context' mode as an approximation.",
+        "Create separate .cursor/rules/*.mdc files scoped to different workflows.",
+    ],
+    ("windsurf", "agents"): [
+        "Use Windsurf Cascade's multi-step mode for sequential task pipelines.",
+        "Create separate workspace flows for different agent roles.",
+    ],
+    ("windsurf", "mcp"): [
+        "Use Windsurf's built-in tool integrations (file system, terminal) as MCP alternatives.",
+        "For custom MCP tools: run them as background processes and read their output via context.",
+    ],
+    ("gemini", "commands"): [
+        "Use Gemini CLI's `@file` context injection as an approximation of slash commands.",
+        "Create shell aliases: `alias /fix-types='gemini --context skills/fix-types.md'`.",
+    ],
+    ("cline", "agents"): [
+        "Use Cline's task chaining feature in VS Code to approximate multi-agent flows.",
+    ],
+}
+
+# Generic fallback workarounds by feature category
+_GENERIC_WORKAROUNDS: dict[str, list[str]] = {
+    "skills": [
+        "Embed skill instructions directly in CLAUDE.md/AGENTS.md under a '## Skills' section.",
+        "Create a dedicated rules file per skill and load it as additional context.",
+    ],
+    "agents": [
+        "Split agent responsibilities across CLAUDE.md sections with clear headings.",
+        "Use sequential task files to hand off context between conceptual agents.",
+    ],
+    "commands": [
+        "Map each command to a shell alias or Makefile target.",
+        "Document command invocations in CLAUDE.md so the AI can approximate them.",
+    ],
+    "mcp": [
+        "Run MCP servers as standalone background processes and use their CLI output.",
+        "Check if the harness has native equivalents for your specific MCP tools.",
+    ],
+    "settings": [
+        "Document your desired permission model in CLAUDE.md comments for reference.",
+        "Use harness-specific config files (.cursorrules, GEMINI.md) for settings approximation.",
+    ],
+}
+
+
+@dataclass
+class GapAdvice:
+    """Actionable advice for a single capability gap."""
+    harness: str
+    feature: str
+    workarounds: list[str]
+    # True if specific workarounds exist; False if only generic advice available
+    has_specific_advice: bool = False
+
+
+class FeatureGapAdvisor:
+    """Provide actionable workarounds for Claude Code → harness capability gaps.
+
+    Goes beyond gap detection to give users specific, copyable steps to
+    recover missing capabilities.  Each piece of advice targets the exact
+    (harness, feature) combination rather than generic guidance.
+
+    Usage::
+
+        advisor = FeatureGapAdvisor()
+        advice_list = advisor.advise("aider", ["skills", "mcp", "agents"])
+        print(advisor.format_advice(advice_list))
+    """
+
+    def advise(
+        self,
+        harness: str,
+        features: list[str],
+    ) -> list[GapAdvice]:
+        """Return workarounds for each (harness, feature) capability gap.
+
+        Args:
+            harness: Target harness name (e.g. "aider").
+            features: List of feature categories that are missing
+                      (e.g. ["skills", "mcp", "agents"]).
+
+        Returns:
+            List of GapAdvice objects, one per feature with at least one step.
+        """
+        result: list[GapAdvice] = []
+        h = harness.lower().strip()
+        for feature in features:
+            f = feature.lower().strip()
+            key = (h, f)
+            specific = _WORKAROUNDS.get(key)
+            if specific:
+                result.append(GapAdvice(
+                    harness=h,
+                    feature=f,
+                    workarounds=specific,
+                    has_specific_advice=True,
+                ))
+            else:
+                generic = _GENERIC_WORKAROUNDS.get(f, [
+                    f"No direct equivalent exists for '{f}' in {h}. "
+                    "Consider documenting the capability in your project's CLAUDE.md "
+                    "so it remains accessible as human reference even without tool support.",
+                ])
+                result.append(GapAdvice(
+                    harness=h,
+                    feature=f,
+                    workarounds=generic,
+                    has_specific_advice=False,
+                ))
+        return result
+
+    def format_advice(self, advice_list: list[GapAdvice]) -> str:
+        """Render advice as a human-readable report.
+
+        Args:
+            advice_list: Output from :meth:`advise`.
+
+        Returns:
+            Formatted multi-line string with per-gap workaround steps.
+        """
+        if not advice_list:
+            return "No capability gaps provided. All features appear to be supported."
+
+        lines: list[str] = []
+        lines.append("Feature Gap Advisor — Actionable Workarounds")
+        lines.append("=" * 55)
+
+        for adv in advice_list:
+            qualifier = "specific" if adv.has_specific_advice else "generic"
+            lines.append(f"\n  [{adv.harness.upper()}] {adv.feature}  ({qualifier} advice)")
+            for i, step in enumerate(adv.workarounds, 1):
+                lines.append(f"    {i}. {step}")
+
+        lines.append("")
+        lines.append(
+            "Use /sync-gaps to see the full gap list or /sync-compare for a matrix view."
+        )
+        return "\n".join(lines)

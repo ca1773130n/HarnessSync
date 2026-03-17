@@ -395,6 +395,21 @@ class SyncOrchestrator:
         except Exception as e:
             self.logger.warn(f"MCP reachability check failed: {e}")
 
+        # --- PRE-SYNC: CAPABILITY GAP WARNINGS (Item 1) ---
+        # Surface which rules/skills/MCP servers will be silently dropped or
+        # approximated in each target harness before sync begins.
+        try:
+            from src.capability_advisor import CapabilityAdvisor
+            _cap_advisor = CapabilityAdvisor()
+            _cap_report = _cap_advisor.analyze_source_data(source_data)
+            if _cap_report and not _cap_report.is_empty:
+                for _cap_warning in _cap_report.warnings:
+                    self.logger.warn(
+                        f"Capability gap [{_cap_warning.harness}]: {_cap_warning.message}"
+                    )
+        except Exception:
+            pass  # Capability gap warnings are informational, never block sync
+
         # --- PRE-SYNC: SECRET DETECTION ---
         # Scan MCP env vars AND CLAUDE.md/rules files before any writes.
         # Item 4: catches API keys pasted into markdown rules, not just MCP env.
@@ -665,6 +680,17 @@ class SyncOrchestrator:
                     target_data['rules'] = _transform_engine.apply_to_rules(
                         target_data.get('rules', adapter_data.get('rules', [])), target
                     )
+                # Step 4: apply rule category tag filtering (Item 12)
+                # Filters tagged sections (<!-- #security --> etc.) per harness policy.
+                try:
+                    from src.rule_tagger import RuleTagger
+                    _rule_tagger = RuleTagger(project_dir=self.project_dir)
+                    if _rule_tagger.is_configured:
+                        target_data['rules'] = _rule_tagger.filter_rules_list(
+                            target_data.get('rules', adapter_data.get('rules', [])), target
+                        )
+                except Exception:
+                    pass  # Tag filtering is best-effort, never blocks sync
 
                 # --- PER-HARNESS OVERRIDE FILES: append CLAUDE.<target>.md content ---
                 _override_content = reader.get_harness_override(target)
@@ -701,6 +727,23 @@ class SyncOrchestrator:
                         )
                 except Exception:
                     pass  # Aliasing is best-effort
+
+                # --- MCP ROUTING: filter servers to only those routed to this target (Item 22) ---
+                try:
+                    from src.mcp_routing import McpRouter
+                    _mcp_router = McpRouter(project_dir=self.project_dir)
+                    if _mcp_router.is_configured and isinstance(target_data.get('mcp'), dict):
+                        _dropped = _mcp_router.dropped_servers(target_data['mcp'], target)
+                        target_data['mcp'] = _mcp_router.filter_for_target(
+                            target_data['mcp'], target
+                        )
+                        for _dropped_srv in _dropped:
+                            self.logger.warn(
+                                f"MCP routing: '{_dropped_srv}' not synced to {target} "
+                                f"(per .harnesssync/mcp_routing.json)"
+                            )
+                except Exception:
+                    pass  # MCP routing is best-effort, never blocks sync
 
                 # --- MCP DEPENDENCY ORDERING: reorder servers for safe startup ---
                 try:
