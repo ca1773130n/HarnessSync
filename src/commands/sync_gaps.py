@@ -1,21 +1,32 @@
 from __future__ import annotations
 
 """
-/sync-gaps slash command — Cross-Harness Feature Request Tracker (item 24).
+/sync-gaps slash command — Cross-Harness Feature Request Tracker (item 24)
+and Harness Feature Watchlist (item 19).
 
 When HarnessSync can't sync a feature because the target lacks support, log it
 as a tracked gap with an optional link to the upstream issue tracker. Over time
 this turns user frustration into an actionable log of what's missing and where
 to upvote/follow.
 
+Watchlist: subscribe to (feature, harness) pairs and get notified when support
+level changes — so you find out when Aider adds MCP support instead of
+discovering it by accident.
+
 Usage:
-    /sync-gaps                            # list all open gaps
-    /sync-gaps --target codex             # gaps for a specific harness
+    /sync-gaps                              # list all open gaps
+    /sync-gaps --target codex               # gaps for a specific harness
     /sync-gaps log codex skills "Skills dropped — no equivalent" [--url URL]
-    /sync-gaps resolve codex skills       # mark a gap resolved
-    /sync-gaps --include-resolved         # show resolved gaps too
-    /sync-gaps --auto                     # auto-detect gaps from last sync state
-    /sync-gaps --json                     # output as JSON
+    /sync-gaps resolve codex skills         # mark a gap resolved
+    /sync-gaps --include-resolved           # show resolved gaps too
+    /sync-gaps --auto                       # auto-detect gaps from last sync state
+    /sync-gaps --json                       # output as JSON
+
+    # Watchlist (item 19)
+    /sync-gaps --watchlist                  # show current watchlist with support levels
+    /sync-gaps --watchlist-add mcp aider    # watch for aider to add MCP support
+    /sync-gaps --watchlist-remove mcp aider # stop watching
+    /sync-gaps --watchlist-check            # check for support level changes
 """
 
 import os
@@ -103,8 +114,76 @@ def main() -> None:
     parser.add_argument("--json", dest="output_json", action="store_true",
                         help="Output as JSON")
 
+    # Watchlist flags (item 19)
+    parser.add_argument(
+        "--watchlist",
+        action="store_true",
+        help="Show the current feature watchlist with live support levels",
+    )
+    parser.add_argument(
+        "--watchlist-add",
+        nargs=2,
+        metavar=("FEATURE", "HARNESS"),
+        dest="watchlist_add",
+        help="Add a (feature, harness) pair to the watchlist. E.g. --watchlist-add mcp aider",
+    )
+    parser.add_argument(
+        "--watchlist-remove",
+        nargs=2,
+        metavar=("FEATURE", "HARNESS"),
+        dest="watchlist_remove",
+        help="Remove a (feature, harness) pair from the watchlist.",
+    )
+    parser.add_argument(
+        "--watchlist-check",
+        action="store_true",
+        dest="watchlist_check",
+        help=(
+            "Check current support levels against stored levels and report changes. "
+            "Updates stored levels so next check only reports new changes."
+        ),
+    )
+
     args = parser.parse_args(raw_args)
     tracker = GapTracker()
+
+    # ── Watchlist commands (item 19) ──────────────────────────────────────────
+    if getattr(args, "watchlist_add", None):
+        from src.feature_watchlist import FeatureWatchlist
+        feature, harness = args.watchlist_add
+        wl = FeatureWatchlist()
+        ok, msg = wl.add(feature, harness)
+        print(("OK: " if ok else "Error: ") + msg)
+        return
+
+    if getattr(args, "watchlist_remove", None):
+        from src.feature_watchlist import FeatureWatchlist
+        feature, harness = args.watchlist_remove
+        wl = FeatureWatchlist()
+        ok, msg = wl.remove(feature, harness)
+        print(("OK: " if ok else "Error: ") + msg)
+        return
+
+    if getattr(args, "watchlist", False):
+        from src.feature_watchlist import FeatureWatchlist
+        wl = FeatureWatchlist()
+        print(wl.format_status())
+        return
+
+    if getattr(args, "watchlist_check", False):
+        from src.feature_watchlist import FeatureWatchlist
+        wl = FeatureWatchlist()
+        hits = wl.check(update=True)
+        if hits:
+            print(wl.format_hits(hits))
+        else:
+            watches = wl.list_watches()
+            if watches:
+                print(f"No changes detected across {len(watches)} watched feature/harness pair(s).")
+            else:
+                print("Watchlist is empty. Add entries with --watchlist-add <feature> <harness>.")
+        return
+    # ── End watchlist ─────────────────────────────────────────────────────────
 
     if args.subcommand == "log":
         gap = tracker.log_gap(

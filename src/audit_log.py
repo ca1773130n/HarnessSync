@@ -83,6 +83,12 @@ class AuditEntry:
     user: str               # git config user.name or OS user
     extra: dict             # Arbitrary additional fields
     chain_hash: str         # HMAC chain link (empty string on genesis entry)
+    # Per-file SHA256 snapshots recorded before and after the sync event.
+    # Keys are relative file paths; values are hex SHA256 digests.
+    # Empty dicts when the caller does not provide hash snapshots.
+    before_hashes: dict     # {rel_path: sha256} state BEFORE this event
+    after_hashes: dict      # {rel_path: sha256} state AFTER this event
+    trigger: str            # What triggered this event: "hook" | "manual" | "schedule" | ""
 
     def to_dict(self) -> dict:
         return {
@@ -94,6 +100,9 @@ class AuditEntry:
             "user": self.user,
             "extra": self.extra,
             "chain_hash": self.chain_hash,
+            "before_hashes": self.before_hashes,
+            "after_hashes": self.after_hashes,
+            "trigger": self.trigger,
         }
 
     @staticmethod
@@ -107,6 +116,9 @@ class AuditEntry:
             user=d.get("user", ""),
             extra=d.get("extra", {}),
             chain_hash=d.get("chain_hash", ""),
+            before_hashes=d.get("before_hashes", {}),
+            after_hashes=d.get("after_hashes", {}),
+            trigger=d.get("trigger", ""),
         )
 
 
@@ -187,6 +199,9 @@ class AuditLog:
         files_changed: list[str] | None = None,
         source_hash: str = "",
         user: str | None = None,
+        before_hashes: dict | None = None,
+        after_hashes: dict | None = None,
+        trigger: str = "",
         **extra: object,
     ) -> AuditEntry:
         """Append a new event to the audit log.
@@ -197,6 +212,11 @@ class AuditLog:
             files_changed: Relative paths of files written/modified.
             source_hash: SHA256 of the source CLAUDE.md (optional).
             user: Override identity string (defaults to git/OS user).
+            before_hashes: Per-file SHA256 digests captured before this event.
+                Keys are relative file paths; values are hex SHA256 strings.
+                Enables forensic "why did my Cursor config change?" queries.
+            after_hashes: Per-file SHA256 digests captured after this event.
+            trigger: What initiated this event ("hook", "manual", "schedule", "").
             **extra: Additional key-value metadata stored in entry.extra.
 
         Returns:
@@ -211,6 +231,9 @@ class AuditLog:
             "source_hash": source_hash,
             "user": user or _get_identity(),
             "extra": extra,
+            "before_hashes": before_hashes or {},
+            "after_hashes": after_hashes or {},
+            "trigger": trigger,
         }
         # Serialise without chain_hash for the hash computation
         entry_raw = json.dumps(entry_body, separators=(",", ":"), sort_keys=True)
@@ -365,11 +388,66 @@ class AuditLog:
                 continue
         return entries
 
-    def format_timeline(self, n: int = 20) -> str:
+    def files_changed_since(self, since_timestamp: str) -> list[dict]:
+        """Return per-file change records for all sync events after *since_timestamp*.
+
+        Uses the before_hashes / after_hashes stored in each entry to answer
+        forensic questions like "why does my Cursor config look different from
+        last week?" — returning each file that had its hash change along with
+        the timestamp and trigger that caused the change.
+
+        Args:
+            since_timestamp: ISO-8601 UTC string.  Only events whose timestamp
+                is greater than this value are included.
+
+        Returns:
+            List of dicts, one per changed file per event::
+
+                {
+                    "file": "AGENTS.md",
+                    "target": "codex",
+                    "event": "sync",
+                    "timestamp": "2026-03-18T10:00:00Z",
+                    "trigger": "hook",
+                    "before_hash": "abc123",
+                    "after_hash": "def456",
+                }
+        """
+        records: list[dict] = []
+        for entry in self.tail(5_000):
+            if entry.timestamp <= since_timestamp:
+                continue
+            if not entry.after_hashes:
+                continue
+            for rel_path, after_hash in entry.after_hashes.items():
+                before_hash = entry.before_hashes.get(rel_path, "")
+                if before_hash == after_hash:
+                    continue  # unchanged
+                # Try to infer target from file path
+                target = "unknown"
+                for t in entry.targets:
+                    if t.lower() in rel_path.lower():
+                        target = t
+                        break
+                if target == "unknown" and entry.targets:
+                    target = entry.targets[0]
+                records.append({
+                    "file": rel_path,
+                    "target": target,
+                    "event": entry.event,
+                    "timestamp": entry.timestamp,
+                    "trigger": entry.trigger,
+                    "before_hash": before_hash,
+                    "after_hash": after_hash,
+                })
+        return records
+
+    def format_timeline(self, n: int = 20, show_hashes: bool = False) -> str:
         """Format a human-readable timeline of recent events.
 
         Args:
             n: Number of recent entries to show.
+            show_hashes: If True, include before/after hash fingerprints.
 
         Returns:
             Multi-line string suitable for terminal output.
@@ -385,7 +463,14 @@ class AuditLog:
             changed_str = (
                 f"{len(e.files_changed)} file(s)" if e.files_changed else "no files"
             )
-            lines.append(f"  {ts}  [{e.event:<18}]  {targets_str}  ({changed_str})  by {e.user}")
+            trigger_str = f"  trigger={e.trigger}" if e.trigger else ""
+            lines.append(f"  {ts}  [{e.event:<18}]  {targets_str}  ({changed_str})  by {e.user}{trigger_str}")
+            if show_hashes and (e.before_hashes or e.after_hashes):
+                for path in sorted(set(list(e.before_hashes) + list(e.after_hashes))):
+                    bh = e.before_hashes.get(path, "—")[:12]
+                    ah = e.after_hashes.get(path, "—")[:12]
+                    if bh != ah:
+                        lines.append(f"      {path}: {bh} → {ah}")
         lines.append("")
         lines.append(f"Showing {len(entries)} of {len(self._read_lines())} total entries.")
         lines.append("Run /sync-audit verify to check chain integrity.")

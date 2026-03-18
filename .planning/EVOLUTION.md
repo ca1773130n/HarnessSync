@@ -5534,3 +5534,114 @@ None
 None
 
 ---
+## Iteration 86
+_2026-03-18T01:50:14.165Z_
+
+### Items Attempted
+
+- **Reverse Import: Harness → Claude Code** — pass
+- **Sync Explain: Human-Readable Change Preview** — pass
+- **Dotfiles Repo Sync** — pass
+- **Team Config Sharing via Git** — pass
+- **Harness Compatibility Score** — pass
+- **Interactive Onboarding Wizard** — pass
+- **Config Snapshot Timeline** — pass
+- **GitHub Actions Sync Workflow** — pass
+- **Selective Skill Sync with Tag Filtering** — pass
+- **Adapter Plugin SDK for Custom Harnesses** — pass
+- **Live Drift Alerts in IDE** — pass
+- **Config Complexity Analyzer** — pass
+- **CI-Friendly Dry-Run with Exit Codes** — pass
+- **MCP Server Auto-Discovery Across Harnesses** — pass
+- **Sync Recipe Library** — pass
+- **Permission Translation Explainer** — pass
+- **Smart Conflict Resolution with AI Merge** — pass
+- **One-Click New Harness Bootstrap** — pass
+- **PR Comment: Sync Impact Summary** — pass
+- **Offline Sync Queue** — pass
+- **Feature Parity Gap Tracker** — pass
+- **Config Linter with Sync-Aware Rules** — pass
+- **Multi-Machine Config Sync via Cloud** — pass
+- **Sandboxed Sync Test** — pass
+- **Skill Transpiler: Approximate Unsupported Skills** — pass
+- **Harness Version Compatibility Matrix** — pass
+- **Natural Language Rule Generator** — pass
+- **Dependency-Aware Skill Sync** — pass
+- **Per-Harness Config Smoke Test** — pass
+- **Ambient Sync Notifications** — pass
+- **Sync Profiles: Work vs Personal** — pass
+- **Rule Deduplication Across Sources** — pass
+- **Harness Changelog Tracker** — pass
+
+### Decisions Made
+
+- Added --ci and --json flags to sync_status.py: --ci exits 1 on drift/never-synced for CI pipeline blocking; --json outputs structured data without exit-code enforcement. Kept them separate so --json can be used for tooling without blocking.
+- Wired DotfilesAutoCommitter into sync.py via --dotfiles-path: placed the commit call at the end of _display_results() rather than main() to cover all sync code paths (account sync, multi-account, v1). Added --dotfiles-push for optional remote push.
+- Created sync_mcp_discover.py as a standalone command rather than folding it into sync_status: discovery is a one-shot scan users run intentionally, not something that should appear in every status check. Added --from-harnesses to scan Cursor/Windsurf configs specifically.
+- Ambient post-sync notification writes a terminal bell (\x07) + summary line to /dev/tty first, falling back to stderr if /dev/tty is unavailable. This mirrors the existing _ring_terminal_bell() pattern in drift_watcher.py for consistency.
+- Skill dependency check is placed as PRE-sync in orchestrator.sync_all() immediately after source_data is loaded, so warnings surface before any files are written. Only warns on 'explicit' and 'slash' edge kinds to avoid false positives from mention-based detection.
+
+### Patterns Discovered
+
+- All post-sync blocks in orchestrator.py follow the same pattern: try/except with a comment '# never blocks'. New additions should follow this — best-effort, never blocking is the invariant.
+- The orchestrator uses SkillDependencyGraph._nodes as a set lookup — accessing a private attribute is a minor code smell; a public method like graph.skill_names() would be cleaner.
+- sync_status.py had no JSON output despite being a status command — this is a missing pattern vs. other tools that routinely support --json for scriptability.
+- _display_results() in sync.py acts as a catch-all for all post-sync display logic, making it the right place for dotfiles integration but also a growing monolith to watch.
+- The deepeval pytest plugin causes collection failure on Python 3.9 due to union-type syntax incompatibility — preexisting issue, not related to changes. Tests run fine with -p no:deepeval.
+
+### Takeaways
+
+- The orchestrator already had desktop notifications, webhook notifications, and post-sync verification but lacked an always-visible ambient feedback mechanism for background/hook-triggered syncs — the terminal bell fills this gap.
+- DotfilesAutoCommitter in dotfile_integration.py was fully implemented but completely unwired from any command — a common pattern in this codebase where library modules exist without command exposure.
+- mcp_autodiscovery.py existed with a complete implementation but had no slash command exposing it — the --from-harnesses flag in sync_mcp_discover.py adds cross-harness import capability on top of the existing system scanner.
+- SkillDependencyGraph already detects cycles and missing deps but was only used by sync_map/sync_report commands, not integrated into the core sync path where warnings matter most.
+- The CI dry-run gap was real: sync_status.py had human-readable drift output but no machine-readable JSON or non-zero exit code, making it unusable in automated pipelines.
+
+---
+## Iteration 87
+_2026-03-18T02:03:14.793Z_
+
+### Items Attempted
+
+- **Reverse Import: Pull Config INTO Claude Code** — fail
+- **Prompt Parity Tester** — fail
+- **Shareable Config Bundles via GitHub Gist** — fail
+- **Conditional Sync Rules per Harness** — fail
+- **Token Budget Optimizer** — fail
+- **Community Adapter Generator** — fail
+- **Immutable Sync Audit Trail** — fail
+- **Harness Compatibility Score Card** — fail
+- **Team Sync Profiles** — fail
+- **Auto-Discover Installed Harnesses** — fail
+- **Permission Gap Analyzer** — fail
+- **Git Commit/Push Sync Trigger** — fail
+- **Semantic Config Diff (not just text diff)** — fail
+- **MCP Server Reachability Dashboard** — fail
+- **Config Template Marketplace** — fail
+- **Config Drift Notifications** — fail
+- **Harness Update Compatibility Alerts** — fail
+- **Interactive Conflict Resolver** — fail
+- **Config Annotation Layer** — fail
+- **Sync Webhook Notifications** — fail
+- **Lazy On-Demand Sync (sync when harness is invoked)** — fail
+- **Multi-Machine Config Sync via Git Remote** — fail
+- **Config Health Score Over Time** — fail
+- **Skill Compatibility Matrix** — fail
+- **One-Click New Harness Onboarding** — fail
+- **Config Size Budget Warnings** — fail
+- **Rollback to Last Known Good State** — fail
+- **Environment Variable Translation Map** — fail
+
+### Decisions Made
+
+None
+
+### Patterns Discovered
+
+None
+
+### Takeaways
+
+None
+
+---

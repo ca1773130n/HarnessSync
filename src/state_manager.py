@@ -529,3 +529,82 @@ class StateManager:
         """
         self._state["global_dry_run"] = enabled
         self._save()
+
+    # ── Health score history (Config Health Score Over Time) ───────────────
+
+    def record_health_score(
+        self,
+        target: str,
+        score: int,
+        label: str = "",
+    ) -> None:
+        """Append a health score snapshot for a target to the rolling history.
+
+        Keeps the last 90 entries per target (one per sync ≈ 3 months of daily
+        syncs) so callers can plot a sparkline trend without unbounded growth.
+
+        Args:
+            target: Harness name (e.g. "codex", "gemini").
+            score:  0-100 health score from HarnessHealthScorer.
+            label:  Optional human-readable label (e.g. "healthy", "warning").
+        """
+        history = self._state.setdefault("health_score_history", {})
+        target_history: list[dict] = history.setdefault(target, [])
+        target_history.append({
+            "timestamp": datetime.now().isoformat(),
+            "score": max(0, min(100, score)),
+            "label": label,
+        })
+        # Trim to the most recent 90 entries
+        if len(target_history) > 90:
+            history[target] = target_history[-90:]
+        self._save()
+
+    def get_score_history(
+        self,
+        target: str,
+        n: int = 30,
+    ) -> list[dict]:
+        """Return the last *n* health score snapshots for a target.
+
+        Args:
+            target: Harness name.
+            n:      Maximum number of entries to return (newest last).
+
+        Returns:
+            List of dicts with keys: "timestamp", "score", "label".
+            Empty list if no history is available.
+        """
+        history = self._state.get("health_score_history", {})
+        entries = history.get(target, [])
+        return entries[-n:] if len(entries) > n else entries
+
+    def format_score_sparkline(self, target: str, width: int = 20) -> str:
+        """Render a compact ASCII sparkline of health score history.
+
+        Args:
+            target: Harness name.
+            width:  Number of characters in the sparkline (default: 20).
+
+        Returns:
+            String like "▄▆█▇▅▃▂▄▆█  84/100" or "(no history)" if empty.
+        """
+        history = self.get_score_history(target, n=width)
+        if not history:
+            return "(no history)"
+
+        scores = [e["score"] for e in history]
+        # Pad to width with the oldest score repeated at the left
+        while len(scores) < width:
+            scores.insert(0, scores[0])
+        scores = scores[-width:]
+
+        # Map 0-100 to sparkline block characters (8 levels)
+        _blocks = " ▁▂▃▄▅▆▇█"
+        spark = ""
+        for s in scores:
+            idx = min(8, int(s / 100 * 8.5))
+            spark += _blocks[idx]
+
+        latest = scores[-1]
+        return f"{spark}  {latest}/100"

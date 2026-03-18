@@ -325,6 +325,82 @@ def _show_status(branch: str, project_dir: Path) -> None:
         print(f"Could not read share branch: {e}")
 
 
+def _export_to_gist(
+    project_dir: Path,
+    public: bool = False,
+    description: str = "",
+    dry_run: bool = False,
+) -> None:
+    """Export the normalized config snapshot to a GitHub Gist.
+
+    Wraps CloudBackupExporter.export_to_gist() with pre-export secret scanning
+    and user-friendly output.  Requires GITHUB_TOKEN env var with 'gist' scope.
+
+    Args:
+        project_dir: Project root directory.
+        public: If True, create a public Gist (default: secret).
+        description: Gist description shown on GitHub.
+        dry_run: If True, show what would be exported without calling the API.
+    """
+    # Secret scan before exporting
+    secrets = _check_secrets(project_dir)
+    if secrets:
+        detector = SecretDetector()
+        print("ERROR: Secrets detected — refusing to export to Gist.")
+        print(detector.format_warnings(secrets))
+        print("Fix the secrets above, then retry /sync-share --gist.")
+        return
+
+    import os
+    github_token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if not github_token:
+        print("ERROR: GITHUB_TOKEN environment variable is not set.")
+        print("  Set it with: export GITHUB_TOKEN=<your-token>")
+        print("  The token needs the 'gist' scope.")
+        print("  Create one at: https://github.com/settings/tokens")
+        return
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    gist_description = description or f"HarnessSync config — {project_dir.name} — {timestamp}"
+
+    if dry_run:
+        bundle = _build_share_bundle(project_dir)
+        rules_lines = len((bundle.get("rules") or "").splitlines())
+        visibility = "public" if public else "secret"
+        print(f"[DRY RUN] Would export to GitHub Gist ({visibility}):")
+        print(f"  Description: {gist_description}")
+        print(f"  Rules:       {rules_lines} lines")
+        print(f"  Files:       {len(bundle.get('extra_files', {}))} extra config file(s)")
+        print()
+        print("Set GITHUB_TOKEN and run without --dry-run to create the Gist.")
+        return
+
+    try:
+        from src.backup_manager import CloudBackupExporter
+        exporter = CloudBackupExporter(project_dir=project_dir)
+        result = exporter.export_to_gist(
+            description=gist_description,
+            public=public,
+            github_token=github_token,
+        )
+        gist_url = result.get("gist_url") or result.get("html_url", "")
+        gist_id = result.get("id", "")
+        print(f"✓ Config exported to GitHub Gist")
+        print(f"  URL:  {gist_url}")
+        print(f"  ID:   {gist_id}")
+        visibility_label = "public" if public else "secret (only visible with the URL)"
+        print(f"  Visibility: {visibility_label}")
+        print()
+        print("Teammates import with:")
+        print(f"  /sync-reverse --from-gist {gist_url}")
+        print()
+        print("Or fetch the raw bundle and apply manually:")
+        print(f"  curl -s https://api.github.com/gists/{gist_id} | python -m src.commands.sync_import --bundle -")
+    except Exception as exc:
+        print(f"ERROR: Failed to export to Gist: {exc}", file=sys.stderr)
+        print("Check that GITHUB_TOKEN has the 'gist' scope and try again.")
+
+
 def main() -> None:
     """Entry point for /sync-share command."""
     args_string = " ".join(sys.argv[1:])
@@ -365,6 +441,29 @@ def main() -> None:
         help="Print the normalized config that would be shared",
     )
     parser.add_argument(
+        "--gist",
+        action="store_true",
+        help=(
+            "Export config as a GitHub Gist instead of a git branch. "
+            "Requires GITHUB_TOKEN env var with 'gist' scope. "
+            "Prints the Gist URL — teammates import with: "
+            "/sync-reverse --from-gist <url>"
+        ),
+    )
+    parser.add_argument(
+        "--gist-public",
+        action="store_true",
+        dest="gist_public",
+        help="Make the Gist public (default: secret/private)",
+    )
+    parser.add_argument(
+        "--gist-description",
+        type=str,
+        default="",
+        metavar="DESC",
+        help="Custom Gist description (default: auto-generated)",
+    )
+    parser.add_argument(
         "--project-dir",
         default=None,
         metavar="DIR",
@@ -380,6 +479,16 @@ def main() -> None:
 
     if args.status:
         _show_status(args.branch, project_dir)
+        return
+
+    # --gist: export config snapshot to GitHub Gist instead of a git branch
+    if getattr(args, "gist", False):
+        _export_to_gist(
+            project_dir=project_dir,
+            public=getattr(args, "gist_public", False),
+            description=getattr(args, "gist_description", "") or "",
+            dry_run=args.dry_run,
+        )
         return
 
     if not _is_git_repo(project_dir):

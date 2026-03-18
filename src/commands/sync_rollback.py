@@ -247,6 +247,78 @@ def _restore_backup(backup_dir: Path, project_dir: Path, target: str) -> bool:
         return False
 
 
+def _find_last_known_good_backup(target: str, project_dir: Path) -> Path | None:
+    """Find the backup from the most recent sync where all targets were healthy.
+
+    Queries the audit log for "sync" events and walks backwards from newest to
+    oldest to find the last event that had no failures.  Then selects the backup
+    directory whose mtime is closest to (and not after) that event's timestamp.
+
+    Falls back to the second-most-recent backup if the audit log is empty or
+    contains no clean sync events — giving the user one step back from the
+    current (possibly broken) state.
+
+    Args:
+        target: Target harness to roll back.
+        project_dir: Project root (used to locate the audit log).
+
+    Returns:
+        Best-candidate backup Path, or None if no backups exist.
+    """
+    backups = _list_backups_for_target(target)
+    if not backups:
+        return None
+
+    # Try to find the last clean-state timestamp from the audit log
+    clean_ts: float | None = None
+    try:
+        from src.audit_log import AuditLog
+        audit = AuditLog(project_dir=project_dir)
+        # Walk entries newest-first looking for a sync with no failures
+        for entry in reversed(audit.tail(500)):
+            if entry.event != "sync":
+                continue
+            # An entry is "clean" if it has no "failed" marker in extra
+            failed = entry.extra.get("failed", 0) if isinstance(entry.extra, dict) else 0
+            if int(failed) == 0:
+                # Parse timestamp to float for comparison with backup mtimes
+                try:
+                    from datetime import datetime as _dt, timezone as _tz
+                    ts_str = entry.timestamp.rstrip("Z")
+                    ts_dt = _dt.fromisoformat(ts_str).replace(tzinfo=_tz.utc)
+                    clean_ts = ts_dt.timestamp()
+                    break
+                except (ValueError, AttributeError):
+                    continue
+    except Exception:
+        pass  # Audit log unavailable — fall through to fallback
+
+    if clean_ts is not None:
+        # Find the most recent backup at or before the clean sync timestamp
+        for backup_dir in backups:
+            try:
+                mtime = backup_dir.stat().st_mtime
+            except OSError:
+                continue
+            if mtime <= clean_ts + 60:  # +60s tolerance for clock skew
+                dt = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+                print(f"Last-known-good sync was at {dt} (audit log reference)")
+                print(f"Selected backup: {backup_dir.name}")
+                return backup_dir
+
+    # Fallback: second-most-recent backup (step back from current)
+    if len(backups) >= 2:
+        fallback = backups[1]
+        dt = datetime.datetime.fromtimestamp(fallback.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        print(f"No clean-state event found in audit log — using second-most-recent backup ({dt})")
+        print(f"Selected backup: {fallback.name}")
+        return fallback
+
+    # Only one backup — return it
+    print(f"Only one backup available — using: {backups[0].name}")
+    return backups[0]
+
+
 def main() -> None:
     """Entry point for /sync-rollback command."""
     args_string = " ".join(sys.argv[1:])
@@ -330,6 +402,19 @@ def main() -> None:
             "Requires --target.  Example: --target codex --steps 3"
         ),
     )
+    parser.add_argument(
+        "--last-known-good",
+        action="store_true",
+        default=False,
+        dest="last_known_good",
+        help=(
+            "Find and restore the most recent sync checkpoint where ALL active "
+            "targets had status='success' (no failures or partial syncs). "
+            "More intelligent than --steps: it searches the audit log for the "
+            "last clean-state event instead of blindly undoing N operations. "
+            "Use --dry-run to preview which backup would be selected."
+        ),
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -337,6 +422,34 @@ def main() -> None:
         return
 
     project_dir = Path(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
+
+    # --last-known-good: find and restore the last clean-state backup
+    if getattr(args, "last_known_good", False):
+        if not args.target:
+            print("Error: --last-known-good requires --target.", file=sys.stderr)
+            sys.exit(1)
+        backup_dir = _find_last_known_good_backup(args.target, project_dir)
+        if backup_dir is None:
+            print(f"No backups found for target '{args.target}'.")
+            return
+        if args.dry_run or args.diff_preview:
+            dt = datetime.datetime.fromtimestamp(backup_dir.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            print(f"\nDiff preview: {args.target} → last-known-good backup {backup_dir.name} ({dt})")
+            print("=" * 70)
+            diff = _diff_preview(backup_dir, project_dir)
+            if diff:
+                print(diff)
+            else:
+                print("  (no differences — target files already match backup)")
+            print("\nDry run — no files modified.")
+            return
+        success = _restore_backup(backup_dir, project_dir, args.target)
+        if success:
+            dt = datetime.datetime.fromtimestamp(backup_dir.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            print(f"Rollback complete. {args.target} restored to last-known-good state ({dt})")
+        else:
+            sys.exit(1)
+        return
 
     # --steps N: undo the last N operations via HarnessUndoStack
     if args.steps is not None:
