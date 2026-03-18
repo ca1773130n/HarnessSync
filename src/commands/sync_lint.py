@@ -13,6 +13,8 @@ Flags:
   --format text|json         Output format (--ci implies json)
   --dead                     Detect dead/orphaned config items (unused rules, skills, etc.)
   --dead-days N              Staleness threshold for --dead (default: 30 days)
+  --quality                  Run semantic quality analysis: vague instructions, contradictions,
+                             security risks, duplicate rules, overly-broad permissions
 """
 
 import json

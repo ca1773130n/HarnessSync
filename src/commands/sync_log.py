@@ -84,6 +84,24 @@ def main() -> None:
         action="store_true",
         help="Render a visual ASCII bar chart showing sync event density by day",
     )
+    parser.add_argument(
+        "--search",
+        type=str,
+        default=None,
+        metavar="QUERY",
+        help="Search the tamper-evident audit log for entries matching QUERY "
+             "(searches event, targets, and file fields)",
+    )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Verify tamper-evident audit log chain integrity and report any violations",
+    )
+    parser.add_argument(
+        "--audit",
+        action="store_true",
+        help="Show raw entries from the JSONL audit log (more detailed than changelog)",
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -92,6 +110,70 @@ def main() -> None:
 
     project_dir = Path(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
     changelog = ChangelogManager(project_dir)
+
+    # --- Audit log search / verify (item 17 — Searchable Sync Audit Log) ---
+    if getattr(args, "search", None) or getattr(args, "verify", False) or getattr(args, "audit", False):
+        try:
+            from src.audit_log import AuditLog
+            audit = AuditLog(project_dir=project_dir)
+
+            if getattr(args, "verify", False):
+                report = audit.verify()
+                if report.ok:
+                    print(f"Audit log OK — {report.entries_checked} entries verified, chain intact.")
+                else:
+                    print(f"[WARN] Audit log violation at entry {report.first_violation}:")
+                    print(f"  {report.message}")
+                return
+
+            if getattr(args, "search", None):
+                query = args.search.lower()
+                entries = audit.tail(500)  # Search last 500 entries
+                matches = [
+                    e for e in entries
+                    if (
+                        query in (e.event or "").lower()
+                        or any(query in t.lower() for t in (e.targets or []))
+                        or any(query in f.lower() for f in (e.files_changed or []))
+                        or query in (e.user or "").lower()
+                    )
+                ]
+                if not matches:
+                    print(f"No audit log entries matching '{args.search}'.")
+                    return
+                print(f"Audit Log Search: '{args.search}' — {len(matches)} result(s)")
+                print("=" * 60)
+                for e in matches[-50:]:  # Show at most 50 results
+                    targets_str = ", ".join(e.targets or [])
+                    files_str = ", ".join((e.files_changed or [])[:3])
+                    if len(e.files_changed or []) > 3:
+                        files_str += f" (+{len(e.files_changed) - 3} more)"
+                    print(f"  {e.timestamp}  [{e.event}]  targets={targets_str or '-'}")
+                    if files_str:
+                        print(f"    files: {files_str}")
+                return
+
+            if getattr(args, "audit", False):
+                limit = args.tail or 20
+                entries = audit.tail(limit)
+                if not entries:
+                    print("Audit log is empty. Run /sync to record the first entry.")
+                    return
+                print(f"HarnessSync Audit Log ({len(entries)} entries)")
+                print("=" * 60)
+                for e in entries:
+                    targets_str = ", ".join(e.targets or [])
+                    files_str = ", ".join((e.files_changed or [])[:3])
+                    extra = f" (+{len(e.files_changed) - 3} more)" if len(e.files_changed or []) > 3 else ""
+                    print(f"  {e.timestamp}  [{e.event}]  {targets_str or '—'}")
+                    if files_str:
+                        print(f"    files: {files_str}{extra}")
+                return
+
+        except ImportError:
+            print("[warn] Audit log module not available — showing changelog instead.")
+        except Exception as e:
+            print(f"[warn] Audit log error: {e} — showing changelog instead.")
 
     # Handle export modes before other actions
     if getattr(args, "export_json", None):

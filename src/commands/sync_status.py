@@ -553,6 +553,17 @@ def _show_default_status():
     except Exception:
         pass  # Non-critical; health scores are informational only
 
+    # Item 23 — Harness health score dashboard (0-100 per target with badge)
+    try:
+        from src.harness_health_score import HarnessHealthScorer
+        _hs = HarnessHealthScorer(project_dir=project_dir)
+        _health_scores_new = _hs.score_all(targets=list(registered))
+        if _health_scores_new:
+            print()
+            print(_hs.format_dashboard(_health_scores_new))
+    except Exception:
+        pass  # Non-critical; health score dashboard is informational only
+
     # Item 8 — Harness parity scores (0-100 per target, inline with status)
     try:
         from src.commands.sync_parity import _SUPPORT_MATRIX, _score as _parity_score

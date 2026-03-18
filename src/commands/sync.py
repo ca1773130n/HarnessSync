@@ -443,6 +443,27 @@ def main():
             )
             source_data = source_reader.discover_all()
 
+            # --- PRE-SYNC IMPACT SUMMARY (item 11) ---
+            # Show a plain-English one-liner before sync so the user knows what's coming.
+            try:
+                from src.pre_sync_summary import PreSyncSummary
+                import json as _pss_json
+                _snapshot_path = project_dir / ".harnesssync-last-source.json"
+                _prev_source: dict = {}
+                if _snapshot_path.exists():
+                    try:
+                        _prev_source = _pss_json.loads(
+                            _snapshot_path.read_text(encoding="utf-8")
+                        )
+                    except Exception:
+                        pass
+                _pss = PreSyncSummary()
+                _summary_line = _pss.one_liner(source_data, _prev_source)
+                if _summary_line and "up to date" not in _summary_line:
+                    print(f"[preview] {_summary_line}")
+            except Exception:
+                pass  # Non-blocking: summary failure must not prevent sync
+
             # --- PRE-SYNC: INTERACTIVE CONFLICT RESOLUTION ---
             if not args.dry_run and not args.no_interactive:
                 import sys
