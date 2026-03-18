@@ -180,6 +180,15 @@ def main():
         help="Only sync targets where source files changed since last sync (delta sync)"
     )
     parser.add_argument(
+        "--minimal",
+        action="store_true",
+        help=(
+            "Minimal Footprint Mode: sync only rules and essential MCP servers to each target. "
+            "Skills, agents, commands, and non-essential MCP servers are skipped. "
+            "Mark a server as essential with '\"essential\": true' in .mcp.json."
+        ),
+    )
+    parser.add_argument(
         "--watch",
         action="store_true",
         help="Watch for config file changes and sync automatically (Ctrl+C to stop)"
@@ -303,6 +312,24 @@ def main():
         action="store_true",
         dest="disable_global_dry_run",
         help="Disable persistent global dry-run mode, restoring normal sync behavior.",
+    )
+    parser.add_argument(
+        "--dotfiles-path",
+        type=str,
+        default=None,
+        metavar="PATH",
+        dest="dotfiles_path",
+        help=(
+            "After a successful sync, auto-commit changed harness configs to this "
+            "dotfiles git repository. Enables free backup, history, and multi-machine "
+            "propagation for users who version their dotfiles."
+        ),
+    )
+    parser.add_argument(
+        "--dotfiles-push",
+        action="store_true",
+        dest="dotfiles_push",
+        help="With --dotfiles-path: push to remote after committing.",
     )
 
     try:
@@ -609,6 +636,7 @@ def main():
                     cli_skip_targets=cli_skip_targets,
                     harness_env=harness_env,
                     cli_per_target_only=cli_per_target_only if cli_per_target_only else None,
+                    minimal=getattr(args, 'minimal', False),
                 )
                 results = orchestrator.sync_all()
                 elapsed = time.time() - start_time
@@ -630,6 +658,7 @@ def main():
                     cli_skip_targets=cli_skip_targets,
                     harness_env=harness_env,
                     cli_per_target_only=cli_per_target_only if cli_per_target_only else None,
+                    minimal=getattr(args, 'minimal', False),
                 )
 
                 # Check for multi-account setup
@@ -802,6 +831,33 @@ def _display_results(results: dict, args, elapsed: float = None, account: str = 
             notify_from_results(results)
         except Exception:
             pass  # Desktop notifications are always best-effort
+
+        # --- DOTFILES AUTO-COMMIT (item 3) ---
+        # After a successful sync, stage and commit changed harness configs
+        # into the user's dotfiles git repository (if --dotfiles-path is set).
+        dotfiles_path = getattr(args, "dotfiles_path", None)
+        if dotfiles_path and not getattr(args, "dry_run", False) and not results.get("_blocked"):
+            try:
+                from src.dotfile_integration import DotfilesAutoCommitter
+                committer = DotfilesAutoCommitter(
+                    dotfiles_repo=Path(dotfiles_path),
+                    project_dir=project_dir or Path(os.getcwd()),
+                    push_after_commit=getattr(args, "dotfiles_push", False),
+                )
+                if committer.is_available():
+                    changed_targets = [
+                        t for t in results
+                        if not t.startswith("_") and isinstance(results[t], dict)
+                    ]
+                    commit_result = committer.commit(changed_targets=changed_targets)
+                    print(commit_result.format())
+                else:
+                    print(
+                        f"[dotfiles] {dotfiles_path!r} is not a git repository "
+                        "or git is not on PATH — skipping auto-commit"
+                    )
+            except Exception as _df_err:
+                print(f"[dotfiles] auto-commit failed: {_df_err}", file=sys.stderr)
 
 
 def _run_monorepo_sync(project_dir: Path, args) -> None:

@@ -501,6 +501,173 @@ _register(
 )
 
 
+# Pre-commit / commit hygiene
+_register(
+    r"pre.commit|before.commit|commit.hook|run.tests.before|lint.before.commit",
+    BehaviorRule(
+        category="git-workflow",
+        title="Pre-Commit Checks Required",
+        rule_text=(
+            "- Always run tests and lint before committing.\n"
+            "- Never bypass pre-commit hooks with `--no-verify`.\n"
+            "- Fix all failures before the commit proceeds — do not stage broken code."
+        ),
+        harness_notes={
+            "codex": "Codex honors this via AGENTS.md; also configure in .pre-commit-config.yaml",
+            "aider": "Set `auto_lint=true` in .aider.conf.yml to enforce automatically",
+        },
+        confidence="high",
+    ),
+)
+
+# Migration files — never modify
+_register(
+    r"migrat|never.modify.migrat|do.not.edit.migrat|alembic|flyway|liquibase",
+    BehaviorRule(
+        category="database",
+        title="Migration Files Are Immutable",
+        rule_text=(
+            "- Never modify existing migration files — they are append-only.\n"
+            "- To fix a migration, create a new migration that reverses or amends the change.\n"
+            "- Do not squash, rename, or reorder migration files.\n"
+            "- Always run migrations in the order they were created."
+        ),
+        confidence="high",
+    ),
+)
+
+# TypeScript strict mode
+_register(
+    r"typescript.strict|ts.strict|strict.mode|noImplicit|tsconfig.strict",
+    BehaviorRule(
+        category="typescript",
+        title="TypeScript Strict Mode Enforcement",
+        rule_text=(
+            "- Always use TypeScript with `strict: true` in tsconfig.json.\n"
+            "- Never use `any` as a type — use `unknown` and narrow explicitly.\n"
+            "- All function parameters and return types must be explicitly typed.\n"
+            "- Do not suppress type errors with `@ts-ignore` without a comment explaining why."
+        ),
+        harness_notes={
+            "gemini": "Gemini CLI: add ESLint strict rules to reinforce at lint time",
+        },
+        confidence="high",
+    ),
+)
+
+# Dependency injection / avoid singletons
+_register(
+    r"dependency.inject|avoid.singleton|no.global.state|DI.container|inject.depend",
+    BehaviorRule(
+        category="architecture",
+        title="Dependency Injection Over Singletons",
+        rule_text=(
+            "- Pass dependencies explicitly via constructor or function parameters.\n"
+            "- Avoid module-level singletons and global mutable state.\n"
+            "- Use dependency injection containers only when the project already does so.\n"
+            "- Side effects (network, filesystem, time) must be injectable for testability."
+        ),
+        confidence="high",
+    ),
+)
+
+# Env var / config management
+_register(
+    r"env.var|environment.variable|dotenv|config.from.env|never.hardcode.config",
+    BehaviorRule(
+        category="configuration",
+        title="Configuration Via Environment Variables",
+        rule_text=(
+            "- Never hardcode configuration values (URLs, ports, credentials) in source code.\n"
+            "- Read all config from environment variables or a designated config file.\n"
+            "- Validate required env vars at startup and fail fast with a clear error.\n"
+            "- Document every env var in README or .env.example."
+        ),
+        confidence="high",
+    ),
+)
+
+# No silent failures / bare except
+_register(
+    r"silent.fail|don.t.swallow|catch.and.ignore|bare.except|no.empty.catch",
+    BehaviorRule(
+        category="error-handling",
+        title="No Silent Failures",
+        rule_text=(
+            "- Never catch an exception without at least logging it.\n"
+            "- Avoid bare `except: pass` blocks — handle or re-raise.\n"
+            "- Log the full stack trace for unexpected exceptions.\n"
+            "- Use structured logging with `exc_info=True` for exception context."
+        ),
+        confidence="high",
+    ),
+)
+
+# Small, focused PRs
+_register(
+    r"small.pr|small.pull.request|pr.size|atomic.commit|one.thing.per.pr",
+    BehaviorRule(
+        category="git-workflow",
+        title="Small, Focused Pull Requests",
+        rule_text=(
+            "- Keep pull requests focused on a single concern — one bug fix or one feature.\n"
+            "- Target < 400 lines changed per PR; split larger changes into a PR series.\n"
+            "- Write a clear PR description explaining what changed and why.\n"
+            "- Include test coverage for every behaviour change."
+        ),
+        confidence="medium",
+    ),
+)
+
+# Feature flags
+_register(
+    r"feature.flag|feature.toggle|dark.launch|gradual.rollout|killswitch",
+    BehaviorRule(
+        category="deployment",
+        title="Feature Flags for New Features",
+        rule_text=(
+            "- Gate new features behind feature flags before shipping to production.\n"
+            "- Feature flags must default to `false` (off) until explicitly enabled.\n"
+            "- Remove flag and cleanup code within one sprint of full rollout.\n"
+            "- Document which flags are active and their owners."
+        ),
+        confidence="medium",
+    ),
+)
+
+# Prefer explicit over implicit
+_register(
+    r"explicit.over.implicit|be.explicit|avoid.magic|no.magic.import|no.implicit",
+    BehaviorRule(
+        category="code-clarity",
+        title="Prefer Explicit Over Implicit",
+        rule_text=(
+            "- Prefer explicit imports over wildcard imports (`from x import *`).\n"
+            "- Avoid implicit type coercion — always convert types explicitly.\n"
+            "- Avoid 'magic' values — define named constants for all literal numbers and strings.\n"
+            "- Code should be readable without needing to trace implicit framework behaviour."
+        ),
+        confidence="medium",
+    ),
+)
+
+# Performance: avoid N+1 queries
+_register(
+    r"n\+1|n.plus.1|avoid.n.plus|eager.load|select.related|prefetch",
+    BehaviorRule(
+        category="performance",
+        title="Avoid N+1 Query Patterns",
+        rule_text=(
+            "- Never query inside a loop — batch lookups with `IN` clauses or eager loading.\n"
+            "- Use `SELECT RELATED` / `PREFETCH RELATED` (Django) or `include` (Rails/ActiveRecord).\n"
+            "- Add a query counter in tests to catch new N+1 regressions.\n"
+            "- Review the query log when adding new list endpoints."
+        ),
+        confidence="high",
+    ),
+)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Generator
 # ──────────────────────────────────────────────────────────────────────────────

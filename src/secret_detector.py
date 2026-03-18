@@ -193,12 +193,19 @@ class SecretDetector:
         """Initialize SecretDetector with Logger instance."""
         self.logger = Logger()
 
-    def scan(self, env_vars: dict[str, str]) -> list[dict]:
+    def scan(
+        self,
+        env_vars: dict[str, str],
+        source_file: str = "",
+    ) -> list[dict]:
         """
         Scan environment variables for potential secrets.
 
         Args:
             env_vars: Dict mapping var_name -> var_value
+            source_file: Optional label identifying where the env vars came from
+                         (e.g. ".mcp.json", "environment"). Included in each
+                         detection dict as ``source_file`` to aid audit logging.
 
         Returns:
             List of detection dicts with keys:
@@ -206,6 +213,7 @@ class SecretDetector:
                 - keywords_matched: List of matched keywords
                 - confidence: 'medium' (regex+keyword approach)
                 - reason: Human-readable detection reason
+                - source_file: Origin label (empty string if not provided)
 
             Empty list if no secrets detected.
         """
@@ -230,6 +238,7 @@ class SecretDetector:
                         "var_name": var_name,
                         "keywords_matched": [],
                         "confidence": "low",
+                        "source_file": source_file,
                         "reason": (
                             f"High-entropy value detected (Shannon entropy "
                             f"{shannon_entropy(var_value):.2f} bits/char >= {ENTROPY_THRESHOLD})"
@@ -251,6 +260,7 @@ class SecretDetector:
                 "var_name": var_name,
                 "keywords_matched": matched_keywords,
                 "confidence": confidence,
+                "source_file": source_file,
                 "reason": (
                     f"Contains keywords: {', '.join(matched_keywords)}"
                     + (f"; high entropy ({entropy:.2f} bits/char)" if confidence == "high" else "")
@@ -618,30 +628,77 @@ class SecretDetector:
         return True
 
     def format_warnings(self, detections: list[dict]) -> str:
-        """
-        Format secret detection warnings for user output.
+        """Format secret detection warnings for user output.
+
+        Each warning includes:
+        - The variable or keyword name (never the value)
+        - The source file and line number (when available in detection)
+        - The matched pattern or reason for flagging
+        - A concrete fix suggestion: use an env var reference instead
 
         CRITICAL: Never includes actual secret values in output.
 
         Args:
-            detections: List of detection dicts from scan()
+            detections: List of detection dicts from scan() or scan_content().
 
         Returns:
-            Formatted warning string with variable names (values masked)
+            Formatted warning string with file/line context and fix suggestions.
         """
         if not detections:
             return ""
 
         lines = []
-        lines.append(f"\n⚠ Detected {len(detections)} potential secret(s) in environment variables:")
+        lines.append(
+            f"\n⚠ Detected {len(detections)} potential secret(s) in config files "
+            "or environment variables:"
+        )
 
         for detection in detections:
-            var_name = detection["var_name"]
-            reason = detection["reason"]
-            lines.append(f"  · {var_name} — {reason}")
+            var_name = detection.get("var_name", "<unknown>")
+            reason = detection.get("reason", "")
+            source_file = detection.get("source_file") or detection.get("source", "")
+            confidence = detection.get("confidence", "")
+
+            # Build location hint: "in FILE" or "in FILE (line N)" when available
+            loc = ""
+            if source_file:
+                loc = f"  [in {source_file}]"
+            # Extract line number from reason text if present (e.g. "on line 12")
+            _line_m = __import__("re").search(r"\bon line (\d+)\b", reason)
+            if _line_m and source_file:
+                loc = f"  [in {source_file}:{_line_m.group(1)}]"
+            elif _line_m:
+                loc = f"  [line {_line_m.group(1)}]"
+
+            # Confidence label
+            conf_label = f" ({confidence} confidence)" if confidence else ""
+
+            # Fix suggestion: derive env var name from the keyword/var name
+            _env_var = (
+                __import__("re")
+                .sub(r"[^A-Za-z0-9]+", "_", var_name)
+                .upper()
+                .strip("_")
+            )
+            # Normalise common suffixes for cleaner suggestion
+            for _sfx in ("_VALUE", "_VAL"):
+                if _env_var.endswith(_sfx):
+                    _env_var = _env_var[: -len(_sfx)]
+            if not _env_var or _env_var.startswith("<"):
+                _env_var = "SECRET_VALUE"
+            fix_hint = f"Fix: use ${{{_env_var}}} instead of an inline value."
+
+            lines.append(f"  · {var_name}{loc}{conf_label}")
+            lines.append(f"    Reason: {reason}")
+            lines.append(f"    {fix_hint}")
 
         lines.append("\nSecrets should not be synced to target configs.")
-        lines.append("Use --allow-secrets to override this warning (NOT recommended).")
+        lines.append(
+            "Options:\n"
+            "  1. Replace inline secrets with env var references (e.g. ${MY_API_KEY})\n"
+            "  2. Use --scrub-secrets to auto-redact and continue sync\n"
+            "  3. Use --allow-secrets to skip this check entirely (not recommended)"
+        )
 
         return "\n".join(lines)
 
@@ -709,6 +766,80 @@ class SecretDetector:
             scrubbed_lines.append(new_line)
 
         return "".join(scrubbed_lines), descriptions
+
+    def scrub_content_with_env_refs(
+        self,
+        content: str,
+    ) -> tuple[str, list[tuple[str, str]]]:
+        """Replace inline secret values with ``${ENV_VAR_NAME}`` shell references.
+
+        Unlike ``scrub_content()`` which uses ``[REDACTED]``, this method replaces
+        each detected secret value with an environment variable reference derived
+        from the key name (e.g. ``api_key: sk-abc123`` → ``api_key: ${API_KEY}``).
+        This produces configs that work when the env var is set, rather than
+        configs that are simply broken.
+
+        CRITICAL: Never logs or displays actual secret values.
+
+        Args:
+            content: Raw text to scrub (e.g. CLAUDE.md or settings.json content).
+
+        Returns:
+            Tuple of (scrubbed_content, replacements) where:
+              - scrubbed_content: Content with secret values replaced by env refs.
+              - replacements: List of (keyword, suggested_env_var_name) tuples,
+                             one per substitution, so the caller can document
+                             which env vars need to be set.
+        """
+        import re as _re
+
+        scrubbed_lines: list[str] = []
+        replacements: list[tuple[str, str]] = []
+
+        def _env_var_name(keyword: str) -> str:
+            """Derive an ENV_VAR_NAME from a keyword like 'api_key' or 'OPENAI_TOKEN'."""
+            # Normalise to upper-case underscored form
+            name = _re.sub(r"[^A-Za-z0-9]+", "_", keyword).upper().strip("_")
+            # Strip common suffixes that are already implied
+            for suffix in ("_VALUE", "_VAL", "_SECRET_VALUE"):
+                if name.endswith(suffix):
+                    name = name[: -len(suffix)]
+            return name or "SECRET"
+
+        for line_num, line in enumerate(content.splitlines(keepends=True), start=1):
+            new_line = line
+
+            # Keyword=value pattern
+            for m in _INLINE_SECRET_RE.finditer(line):
+                matched = m.group(0)
+                sep_pos = -1
+                for sep in (":", "="):
+                    idx = matched.find(sep)
+                    if idx != -1 and (sep_pos == -1 or idx < sep_pos):
+                        sep_pos = idx
+                if sep_pos != -1:
+                    keyword = matched[:sep_pos].strip()
+                    env_var = _env_var_name(keyword)
+                    key_part = matched[: sep_pos + 1]
+                    new_line = new_line.replace(matched, f"{key_part} ${{{env_var}}}", 1)
+                    replacements.append((keyword, env_var))
+
+            # Entropy-based replacement for standalone high-entropy tokens
+            if new_line == line:  # Only if keyword scan didn't already replace
+                for word in line.split():
+                    clean = word.strip("\"',;()")
+                    if len(clean) >= ENTROPY_MIN_LENGTH and is_high_entropy_secret(clean):
+                        has_upper = any(c.isupper() for c in clean)
+                        has_digit = any(c.isdigit() for c in clean)
+                        if has_upper and has_digit:
+                            env_var = "SECRET_TOKEN"
+                            new_line = new_line.replace(clean, f"${{{env_var}}}", 1)
+                            replacements.append((f"<token on line {line_num}>", env_var))
+                            break
+
+            scrubbed_lines.append(new_line)
+
+        return "".join(scrubbed_lines), replacements
 
     def scrub_rules_content(self, rules: list[dict]) -> tuple[list[dict], list[str]]:
         """Scrub inline secrets from a list of rule dicts returned by SourceReader.
@@ -850,7 +981,7 @@ def pre_sync_secret_scan(
 
         hits = detector.scan_content(content, source_label=path.name)
         if hits:
-            all_detections.extend(d.description for d in hits)
+            all_detections.extend(d["reason"] for d in hits)
             if redact:
                 scrubbed, _ = detector.scrub_content(content)
                 redacted_map[path_str] = scrubbed

@@ -143,6 +143,36 @@ def _gather_status(project_dir: Path) -> dict:
     except Exception as e:
         status["errors"].append(f"McpReachability: {e}")
 
+    # --- Capability matrix ---
+    try:
+        from src.capability_matrix import build_matrix, STATUS_FULL, STATUS_APPROX, STATUS_NONE
+        from src.source_reader import SourceReader
+        try:
+            reader  # reuse if already defined above
+        except NameError:
+            reader = SourceReader(project_dir=project_dir)
+        try:
+            source_data  # reuse if already defined above
+        except NameError:
+            source_data = reader.discover_all()
+        matrix = build_matrix(source_data, project_dir=project_dir)
+        status["capability_matrix"] = {
+            "targets": matrix.targets,
+            "rows": [
+                {
+                    "category": row.category,
+                    "item_name": row.item_name,
+                    "cells": {
+                        t: {"status": cell.status, "note": cell.note}
+                        for t, cell in row.cells.items()
+                    },
+                }
+                for row in matrix.rows
+            ],
+        }
+    except Exception as e:
+        status["errors"].append(f"CapabilityMatrix: {e}")
+
     return status
 
 
@@ -155,7 +185,50 @@ def _render_html(status: dict, refresh_seconds: int) -> str:
     project_dir = status.get("project_dir", "")
     errors = status.get("errors", [])
 
+    capability_matrix_data = status.get("capability_matrix", {})
     drift_targets: set[str] = {d["target"] for d in drift}
+
+    def _capability_matrix_section() -> str:
+        """Render the capability matrix as an HTML table section."""
+        if not capability_matrix_data or not capability_matrix_data.get("rows"):
+            return ""
+        cap_targets = capability_matrix_data.get("targets", [])
+        rows = capability_matrix_data.get("rows", [])
+        _STATUS_SYMBOL = {"full": "✓", "approx": "~", "none": "✗"}
+        _STATUS_CLASS = {"full": "cap-full", "approx": "cap-approx", "none": "cap-none"}
+        header_cols = "".join(f"<th>{t}</th>" for t in cap_targets)
+        html_rows = []
+        current_cat = None
+        for row in rows:
+            if row["category"] != current_cat:
+                current_cat = row["category"]
+                span = len(cap_targets) + 1
+                html_rows.append(
+                    f'<tr class="cat-header"><td colspan="{span}">'
+                    f'[{current_cat.upper()}]</td></tr>'
+                )
+            cells = "".join(
+                f'<td class="{_STATUS_CLASS.get(row["cells"].get(t, {}).get("status", "none"), "cap-none")}"'
+                f' title="{row["cells"].get(t, {}).get("note", "")}">'
+                f'{_STATUS_SYMBOL.get(row["cells"].get(t, {}).get("status", "none"), "✗")}'
+                f'</td>'
+                for t in cap_targets
+            )
+            html_rows.append(
+                f"<tr><td class='item-name'>{row['item_name']}</td>{cells}</tr>"
+            )
+        table_html = "\n".join(html_rows)
+        return f"""
+<h2>Capability Matrix</h2>
+<p style="color:var(--muted);font-size:0.8rem;margin-bottom:0.5rem">
+  ✓ Full &nbsp; ~ Approximate &nbsp; ✗ Not supported — hover cells for details
+</p>
+<div style="overflow-x:auto">
+<table class="cap-table">
+<thead><tr><th>Config Item</th>{header_cols}</tr></thead>
+<tbody>{table_html}</tbody>
+</table>
+</div>"""
 
     def _target_rows() -> str:
         rows = []
@@ -260,6 +333,12 @@ def _render_html(status: dict, refresh_seconds: int) -> str:
   .error-box {{ background: #2d1515; border: 1px solid var(--fail); border-radius: 4px; padding: 0.75rem; margin-bottom: 1rem; font-size: 0.85rem; }}
   .error-row {{ color: var(--muted); font-size: 0.8rem; }}
   .refresh-note {{ color: var(--muted); font-size: 0.75rem; margin-top: 1.5rem; }}
+  .cap-table td, .cap-table th {{ text-align: center; padding: 0.45rem 0.6rem; }}
+  .cap-table td.item-name {{ text-align: left; font-size: 0.83rem; }}
+  .cap-table tr.cat-header td {{ text-align: left; background: #1c2230; color: var(--accent); font-size: 0.78rem; font-weight: 600; padding: 0.3rem 0.75rem; }}
+  .cap-full {{ color: var(--ok); font-weight: 700; }}
+  .cap-approx {{ color: var(--warn); font-weight: 700; }}
+  .cap-none {{ color: var(--muted); }}
 </style>
 </head>
 <body>
@@ -289,6 +368,8 @@ def _render_html(status: dict, refresh_seconds: int) -> str:
 <thead><tr><th>Harness</th><th>File</th><th>Type</th></tr></thead>
 <tbody>{_drift_rows()}</tbody>
 </table>
+
+{_capability_matrix_section()}
 
 <p class="refresh-note">Auto-refresh every {refresh_seconds} seconds &nbsp;·&nbsp;
 <a href="/" style="color:var(--accent)">Refresh now</a></p>

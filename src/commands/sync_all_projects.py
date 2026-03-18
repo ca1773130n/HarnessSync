@@ -200,6 +200,140 @@ def sync_all_projects(
     return results, summary
 
 
+@dataclass
+class ProjectStatusInfo:
+    """Status snapshot for a single project (no sync performed)."""
+
+    project_path: str
+    last_sync: str | None = None
+    drift_count: int = 0
+    health_scores: dict[str, int] = field(default_factory=dict)
+    error: str | None = None
+
+
+def _status_only_projects(
+    cc_home: Path | None = None,
+    filter_glob: str | None = None,
+    exclude_glob: str | None = None,
+) -> tuple[list[ProjectStatusInfo], str]:
+    """Collect sync status across all projects without running a sync.
+
+    Reads state, drift, and health score data for each discovered project
+    and returns a human-readable overview — useful for spotting which projects
+    have gone stale without touching anything.
+
+    Args:
+        cc_home: Claude Code config home directory.
+        filter_glob: Only include projects matching this glob.
+        exclude_glob: Skip projects matching this glob.
+
+    Returns:
+        Tuple of (list of ProjectStatusInfo, formatted summary string).
+    """
+    cc_home = cc_home or Path.home() / ".claude"
+    projects = _discover_projects(cc_home)
+
+    if filter_glob:
+        projects = [p for p in projects if _matches_glob(p, filter_glob)]
+    if exclude_glob:
+        projects = [p for p in projects if not _matches_glob(p, exclude_glob)]
+
+    if not projects:
+        return [], "No Claude Code projects found matching criteria."
+
+    infos: list[ProjectStatusInfo] = []
+    for project_path in projects:
+        info = ProjectStatusInfo(project_path=str(project_path))
+        try:
+            from src.state_manager import StateManager
+            sm = StateManager(project_dir=project_path)
+            all_status = sm.get_all_status()
+            # Collect most recent last_sync across all targets
+            last_syncs = [
+                v.get("last_sync") for v in all_status.values()
+                if isinstance(v, dict) and v.get("last_sync")
+            ]
+            if last_syncs:
+                info.last_sync = max(last_syncs)
+            # Collect health scores
+            for target, t_status in all_status.items():
+                score = t_status.get("health_score")
+                if score is not None:
+                    info.health_scores[target] = score
+        except Exception as exc:
+            info.error = str(exc)
+
+        try:
+            from src.conflict_detector import ConflictDetector
+            cd = ConflictDetector(project_dir=project_path)
+            drift_info = cd.detect_all_drift()
+            if isinstance(drift_info, list):
+                info.drift_count = len(drift_info)
+            elif isinstance(drift_info, dict):
+                info.drift_count = sum(len(v) for v in drift_info.values() if isinstance(v, list))
+        except Exception:
+            pass  # drift check is best-effort
+
+        infos.append(info)
+
+    infos.sort(key=lambda i: i.project_path)
+    summary = _format_status_overview(infos)
+    return infos, summary
+
+
+def _format_status_overview(infos: list[ProjectStatusInfo]) -> str:
+    """Format multi-project status as a read-only overview table."""
+    lines = [
+        "HarnessSync — All Projects Status",
+        "=" * 72,
+        f"{'Project':<35} {'Last Sync':<20} {'Drift':>5} {'Health':>8}",
+        "-" * 72,
+    ]
+
+    stale_count = 0
+    drifted_count = 0
+
+    for info in infos:
+        label = Path(info.project_path).name
+        if len(label) > 33:
+            label = "..." + label[-30:]
+
+        # Format last_sync timestamp
+        if info.last_sync:
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(info.last_sync)
+                last_sync_str = dt.strftime("%Y-%m-%d %H:%M")
+            except (ValueError, TypeError):
+                last_sync_str = info.last_sync[:19] if info.last_sync else "—"
+        else:
+            last_sync_str = "never"
+            stale_count += 1
+
+        drift_str = f"{info.drift_count} file(s)" if info.drift_count else "none"
+        if info.drift_count:
+            drifted_count += 1
+
+        if info.health_scores:
+            avg_health = round(sum(info.health_scores.values()) / len(info.health_scores))
+            health_str = f"{avg_health}/100"
+        else:
+            health_str = "—"
+
+        if info.error:
+            lines.append(f"{label:<35} ERROR: {info.error[:30]}")
+        else:
+            lines.append(f"{label:<35} {last_sync_str:<20} {drift_str:>5} {health_str:>8}")
+
+    lines.append("-" * 72)
+    lines.append(
+        f"  {len(infos)} projects | {stale_count} never synced | {drifted_count} with drift"
+    )
+    if drifted_count:
+        lines.append("  Run /sync-all-projects to propagate changes to all targets.")
+    return "\n".join(lines)
+
+
 def _format_summary(results: list[ProjectSyncResult], dry_run: bool = False) -> str:
     """Format multi-project sync results as a summary table.
 

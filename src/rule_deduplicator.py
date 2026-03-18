@@ -407,6 +407,28 @@ class RuleDeduplicator:
 
         return "\n".join(lines)
 
+    def detect_ordering_issues(self) -> list["OrderingSensitivityIssue"]:
+        """Detect rule pairs where ordering matters for correct model behaviour (item 16).
+
+        Collects all rule blocks from harness config files, then runs
+        ``detect_ordering_sensitivity()`` to find pairs where the general
+        rule must precede the specific exception — or currently doesn't.
+
+        Returns:
+            List of OrderingSensitivityIssue objects, wrong-order pairs first.
+        """
+        blocks = self._collect_blocks()
+        return detect_ordering_sensitivity(blocks)
+
+    def format_ordering_report(self) -> str:
+        """Return a formatted ordering-sensitivity report for this project.
+
+        Returns:
+            Human-readable multi-line string.
+        """
+        issues = self.detect_ordering_issues()
+        return format_ordering_report(issues)
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
@@ -574,3 +596,309 @@ def _similarity(a: str, b: str) -> float:
     if not a or not b:
         return 0.0
     return SequenceMatcher(None, a, b).ratio()
+
+
+# ---------------------------------------------------------------------------
+# Intelligent merge — item 10 (Rules Deduplication / Merge)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class MergeResult:
+    """Result of merging incoming rules into an existing target file.
+
+    Attributes:
+        merged_content: Final content of the target file after merge.
+        sections_added: Number of new sections appended.
+        sections_skipped: Number of sections already present (near-duplicates).
+        preserved_custom: Lines in the target that were NOT in the source —
+                          these are target-specific additions kept verbatim.
+    """
+
+    merged_content: str
+    sections_added: int
+    sections_skipped: int
+    preserved_custom: list[str]
+
+    def format_summary(self) -> str:
+        lines = [
+            f"Merge result: +{self.sections_added} added, "
+            f"{self.sections_skipped} skipped (already present), "
+            f"{len(self.preserved_custom)} custom target lines preserved.",
+        ]
+        if self.preserved_custom:
+            lines.append("  Preserved target-specific content:")
+            for line in self.preserved_custom[:5]:
+                lines.append(f"    {line[:80]}")
+            if len(self.preserved_custom) > 5:
+                lines.append(f"    … and {len(self.preserved_custom) - 5} more")
+        return "\n".join(lines)
+
+
+@dataclass
+class OrderingSensitivityIssue:
+    """A rule pair where the outcome depends on which rule comes first (item 16).
+
+    When rule A overrides or narrows rule B, they are order-sensitive: placing
+    the wrong one first can silently change the model's behavior without any
+    visible error. This is distinct from a direct contradiction (where both
+    rules cannot logically hold simultaneously).
+
+    Examples of order-sensitive pairs:
+    - "Always use single quotes" (A) + "Use double quotes for JSX" (B)
+      → B must come after A, otherwise A's blanket 'single quotes' wins.
+    - "Never add console.log" (A) + "Add debug logs during tests" (B)
+      → B must follow A to be honoured in test contexts.
+    """
+
+    rule_a: str          # Text of the first (earlier) rule
+    rule_b: str          # Text of the second (later) rule
+    file_a: str          # Source file path of rule A
+    file_b: str          # Source file path of rule B
+    explanation: str     # Why order matters here
+    suggested_order: str # "a_before_b" | "b_before_a" | "unclear"
+
+
+# Patterns for detecting order-sensitive rule pairs. Each tuple:
+#   (general_re, specific_re, suggested_order, explanation)
+# When the general pattern matches one block and the specific pattern matches
+# another, the specific rule should come after the general one.
+_ORDER_SENSITIVITY_PATTERNS: list[tuple[re.Pattern, re.Pattern, str, str]] = [
+    (
+        re.compile(r"\b(always|use|prefer)\b.{0,40}\b(single.quot|double.quot)", re.I),
+        re.compile(r"\b(except|for|in)\b.{0,40}\b(jsx|tsx|template|html)", re.I),
+        "general_before_specific",
+        "General quote style rule should precede the JSX/template exception.",
+    ),
+    (
+        re.compile(r"\b(never|avoid|don.t)\b.{0,40}\b(console\.log|print|debug)", re.I),
+        re.compile(r"\b(test|spec|debug)\b.{0,40}\b(log|print|output)", re.I),
+        "general_before_specific",
+        "The blanket 'no debug logging' rule must come before test-context exceptions.",
+    ),
+    (
+        re.compile(r"\b(never|do not|don.t)\b.{0,30}\b(modify|edit|change)\b.{0,30}\bmigration", re.I),
+        re.compile(r"\b(migration|schema)\b.{0,40}\b(fix|hotfix|emergency|except)", re.I),
+        "general_before_specific",
+        "The 'never modify migrations' rule must precede any emergency-exception clause.",
+    ),
+    (
+        re.compile(r"\b(always|use)\b.{0,30}\b(async|await|promise)", re.I),
+        re.compile(r"\b(sync|synchronous|blocking)\b.{0,30}\b(ok|allow|accept|permitted)", re.I),
+        "general_before_specific",
+        "Async-by-default rule should precede any sync-is-OK exception to avoid ambiguity.",
+    ),
+    (
+        re.compile(r"\b(prefer|use)\b.{0,30}\b(functional|immutable|pure)", re.I),
+        re.compile(r"\b(class|oop|object.orient|mutable)\b.{0,30}\b(ok|allow|acceptable|when)", re.I),
+        "general_before_specific",
+        "Functional-by-default must precede class/OOP exception to define priority.",
+    ),
+]
+
+
+def detect_ordering_sensitivity(
+    blocks: list["RuleBlock"],
+    *,
+    max_issues: int = 20,
+) -> list[OrderingSensitivityIssue]:
+    """Detect rule pairs where order matters for correct model behaviour (item 16).
+
+    Scans all block pairs for cases where a general rule and a specific
+    exception/override exist: the general rule must appear before the specific
+    one or the model may silently apply the wrong policy.
+
+    This is separate from ``RuleDeduplicator.detect_contradictions()``, which
+    finds outright logical conflicts. Ordering-sensitive pairs are *compatible*
+    rules that need to be sequenced correctly.
+
+    Args:
+        blocks: RuleBlock list from ``RuleDeduplicator._collect_blocks()``.
+        max_issues: Maximum number of issues to return (default 20).
+
+    Returns:
+        List of OrderingSensitivityIssue objects sorted by urgency
+        (same-file issues first).
+    """
+    issues: list[OrderingSensitivityIssue] = []
+    seen: set[tuple[int, int]] = set()
+
+    for i, block_a in enumerate(blocks):
+        for j, block_b in enumerate(blocks):
+            if i >= j:
+                continue
+            pair_key = (i, j)
+            if pair_key in seen:
+                continue
+
+            for general_re, specific_re, order_hint, explanation in _ORDER_SENSITIVITY_PATTERNS:
+                a_is_general = bool(general_re.search(block_a.content))
+                b_is_specific = bool(specific_re.search(block_b.content))
+                b_is_general = bool(general_re.search(block_b.content))
+                a_is_specific = bool(specific_re.search(block_a.content))
+
+                if a_is_general and b_is_specific:
+                    # A (general) comes before B (specific) — correct order
+                    # Still flag so users know there's an ordering dependency
+                    issues.append(OrderingSensitivityIssue(
+                        rule_a=block_a.content[:200],
+                        rule_b=block_b.content[:200],
+                        file_a=block_a.file_path,
+                        file_b=block_b.file_path,
+                        explanation=explanation,
+                        suggested_order="a_before_b",
+                    ))
+                    seen.add(pair_key)
+                    break
+                elif b_is_general and a_is_specific:
+                    # B (general) comes AFTER A (specific) — possibly wrong order
+                    issues.append(OrderingSensitivityIssue(
+                        rule_a=block_a.content[:200],
+                        rule_b=block_b.content[:200],
+                        file_a=block_a.file_path,
+                        file_b=block_b.file_path,
+                        explanation=f"ORDER WARNING: {explanation} "
+                                    f"The general rule appears AFTER the specific exception.",
+                        suggested_order="b_before_a",
+                    ))
+                    seen.add(pair_key)
+                    break
+
+            if len(issues) >= max_issues:
+                break
+        if len(issues) >= max_issues:
+            break
+
+    # Sort: potential wrong-order issues first, then same-file pairs
+    issues.sort(key=lambda x: (
+        x.suggested_order != "b_before_a",   # wrong-order first
+        x.file_a != x.file_b,                # same-file second
+    ))
+    return issues
+
+
+def format_ordering_report(issues: list[OrderingSensitivityIssue]) -> str:
+    """Format ordering-sensitivity issues as a human-readable report (item 16).
+
+    Args:
+        issues: Output of ``detect_ordering_sensitivity()``.
+
+    Returns:
+        Multi-line formatted string.
+    """
+    if not issues:
+        return "No ordering-sensitive rule pairs detected."
+
+    wrong_order = [i for i in issues if i.suggested_order == "b_before_a"]
+    correct_order = [i for i in issues if i.suggested_order != "b_before_a"]
+
+    lines = [
+        "Rule Ordering Sensitivity Report",
+        "=" * 50,
+        f"Found {len(issues)} order-sensitive pair(s): "
+        f"{len(wrong_order)} with potentially wrong order.",
+        "",
+    ]
+
+    if wrong_order:
+        lines += ["⚠  Potentially Wrong Order", "-" * 40]
+        for idx, issue in enumerate(wrong_order, 1):
+            lines.append(f"\n{idx}. {issue.explanation}")
+            lines.append(f"   File A: {issue.file_a}")
+            lines.append(f"   Rule A: {issue.rule_a[:100]!r}")
+            lines.append(f"   File B: {issue.file_b}")
+            lines.append(f"   Rule B: {issue.rule_b[:100]!r}")
+            lines.append(f"   Suggestion: Move rule B ({issue.file_b}) before rule A.")
+
+    if correct_order:
+        lines += ["", "ℹ  Ordering Dependencies (correct order)", "-" * 40]
+        for idx, issue in enumerate(correct_order, 1):
+            lines.append(f"\n{idx}. {issue.explanation}")
+            lines.append(f"   General rule in:  {issue.file_a}")
+            lines.append(f"   Specific rule in: {issue.file_b}")
+            lines.append(f"   Current order appears correct.")
+
+    return "\n".join(lines)
+
+
+def merge_rules_into_target(
+    incoming: str,
+    existing: str,
+    similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
+    managed_marker: bool = True,
+) -> MergeResult:
+    """Intelligently merge incoming synced rules into an existing target file.
+
+    Instead of overwriting the target (which would destroy any target-native
+    customisation the user has added), this function:
+
+    1. Splits both incoming and existing content into rule blocks.
+    2. For each incoming block, checks whether a near-duplicate already exists
+       in the target.  Near-duplicates are *skipped* — no double-up.
+    3. Incoming blocks that are genuinely new are *appended* after a
+       ``<!-- Managed by HarnessSync -->`` boundary marker.
+    4. Target blocks that don't appear in the incoming content are kept
+       verbatim — these are the user's own additions.
+
+    Args:
+        incoming: The fully-rendered content that HarnessSync wants to write.
+        existing: Current content of the target file (may have manual edits).
+        similarity_threshold: Blocks with similarity >= this are considered
+                              duplicates (default: 0.75).
+        managed_marker: If True, wrap appended sections in HTML comment markers
+                        so future merges can locate and update them cleanly.
+
+    Returns:
+        MergeResult with the merged content and statistics.
+    """
+    # Strip any previously-managed block from existing so we don't accumulate duplicates
+    existing_stripped = _strip_managed_markers(existing)
+
+    incoming_blocks = [b for b in _split_blocks(incoming) if len(b) >= MIN_BLOCK_LEN]
+    existing_blocks = [b for b in _split_blocks(existing_stripped) if len(b) >= MIN_BLOCK_LEN]
+
+    existing_norms = [_normalize(b) for b in existing_blocks]
+
+    new_blocks: list[str] = []
+    skipped = 0
+
+    for block in incoming_blocks:
+        norm = _normalize(block)
+        is_dup = any(
+            _similarity(norm, en) >= similarity_threshold for en in existing_norms
+        )
+        if is_dup:
+            skipped += 1
+        else:
+            new_blocks.append(block)
+
+    # Identify preserved custom content: existing blocks NOT present in incoming
+    incoming_norms = [_normalize(b) for b in incoming_blocks]
+    preserved_custom: list[str] = []
+    for block, en in zip(existing_blocks, existing_norms):
+        if not any(_similarity(en, inc_n) >= similarity_threshold for inc_n in incoming_norms):
+            preserved_custom.append(block[:120])
+
+    if not new_blocks:
+        # Nothing to add — return the stripped existing content (removing stale managed block)
+        return MergeResult(
+            merged_content=existing_stripped.rstrip() + "\n",
+            sections_added=0,
+            sections_skipped=skipped,
+            preserved_custom=preserved_custom,
+        )
+
+    new_content_block = "\n\n".join(new_blocks)
+    if managed_marker:
+        new_content_block = (
+            "<!-- Managed by HarnessSync -->\n"
+            + new_content_block
+            + "\n<!-- End HarnessSync managed content -->"
+        )
+
+    merged = existing_stripped.rstrip() + "\n\n" + new_content_block + "\n"
+    return MergeResult(
+        merged_content=merged,
+        sections_added=len(new_blocks),
+        sections_skipped=skipped,
+        preserved_custom=preserved_custom,
+    )

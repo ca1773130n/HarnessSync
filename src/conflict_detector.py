@@ -554,8 +554,9 @@ class ConflictDetector:
     ) -> tuple[str, str]:
         """Present three-way diff in terminal and ask user to resolve.
 
-        Shows the diff between (last-synced → current) and (last-synced → source)
-        and offers per-file choices:
+        Shows a side-by-side colored diff comparing the current file (your
+        manual edits) against the HarnessSync source version, then offers
+        per-file choices:
           s) Use synced  — accept HarnessSync's version
           k) Keep theirs — preserve the manual edit
           e) Edit manually — write a temp file and open $EDITOR
@@ -574,23 +575,56 @@ class ConflictDetector:
         file_path = three_way["file_path"]
         source_lines = three_way["source_lines"]
         current_lines = three_way["current_lines"]
-        diff_base_vs_current = three_way["unified_base_vs_current"]
+        base_lines = three_way.get("base_lines", [])
 
         print(f"\n{'=' * 70}")
         print(f"THREE-WAY CONFLICT: {file_path}")
         print(f"{'=' * 70}")
 
-        print("\n[ Changes: last-synced → manual edits (what YOU changed) ]")
-        if diff_base_vs_current.strip():
-            print(diff_base_vs_current[:3000])
-        else:
-            print("  (no diff from base)")
+        # Use side-by-side colored diff when supported; fall back to unified diff.
+        try:
+            from src.diff_formatter import format_side_by_side, _supports_color
 
-        print("\n[ Changes: last-synced → sync-source (what HARNESSSYNC would write) ]")
-        if three_way["unified_base_vs_source"].strip():
-            print(three_way["unified_base_vs_source"][:3000])
-        else:
-            print("  (no diff from base)")
+            current_text = "".join(current_lines)
+            source_text = "".join(source_lines)
+            base_text = "".join(base_lines)
+
+            # Primary view: current file (your edits) ↔ what sync would write
+            if current_text != source_text:
+                print("\n[ Side-by-side: YOUR VERSION  vs  SYNC SOURCE ]")
+                print(format_side_by_side(
+                    current_text,
+                    source_text,
+                    label=f"current ↔ sync-source for {file_path}",
+                    context_lines=4,
+                ))
+            else:
+                print("\n  (current file matches sync source — no visible conflict)")
+
+            # Secondary view: what changed since last sync (base → current)
+            if base_text and base_text != current_text:
+                print("\n[ Your edits since last sync: BASE → CURRENT ]")
+                print(format_side_by_side(
+                    base_text,
+                    current_text,
+                    label="last-synced → your edits",
+                    context_lines=3,
+                ))
+
+        except Exception:
+            # Graceful fallback to plain unified diffs if side-by-side fails
+            diff_base_vs_current = three_way["unified_base_vs_current"]
+            print("\n[ Changes: last-synced → manual edits (what YOU changed) ]")
+            if diff_base_vs_current.strip():
+                print(diff_base_vs_current[:3000])
+            else:
+                print("  (no diff from base)")
+
+            print("\n[ Changes: last-synced → sync-source (what HARNESSSYNC would write) ]")
+            if three_way["unified_base_vs_source"].strip():
+                print(three_way["unified_base_vs_source"][:3000])
+            else:
+                print("  (no diff from base)")
 
         print("\nChoices:")
         print("  s) Use synced  — overwrite with HarnessSync version")

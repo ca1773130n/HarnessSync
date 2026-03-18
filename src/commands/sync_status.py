@@ -8,6 +8,7 @@ and drift detection. Supports --account and --list-accounts flags.
 Read-only operation.
 """
 
+import json
 import os
 import sys
 import shlex
@@ -220,6 +221,21 @@ def main():
         action="store_true",
         help="List all configured accounts with sync status"
     )
+    parser.add_argument(
+        "--ci",
+        action="store_true",
+        help=(
+            "CI mode: exit 1 if drift is detected or any target has never been synced. "
+            "Output is machine-readable JSON. Useful in CI pipelines to block PRs "
+            "when config drift is present."
+        ),
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output status as machine-readable JSON (implies CI-style output format).",
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -229,6 +245,9 @@ def main():
     try:
         if args.list_accounts:
             _show_account_list()
+        elif getattr(args, "ci", False) or getattr(args, "json_output", False):
+            _show_ci_status(args)
+            return
         elif args.account:
             _show_account_status(args.account)
         else:
@@ -598,6 +617,80 @@ def _show_default_status():
             print("  Run /sync-parity or remove stale targets with /sync-setup.")
     except Exception:
         pass  # Non-critical; adoption insights are informational only
+
+
+def _show_ci_status(args) -> None:
+    """CI-friendly status output with machine-readable JSON and exit codes.
+
+    Exit codes:
+        0 — all targets synced, no drift detected
+        1 — drift detected or one or more targets have never been synced
+        2 — could not read status (config error)
+    """
+    project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
+    state_manager = StateManager()
+    registered = AdapterRegistry.list_targets()
+
+    reader = SourceReader(scope="all", project_dir=project_dir)
+    source_paths = reader.get_source_paths()
+
+    current_hashes: dict[str, str] = {}
+    for config_type, paths in source_paths.items():
+        for p in paths:
+            if p.is_file():
+                h = hash_file_sha256(p)
+                if h:
+                    current_hashes[str(p)] = h
+
+    state = state_manager.get_all_status()
+    targets_state = state.get("targets", {})
+
+    drift_targets: list[str] = []
+    never_synced: list[str] = []
+    per_target: dict[str, dict] = {}
+
+    for target in registered:
+        target_state = targets_state.get(target)
+        if not target_state:
+            never_synced.append(target)
+            per_target[target] = {
+                "status": "never_synced",
+                "last_sync": None,
+                "items_synced": 0,
+                "items_failed": 0,
+                "drift": [],
+                "drift_count": 0,
+            }
+            continue
+
+        drifted = state_manager.detect_drift(target, current_hashes) or []
+        if drifted:
+            drift_targets.append(target)
+
+        per_target[target] = {
+            "status": target_state.get("status", "unknown"),
+            "last_sync": target_state.get("last_sync"),
+            "items_synced": target_state.get("items_synced", 0),
+            "items_failed": target_state.get("items_failed", 0),
+            "drift": drifted,
+            "drift_count": len(drifted),
+        }
+
+    has_issues = bool(drift_targets or never_synced)
+
+    output = {
+        "ok": not has_issues,
+        "drift_detected": bool(drift_targets),
+        "drift_targets": drift_targets,
+        "never_synced": never_synced,
+        "last_sync": state.get("last_sync"),
+        "targets": per_target,
+    }
+
+    print(json.dumps(output, indent=2))
+
+    if has_issues and getattr(args, "ci", False):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

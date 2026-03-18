@@ -183,6 +183,223 @@ class ProjectPortabilityScore:
         return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Feature support maps: which features are natively supported per harness
+# ---------------------------------------------------------------------------
+
+# Fraction of the feature that reaches the target (0.0 = none, 1.0 = full)
+_FEATURE_COVERAGE: dict[str, dict[str, float]] = {
+    "codex": {
+        "rules": 1.0,
+        "skills": 0.5,   # folded into rules as plain text — intent preserved but no execution
+        "mcp": 0.0,       # MCP not supported by Codex CLI
+        "commands": 0.4,  # converted to AGENTS.md instruction blocks
+        "agents": 0.5,
+        "settings": 0.2,  # only allow/deny lists carry over
+    },
+    "gemini": {
+        "rules": 1.0,
+        "skills": 0.6,   # converted to system instructions
+        "mcp": 0.8,       # stdio MCP supported; SSE may need workarounds
+        "commands": 0.3,
+        "agents": 0.4,
+        "settings": 0.3,
+    },
+    "opencode": {
+        "rules": 1.0,
+        "skills": 0.7,
+        "mcp": 0.9,
+        "commands": 0.3,
+        "agents": 0.5,
+        "settings": 0.3,
+    },
+    "cursor": {
+        "rules": 1.0,
+        "skills": 0.8,   # converted to .mdc rule files
+        "mcp": 0.9,
+        "commands": 0.6,  # .mdc blocks with slash-command triggers
+        "agents": 0.6,
+        "settings": 0.4,
+    },
+    "aider": {
+        "rules": 1.0,
+        "skills": 0.0,   # no skill concept in Aider
+        "mcp": 0.0,       # no MCP support
+        "commands": 0.0,  # no custom commands
+        "agents": 0.0,
+        "settings": 0.2,
+    },
+    "windsurf": {
+        "rules": 1.0,
+        "skills": 0.5,   # mapped to memory files
+        "mcp": 0.8,
+        "commands": 0.2,
+        "agents": 0.4,
+        "settings": 0.3,
+    },
+    "cline": {
+        "rules": 0.9,
+        "skills": 0.5,
+        "mcp": 0.9,
+        "commands": 0.3,
+        "agents": 0.4,
+        "settings": 0.3,
+    },
+    "vscode": {
+        "rules": 0.8,
+        "skills": 0.4,
+        "mcp": 0.7,
+        "commands": 0.3,
+        "agents": 0.4,
+        "settings": 0.3,
+    },
+    "continue": {
+        "rules": 0.9,
+        "skills": 0.5,
+        "mcp": 0.8,
+        "commands": 0.3,
+        "agents": 0.4,
+        "settings": 0.3,
+    },
+    "neovim": {
+        "rules": 0.7,
+        "skills": 0.3,
+        "mcp": 0.6,
+        "commands": 0.2,
+        "agents": 0.2,
+        "settings": 0.2,
+    },
+    "zed": {
+        "rules": 0.8,
+        "skills": 0.4,
+        "mcp": 0.7,
+        "commands": 0.3,
+        "agents": 0.3,
+        "settings": 0.3,
+    },
+}
+
+# Human-readable explanation for each unsupported feature
+_COVERAGE_EXPLANATIONS: dict[str, dict[str, str]] = {
+    "codex": {
+        "mcp": "MCP servers not supported — configure separately",
+        "commands": "commands become plain AGENTS.md instruction notes",
+        "settings": "only allow/deny permissions carry over",
+    },
+    "gemini": {
+        "commands": "commands converted to GEMINI.md instruction blocks",
+        "agents": "agents approximated as GEMINI.md role definitions",
+        "settings": "only allow/deny permissions carry over",
+    },
+    "aider": {
+        "skills": "skills have no Aider equivalent — add to CONVENTIONS.md manually",
+        "mcp": "MCP not supported by Aider",
+        "commands": "Aider has no custom command concept",
+        "agents": "Aider has no agent concept",
+    },
+}
+
+
+@dataclasses.dataclass
+class HarnessFeatureCoverage:
+    """Per-feature coverage for a single target harness."""
+
+    target: str
+    rules_pct: float       # 0.0–1.0
+    skills_pct: float
+    mcp_pct: float
+    commands_pct: float
+    agents_pct: float
+    settings_pct: float
+    source_has_skills: bool
+    source_has_mcp: bool
+    source_has_commands: bool
+    source_has_agents: bool
+
+    @property
+    def overall_pct(self) -> float:
+        """Weighted overall coverage percentage.
+
+        Rules and MCP carry the most weight since they have the highest day-to-day impact.
+        """
+        weights = {
+            "rules": 0.30,
+            "skills": 0.20 if self.source_has_skills else 0.0,
+            "mcp": 0.25 if self.source_has_mcp else 0.0,
+            "commands": 0.15 if self.source_has_commands else 0.0,
+            "agents": 0.10 if self.source_has_agents else 0.0,
+        }
+        total_weight = sum(weights.values()) or 1.0
+        weighted = (
+            self.rules_pct * weights["rules"]
+            + self.skills_pct * weights["skills"]
+            + self.mcp_pct * weights["mcp"]
+            + self.commands_pct * weights["commands"]
+            + self.agents_pct * weights["agents"]
+        )
+        return round(weighted / total_weight, 2)
+
+    def format(self) -> str:
+        """Single-line summary: 'Aider: 42% — skills not supported, MCP not supported'."""
+        pct = round(self.overall_pct * 100)
+        limitations = _COVERAGE_EXPLANATIONS.get(self.target, {})
+
+        unsupported: list[str] = []
+        if self.source_has_skills and self.skills_pct < 0.3:
+            unsupported.append(limitations.get("skills", "skills not supported"))
+        elif self.source_has_skills and self.skills_pct < 0.7:
+            unsupported.append("skills partially supported")
+        if self.source_has_mcp and self.mcp_pct < 0.3:
+            unsupported.append(limitations.get("mcp", "MCP not supported"))
+        if self.source_has_commands and self.commands_pct < 0.3:
+            unsupported.append(limitations.get("commands", "commands not supported"))
+        if self.source_has_agents and self.agents_pct < 0.3:
+            unsupported.append(limitations.get("agents", "agents not supported"))
+
+        if unsupported:
+            return f"{self.target}: {pct}% — {', '.join(unsupported)}"
+        return f"{self.target}: {pct}%"
+
+
+@dataclasses.dataclass
+class HarnessCoverageReport:
+    """Coverage breakdown across all configured target harnesses."""
+
+    coverages: list[HarnessFeatureCoverage]
+
+    def format(self) -> str:
+        """Render a multi-line table showing per-harness coverage."""
+        if not self.coverages:
+            return "No targets configured."
+        lines = [
+            "Harness Coverage Score",
+            "=" * 55,
+            "  How much of your Claude Code config reaches each target.",
+            "",
+        ]
+        for cov in sorted(self.coverages, key=lambda c: -c.overall_pct):
+            lines.append(f"  {cov.format()}")
+            # Show per-feature breakdown
+            features = [
+                ("rules", cov.rules_pct),
+                ("skills", cov.skills_pct, cov.source_has_skills),
+                ("MCP", cov.mcp_pct, cov.source_has_mcp),
+                ("commands", cov.commands_pct, cov.source_has_commands),
+                ("agents", cov.agents_pct, cov.source_has_agents),
+            ]
+            for feat in features:
+                name = feat[0]
+                pct_val = feat[1]
+                has_it = feat[2] if len(feat) > 2 else True
+                if not has_it:
+                    continue  # source has none — skip
+                bar = round(pct_val * 10)
+                bar_str = "█" * bar + "░" * (10 - bar)
+                lines.append(f"    {name:<10} {bar_str}  {round(pct_val * 100):>3}%")
+            lines.append("")
+        return "\n".join(lines)
+
+
 class SkillCompatibilityChecker:
     """Analyzes Claude Code skills for cross-harness compatibility."""
 
@@ -200,6 +417,53 @@ class SkillCompatibilityChecker:
         (r"\bWebFetch\b|\bWebSearch\b", "CC-specific web tool reference"),
         (r"CLAUDE\.md", "CLAUDE.md filename reference — target-specific"),
     ]
+
+    def compute_harness_coverage(
+        self,
+        source_data: dict | None = None,
+        targets: list[str] | None = None,
+    ) -> HarnessCoverageReport:
+        """Compute per-harness coverage scores from SourceReader output.
+
+        Shows what fraction of each config section (rules, skills, MCP servers,
+        commands, agents) is actually expressible in each target harness.
+        Unlike the portability score (which penalises CC-specific constructs),
+        coverage score reflects the harness's *structural* capability.
+
+        Args:
+            source_data: Dict from SourceReader.read() with keys: rules, skills,
+                         mcp_servers, commands, agents. Pass None to use defaults.
+            targets: Target harness names. Defaults to all registered targets.
+
+        Returns:
+            HarnessCoverageReport with a HarnessFeatureCoverage per target.
+        """
+        from src.adapters import AdapterRegistry
+        resolved_targets = targets or AdapterRegistry.list_targets()
+
+        sd = source_data or {}
+        has_skills = bool(sd.get("skills"))
+        has_mcp = bool(sd.get("mcp_servers"))
+        has_commands = bool(sd.get("commands"))
+        has_agents = bool(sd.get("agents"))
+
+        coverages: list[HarnessFeatureCoverage] = []
+        for target in resolved_targets:
+            fc = _FEATURE_COVERAGE.get(target, {})
+            coverages.append(HarnessFeatureCoverage(
+                target=target,
+                rules_pct=fc.get("rules", 0.8),
+                skills_pct=fc.get("skills", 0.5),
+                mcp_pct=fc.get("mcp", 0.5),
+                commands_pct=fc.get("commands", 0.3),
+                agents_pct=fc.get("agents", 0.4),
+                settings_pct=fc.get("settings", 0.3),
+                source_has_skills=has_skills,
+                source_has_mcp=has_mcp,
+                source_has_commands=has_commands,
+                source_has_agents=has_agents,
+            ))
+        return HarnessCoverageReport(coverages=coverages)
 
     def check_rules_portability(
         self,
@@ -392,3 +656,368 @@ class SkillCompatibilityChecker:
                     lines.append(f"  ... and {len(report.issues) - 10} more issues")
 
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Skill Coverage Advisor
+# ---------------------------------------------------------------------------
+
+#: Fallback suggestions keyed by pattern description fragment.
+_FALLBACK_SUGGESTIONS: list[tuple[str, str]] = [
+    (
+        "MCP server dependency",
+        "Replace the MCP tool call with a plain description of the behavior. "
+        "Example: instead of calling `mcp__context7__query-docs`, describe the "
+        "lookup step in prose so non-CC harnesses can follow the intent manually.",
+    ),
+    (
+        "Bash' tool",
+        "Replace references to the Bash tool with generic shell-command instructions "
+        "('Run the following shell command:') so Codex/Gemini users know what to execute.",
+    ),
+    (
+        "Read' tool",
+        "Replace 'Read tool' references with 'open the file' or 'view the file contents' "
+        "to work across all harnesses.",
+    ),
+    (
+        "Write' tool",
+        "Replace 'Write tool' references with 'create the file' or 'write the file contents' "
+        "so the instruction is harness-agnostic.",
+    ),
+    (
+        "Edit' tool",
+        "Replace 'Edit tool' references with 'modify the file at line N' or an equivalent "
+        "instruction that any harness can interpret.",
+    ),
+    (
+        "Glob' tool",
+        "Replace 'Glob tool' references with 'find files matching the pattern' to remain "
+        "portable across harnesses.",
+    ),
+    (
+        "Grep' tool",
+        "Replace 'Grep tool' references with 'search for the pattern in files' for "
+        "cross-harness compatibility.",
+    ),
+    (
+        "Agent' tool",
+        "Agent tool is CC-specific. Add a fallback description: 'If Agent tool is unavailable, "
+        "complete this step manually in sequence.'",
+    ),
+    (
+        "TodoWrite",
+        "TodoWrite is CC-specific. Add a note: 'Track progress in your task manager of choice "
+        "if this harness lacks a todo tool.'",
+    ),
+    (
+        "hooks.json",
+        "hooks.json references are CC-specific. Describe the trigger behavior in prose so "
+        "users of other harnesses understand the intent without the hook mechanism.",
+    ),
+    (
+        "hooks directory",
+        "The .claude/hooks path is CC-specific. Add a note explaining what the hook does "
+        "so users of other harnesses can replicate the behavior manually.",
+    ),
+    (
+        "Hook event name",
+        "Hook lifecycle events (PreToolUse, PostToolUse, etc.) are CC-specific. "
+        "Describe the equivalent trigger in plain language as a fallback.",
+    ),
+    (
+        "plugin path",
+        "$CLAUDE_PLUGIN_ROOT is a CC-only environment variable. Replace with a relative "
+        "path or add a note to set the equivalent variable in other harnesses.",
+    ),
+    (
+        "web tool",
+        "WebFetch/WebSearch tools are CC-specific. Add an alternative: 'If this tool is "
+        "unavailable, fetch the URL using curl or a browser and paste the content.'",
+    ),
+]
+
+
+def _find_fallback(pattern_desc: str) -> str | None:
+    """Return the best matching fallback suggestion for a pattern description."""
+    desc_lower = pattern_desc.lower()
+    for fragment, suggestion in _FALLBACK_SUGGESTIONS:
+        if fragment.lower() in desc_lower:
+            return suggestion
+    return None
+
+
+@dataclasses.dataclass
+class SkillAdvisory:
+    """Advisory for a single skill with actionable fallback suggestions."""
+
+    skill_name: str
+    issues: list[SkillCompatibilityIssue]
+    suggestions: list[str] = dataclasses.field(default_factory=list)
+
+    @property
+    def has_suggestions(self) -> bool:
+        return bool(self.suggestions)
+
+    def format(self) -> str:
+        """Render this advisory as human-readable text."""
+        if not self.issues:
+            return f"  {self.skill_name}: no portability issues found."
+        lines = [f"  {self.skill_name} ({len(self.issues)} issue(s)):"]
+        seen_descs: set[str] = set()
+        for issue in self.issues:
+            desc = issue.pattern_desc
+            if desc in seen_descs:
+                continue
+            seen_descs.add(desc)
+            lines.append(f"    · {desc}")
+            suggestion = _find_fallback(desc)
+            if suggestion:
+                lines.append(f"      → Fallback: {suggestion}")
+        return "\n".join(lines)
+
+
+class SkillCoverageAdvisor:
+    """Analyzes skills and flags Claude Code-specific APIs that won't translate.
+
+    For each issue detected, surfaces a concrete fallback suggestion so authors
+    can either add harness-agnostic alternatives or accept the portability gap
+    with full awareness.
+
+    Usage::
+
+        advisor = SkillCoverageAdvisor()
+        advisories = advisor.advise_all(skills)
+        print(advisor.format_advisory(advisories))
+    """
+
+    def __init__(self) -> None:
+        self._checker = SkillCompatibilityChecker()
+
+    def advise(self, skill_name: str, skill_path: Path) -> SkillAdvisory:
+        """Analyze one skill and return an advisory with fallback suggestions.
+
+        Args:
+            skill_name: Human-readable skill name.
+            skill_path: Path to the skill directory or file.
+
+        Returns:
+            SkillAdvisory with issues and suggestions.
+        """
+        report = self._checker.check_skill(skill_name, skill_path)
+        suggestions: list[str] = []
+        seen_descs: set[str] = set()
+        for issue in report.issues:
+            desc = issue.pattern_desc
+            if desc in seen_descs:
+                continue
+            seen_descs.add(desc)
+            fallback = _find_fallback(desc)
+            if fallback and fallback not in suggestions:
+                suggestions.append(f"[{desc}] {fallback}")
+        return SkillAdvisory(
+            skill_name=skill_name,
+            issues=report.issues,
+            suggestions=suggestions,
+        )
+
+    def advise_all(self, skills: dict[str, Path]) -> list[SkillAdvisory]:
+        """Analyze all skills and return advisories sorted by issue count.
+
+        Args:
+            skills: Dict mapping skill name to skill directory path.
+
+        Returns:
+            List of SkillAdvisory, most-problematic first.
+        """
+        advisories = [self.advise(name, path) for name, path in skills.items()]
+        return sorted(advisories, key=lambda a: -len(a.issues))
+
+    def format_advisory(self, advisories: list[SkillAdvisory]) -> str:
+        """Format all advisories as a human-readable report.
+
+        Args:
+            advisories: List from advise_all().
+
+        Returns:
+            Multi-line advisory string.
+        """
+        if not advisories:
+            return "No skills found to analyze."
+
+        with_issues = [a for a in advisories if a.issues]
+        clean = [a for a in advisories if not a.issues]
+
+        lines = [
+            "Skill Coverage Advisor",
+            "=" * 60,
+            f"  Analyzed {len(advisories)} skill(s): "
+            f"{len(with_issues)} need attention, {len(clean)} fully portable.",
+            "",
+        ]
+
+        if with_issues:
+            lines.append("Skills with portability gaps:")
+            lines.append("-" * 60)
+            for advisory in with_issues:
+                lines.append(advisory.format())
+                lines.append("")
+
+        if clean:
+            lines.append(f"Fully portable ({len(clean)}):")
+            for a in clean:
+                lines.append(f"  \u2713 {a.skill_name}")
+            lines.append("")
+
+        lines.append(
+            "Tip: Add a <!-- harness:skip=codex --> comment around CC-specific "
+            "sections to keep portability explicit in your skill files."
+        )
+        return "\n".join(lines)
+
+
+def generate_what_youre_missing_report(
+    target_harness: str,
+    skills: "dict[str, Path]",
+    rules_content: str = "",
+    mcp_servers: "dict | None" = None,
+) -> str:
+    """Produce a prioritized 'what you're missing in <harness>' report (item 3).
+
+    Scans CLAUDE.md rules, skills, and MCP server config for capabilities
+    that the target harness cannot replicate — then produces a concise,
+    prioritized list with workarounds where they exist.
+
+    Users don't know what they're losing until they need it. This report
+    makes the gap visible upfront so users can plan or accept the trade-off.
+
+    Args:
+        target_harness: Target harness name (e.g. "cursor", "codex", "aider").
+        skills: Dict mapping skill_name → skill directory Path.
+        rules_content: Content of CLAUDE.md rules section (optional).
+        mcp_servers: Dict of MCP server configs from .mcp.json (optional).
+
+    Returns:
+        Multi-line string with prioritized gap list and suggested workarounds.
+    """
+    # ── Known capabilities that only Claude Code supports ────────────────────
+    _CC_ONLY_CAPABILITIES: list[dict] = [
+        {
+            "feature": "MCP tool calls (mcp__* tools)",
+            "description": "Claude Code can call MCP servers directly as tools.",
+            "affected_harnesses": {"cursor", "aider", "windsurf", "cline", "continue", "vscode", "neovim"},
+            "workaround": "Describe MCP tool behavior in rules as manual steps instead.",
+            "severity": "high",
+        },
+        {
+            "feature": "Slash command skills (/commit, /review-pr, etc.)",
+            "description": "Claude Code skills are invocable slash commands with full tool access.",
+            "affected_harnesses": {"aider", "windsurf", "continue", "neovim"},
+            "workaround": "Convert skills to prompt templates; run manually from CLI.",
+            "severity": "high",
+        },
+        {
+            "feature": "PostToolUse / PreToolUse hooks",
+            "description": "Claude Code hooks trigger shell commands around tool calls.",
+            "affected_harnesses": {"cursor", "aider", "codex", "gemini", "opencode", "windsurf", "cline", "continue", "vscode", "neovim"},
+            "workaround": "Add equivalent actions to CI or a pre-commit hook instead.",
+            "severity": "medium",
+        },
+        {
+            "feature": "Tool permission allow/deny lists",
+            "description": "Claude Code's settings.json controls which tools the model can call.",
+            "affected_harnesses": {"aider", "continue", "neovim", "cline"},
+            "workaround": "Enforce restrictions via rules text ('never call bash').",
+            "severity": "medium",
+        },
+        {
+            "feature": "Persistent memory (memory/ directory)",
+            "description": "Claude Code agents can read/write persistent markdown memory files.",
+            "affected_harnesses": {"cursor", "codex", "gemini", "aider", "windsurf", "cline", "continue", "vscode", "neovim", "opencode"},
+            "workaround": "Attach relevant context manually or via project README.",
+            "severity": "low",
+        },
+        {
+            "feature": "Multi-agent orchestration (Agent tool)",
+            "description": "Claude Code can spawn and coordinate subagents for parallel tasks.",
+            "affected_harnesses": {"cursor", "aider", "windsurf", "cline", "continue", "vscode", "neovim", "opencode", "codex", "gemini"},
+            "workaround": "Structure prompts sequentially; use CI pipelines for parallelism.",
+            "severity": "low",
+        },
+    ]
+
+    target_lc = target_harness.lower()
+    gaps: list[dict] = []
+
+    for cap in _CC_ONLY_CAPABILITIES:
+        if target_lc in cap["affected_harnesses"]:
+            gaps.append(cap)
+
+    # Check skills for harness-specific issues
+    checker = SkillCompatibilityChecker()
+    skill_issues_by_harness: dict[str, list[str]] = {}
+    for skill_name, skill_path in (skills or {}).items():
+        report = checker.check_skill(skill_name, skill_path)
+        harness_score = report.harness_scores.get(target_lc, 100)
+        if harness_score < 80:
+            skill_issues_by_harness.setdefault(target_lc, []).append(
+                f"Skill '{skill_name}' compatibility: {harness_score}%"
+            )
+
+    # Check MCP servers — most harnesses can't use them at runtime
+    mcp_gaps: list[str] = []
+    if mcp_servers:
+        _mcp_unsupported = {"aider", "neovim", "cline", "continue"}
+        if target_lc in _mcp_unsupported:
+            mcp_gaps = [
+                f"MCP server '{name}' will not be callable at runtime in {target_harness}."
+                for name in list(mcp_servers.keys())[:5]
+            ]
+
+    # Build the report
+    lines = [
+        f"Feature Gap Report — What You're Missing in {target_harness.capitalize()}",
+        "=" * 65,
+        "",
+    ]
+
+    if not gaps and not mcp_gaps and not skill_issues_by_harness:
+        lines.append(f"  No significant capability gaps detected for {target_harness}.")
+        lines.append("  This harness supports most Claude Code features via synced config.")
+        return "\n".join(lines)
+
+    # Sort by severity: high → medium → low
+    severity_rank = {"high": 0, "medium": 1, "low": 2}
+    gaps_sorted = sorted(gaps, key=lambda g: severity_rank.get(g["severity"], 3))
+
+    for i, gap in enumerate(gaps_sorted, 1):
+        sev = gap["severity"].upper()
+        sev_tag = f"[{sev}]"
+        lines.append(f"{i}. {sev_tag} {gap['feature']}")
+        lines.append(f"   {gap['description']}")
+        lines.append(f"   Workaround: {gap['workaround']}")
+        lines.append("")
+
+    if mcp_gaps:
+        lines.append("MCP Server Gaps")
+        lines.append("-" * 40)
+        for msg in mcp_gaps:
+            lines.append(f"  • {msg}")
+        lines.append(f"  Tip: Describe MCP tool capabilities in rules so {target_harness} "
+                     "users know what to do manually.")
+        lines.append("")
+
+    skill_msgs = skill_issues_by_harness.get(target_lc, [])
+    if skill_msgs:
+        lines.append("Skill Compatibility Issues")
+        lines.append("-" * 40)
+        for msg in skill_msgs:
+            lines.append(f"  • {msg}")
+        lines.append("")
+
+    lines.append(
+        f"Run 'skill_transpiler.transpile_all(skills_dir, target={target_harness!r})' "
+        "to convert skills to the closest native equivalent."
+    )
+
+    return "\n".join(lines)

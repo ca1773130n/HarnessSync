@@ -50,6 +50,9 @@ _MCP_SERVER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Direct mcp__ tool call references: mcp__server__tool_name
+_MCP_TOOL_CALL_RE = re.compile(r"\bmcp__([a-zA-Z0-9_-]+)__([a-zA-Z0-9_-]+)\b")
+
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -73,6 +76,34 @@ class DependencyEdge:
     source: str
     target: str
     kind: str  # "explicit" | "slash" | "mcp_shared" | "mention"
+
+
+@dataclass
+class ImpactReport:
+    """Removal impact for a single skill node."""
+
+    skill_name: str
+    broken_dependents: list[str] = field(default_factory=list)  # skills that depend on this one
+    mcp_tools_orphaned: list[str] = field(default_factory=list)  # mcp__s__t tokens used only here
+    active_harnesses: list[str] = field(default_factory=list)   # harnesses where skill is live
+
+    def format(self) -> str:
+        lines = [f"Removal impact: /{self.skill_name}", "=" * 48]
+        if self.broken_dependents:
+            lines.append(
+                f"  Skills that depend on this:  {', '.join(sorted(self.broken_dependents))}"
+            )
+        if self.mcp_tools_orphaned:
+            lines.append(
+                f"  MCP tools orphaned by removal: {', '.join(sorted(self.mcp_tools_orphaned))}"
+            )
+        if self.active_harnesses:
+            lines.append(
+                f"  Harnesses where skill is active: {', '.join(sorted(self.active_harnesses))}"
+            )
+        if not any([self.broken_dependents, self.mcp_tools_orphaned]):
+            lines.append("  No downstream skill impact — safe to remove.")
+        return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +213,11 @@ class SkillDependencyGraph:
 
         # Extract MCP server references for shared-MCP edge detection
         node.mcp_servers = _MCP_SERVER_RE.findall(content)
+
+        # Extract direct mcp__server__tool call references
+        node._mcp_tool_calls = {  # type: ignore[attr-defined]
+            f"{m.group(1)}__{m.group(2)}" for m in _MCP_TOOL_CALL_RE.finditer(content)
+        }
 
         # Store raw content for later edge resolution
         node._raw_content = content  # type: ignore[attr-defined]
@@ -403,6 +439,98 @@ class SkillDependencyGraph:
                 lines.append(f"  %% {' -> '.join(nodes_in_cycle)}")
 
         return "\n".join(lines)
+
+    def removal_impact(self, skill_name: str) -> ImpactReport:
+        """Analyse the downstream impact of removing *skill_name*.
+
+        Args:
+            skill_name: Skill identifier to analyse (case-insensitive match
+                        against stored node names).
+
+        Returns:
+            :class:`ImpactReport` describing which skills break and which
+            MCP tools become orphaned.
+        """
+        name = skill_name.lower()
+        # Try exact match first, then case-insensitive
+        node = self._nodes.get(name) or self._nodes.get(skill_name)
+        if node is None:
+            return ImpactReport(skill_name=skill_name)
+
+        # Dependents: skills that list this one as a dependency
+        broken = list(node.dependents)
+
+        # MCP tool calls unique to this skill (not used by any other skill)
+        this_tools: set[str] = getattr(node, "_mcp_tool_calls", set())
+        other_tools: set[str] = set()
+        for other_name, other_node in self._nodes.items():
+            if other_name == name or other_name == skill_name:
+                continue
+            other_tools |= getattr(other_node, "_mcp_tool_calls", set())
+        orphaned = sorted(this_tools - other_tools)
+
+        # Harnesses where skills are synced (non-"none" support)
+        _HARNESS_SKILL_SUPPORT = {
+            "codex": "partial", "gemini": "partial", "opencode": "partial",
+            "cursor": "full", "aider": "none", "windsurf": "partial",
+            "cline": "partial", "continue": "partial", "vscode": "partial",
+            "neovim": "none", "zed": "partial",
+        }
+        active = [h for h, lvl in _HARNESS_SKILL_SUPPORT.items() if lvl != "none"]
+
+        return ImpactReport(
+            skill_name=skill_name,
+            broken_dependents=sorted(broken),
+            mcp_tools_orphaned=orphaned,
+            active_harnesses=active,
+        )
+
+    @classmethod
+    def from_skills_and_agents_dir(
+        cls,
+        skills_dir: Path,
+        agents_dir: Path | None = None,
+    ) -> "SkillDependencyGraph":
+        """Build graph from skill and agent directories.
+
+        Agents that reference skills (via ``/skill-name`` or ``invoke skill:
+        name``) are added as virtual skill nodes so their edges appear in the
+        graph.
+
+        Args:
+            skills_dir: Directory containing skill subdirectories.
+            agents_dir: Directory containing agent ``.md`` files (optional).
+
+        Returns:
+            Populated :class:`SkillDependencyGraph`.
+        """
+        graph = cls.from_skills_dir(skills_dir)
+        if agents_dir is None or not agents_dir.is_dir():
+            return graph
+
+        all_names = set(graph._nodes.keys())
+        for agent_file in sorted(agents_dir.glob("*.md")):
+            try:
+                content = agent_file.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            agent_id = f"@{agent_file.stem}"
+            agent_node = graph.add_skill(agent_id, content, description=f"Agent: {agent_file.stem}")
+
+            # Resolve edges for this agent node against known skills
+            for match in _EXPLICIT_RE.finditer(content):
+                dep = match.group(1)
+                if dep in all_names:
+                    graph._add_edge(agent_id, dep, "explicit")
+                    graph._nodes[dep].dependents.append(agent_id)
+            for match in _SLASH_CMD_RE.finditer(content):
+                dep = match.group(1)
+                if dep in all_names:
+                    graph._add_edge(agent_id, dep, "slash")
+                    if agent_id not in graph._nodes[dep].dependents:
+                        graph._nodes[dep].dependents.append(agent_id)
+
+        return graph
 
     def format_summary(self) -> str:
         """Return a short text summary of the graph."""

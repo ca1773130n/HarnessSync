@@ -814,6 +814,133 @@ class ProfileManager:
         return profile
 
     # ------------------------------------------------------------------
+    # Shareable bundle export / import (Item 2 — Team Sync Profile Sharing)
+    # ------------------------------------------------------------------
+
+    def export_shareable_bundle(
+        self,
+        profile_name: str,
+        dest: "Path | None" = None,
+        include_metadata: bool = True,
+    ) -> str:
+        """Export a profile as a portable `.harnesssync-profile.json` bundle (item 2).
+
+        The bundle format is self-describing: it includes schema version, export
+        metadata, and instructions for teammates so they can import it without
+        reading documentation. Teammates run:
+
+            /sync-preset import .harnesssync-profile.json
+
+        or programmatically::
+
+            manager.import_shareable_bundle(Path(".harnesssync-profile.json"))
+
+        Args:
+            profile_name: Name of the local profile to export.
+            dest: Optional file path to write the bundle JSON to.
+            include_metadata: Include export timestamp and instructions block
+                              (set False for machine-to-machine use).
+
+        Returns:
+            JSON string of the bundle.
+
+        Raises:
+            KeyError: If ``profile_name`` is not found.
+        """
+        profile = self.get_profile(profile_name)
+        if profile is None:
+            available = ", ".join(self.list_profiles()) or "(none)"
+            raise KeyError(
+                f"Profile {profile_name!r} not found. Available: {available}"
+            )
+
+        bundle: dict = {
+            "_schema": "harnesssync-profile-bundle/v1",
+            "profile_name": profile_name,
+            "profile": dict(profile),
+        }
+
+        if include_metadata:
+            from datetime import datetime as _dt
+            bundle["_exported_at"] = _dt.utcnow().isoformat() + "Z"
+            bundle["_instructions"] = (
+                "Import with: /sync-preset import <this-file>  "
+                "or in Python: ProfileManager().import_shareable_bundle(Path('<this-file>'))"
+            )
+
+        json_content = json.dumps(bundle, indent=2, ensure_ascii=False)
+
+        if dest is not None:
+            dest = Path(dest)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(json_content, encoding="utf-8")
+
+        return json_content
+
+    def import_shareable_bundle(
+        self,
+        source: "Path | str",
+        import_as: str | None = None,
+        overwrite: bool = True,
+    ) -> str:
+        """Import a profile from a `.harnesssync-profile.json` bundle (item 2).
+
+        Reads a bundle produced by ``export_shareable_bundle()`` and saves it
+        as a local named profile. Safe to call after ``git pull`` — teammates
+        get the team's harness configuration in one command.
+
+        Args:
+            source: Path to the bundle file, or a JSON string.
+            import_as: Local name to save the profile under. Defaults to the
+                       ``profile_name`` stored inside the bundle.
+            overwrite: If False, raise ValueError if the profile already exists.
+
+        Returns:
+            The local profile name the bundle was saved under.
+
+        Raises:
+            ValueError: If bundle format is invalid or profile exists (no overwrite).
+            FileNotFoundError: If ``source`` is a path that doesn't exist.
+        """
+        source_str = str(source)
+        # Determine if source is a file path or raw JSON string
+        if source_str.strip().startswith("{"):
+            raw = source_str
+        else:
+            path = Path(source)
+            if not path.is_file():
+                raise FileNotFoundError(f"Bundle file not found: {path}")
+            raw = path.read_text(encoding="utf-8")
+
+        try:
+            bundle = json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid bundle JSON: {e}") from e
+
+        schema = bundle.get("_schema", "")
+        if schema and not schema.startswith("harnesssync-profile-bundle/"):
+            raise ValueError(
+                f"Unsupported bundle schema: {schema!r}. "
+                "Expected 'harnesssync-profile-bundle/v1'."
+            )
+
+        profile_data = bundle.get("profile")
+        if not isinstance(profile_data, dict) or not profile_data:
+            raise ValueError("Bundle has no 'profile' key or profile is empty.")
+
+        name = import_as or bundle.get("profile_name") or "imported"
+
+        if not overwrite and self.get_profile(name) is not None:
+            raise ValueError(
+                f"Profile {name!r} already exists. Pass overwrite=True to replace it."
+            )
+
+        # Strip internal metadata keys that may have leaked into profile
+        clean_profile = {k: v for k, v in profile_data.items() if not k.startswith("_")}
+        self.save_profile(name, clean_profile)
+        return name
+
+    # ------------------------------------------------------------------
     # CWD-based auto-activation (Item 26 — Project-Scoped Sync Profiles)
     # ------------------------------------------------------------------
 
@@ -1084,6 +1211,34 @@ PRESET_PROFILES: dict[str, dict] = {
         "scope": "all",
         "only_sections": ["rules"],
         "targets": [],
+    },
+    "full": {
+        "description": "Full sync — every section synced to every target, nothing skipped",
+        "scope": "all",
+        "skip_sections": [],
+        "only_sections": [],
+        "targets": [],  # empty = all targets
+    },
+    "team-standard": {
+        "description": "Team standard — shared rules + MCP, no personal settings or agents",
+        "scope": "all",
+        "only_sections": ["rules", "mcp"],
+        "targets": ["codex", "gemini", "opencode", "cursor"],
+        "harness_env": "team",
+        "settings_overrides": {
+            "approval_mode": "auto-edit",
+        },
+    },
+    "solo-dev": {
+        "description": "Solo developer — all sections synced, personal MCP servers included",
+        "scope": "all",
+        "skip_sections": [],
+        "only_sections": [],
+        "targets": [],  # empty = all targets
+        "harness_env": "personal",
+        "settings_overrides": {
+            "approval_mode": "suggest",
+        },
     },
     "compliance": {
         "description": "High-security compliance — skip experimental, force read-only MCP",

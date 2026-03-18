@@ -234,6 +234,8 @@ class DriftWatcher:
         notify: bool = False,
         notify_cooldown_minutes: float = 60.0,
         slack_webhook_url: str | None = None,
+        discord_webhook_url: str | None = None,
+        generic_webhook_url: str | None = None,
     ):
         """Initialize the drift watcher.
 
@@ -245,22 +247,28 @@ class DriftWatcher:
                             Takes precedence over the ``notify`` flag.
             state_manager: Optional StateManager for dependency injection.
             notify: If True and no alert_callback is provided, use the OS
-                    notification callback that sends desktop banners (item 29).
+                    notification callback that sends desktop banners.
             notify_cooldown_minutes: Minimum minutes between OS notifications
                                      for the same file (default: 60).
-            slack_webhook_url: Optional Slack incoming webhook URL for posting
-                               drift alerts. Also reads HARNESSSYNC_SLACK_WEBHOOK
-                               env var if not provided explicitly.
+            slack_webhook_url: Optional Slack incoming webhook URL. Also reads
+                               HARNESSSYNC_SLACK_WEBHOOK env var.
+            discord_webhook_url: Optional Discord webhook URL. Also reads
+                                 HARNESSSYNC_DISCORD_WEBHOOK env var.
+            generic_webhook_url: Optional generic HTTPS webhook URL. Also reads
+                                 HARNESSSYNC_WEBHOOK_URL env var.
         """
         self.project_dir = project_dir
         self.poll_interval = poll_interval
+        has_webhook = slack_webhook_url or discord_webhook_url or generic_webhook_url
         if alert_callback is not None:
             self.alert_callback = alert_callback
-        elif notify or slack_webhook_url:
+        elif notify or has_webhook:
             self.alert_callback = make_notifying_alert_callback(
                 notify=notify,
                 threshold_minutes=notify_cooldown_minutes,
                 slack_webhook_url=slack_webhook_url,
+                discord_webhook_url=discord_webhook_url,
+                generic_webhook_url=generic_webhook_url,
             )
         else:
             self.alert_callback = _default_alert_callback
@@ -578,19 +586,137 @@ def send_slack_notification(webhook_url: str, title: str, body: str) -> bool:
         return False
 
 
+def send_discord_notification(webhook_url: str, title: str, body: str) -> bool:
+    """Send a drift alert to a Discord channel via incoming webhook (item 11).
+
+    Posts a Discord embed message via Discord's incoming webhook API.
+    Uses Discord's embed format for rich, readable notifications.
+
+    CRITICAL: Never includes file content or hash values — only filenames
+    and harness names to avoid leaking sensitive config data.
+
+    Args:
+        webhook_url: Discord webhook URL
+                     (e.g. https://discord.com/api/webhooks/<id>/<token>).
+        title: Embed title.
+        body: Embed description text.
+
+    Returns:
+        True if the notification was posted successfully, False otherwise.
+    """
+    import json as _json
+    import urllib.request as _urllib_request
+
+    if not webhook_url or not webhook_url.startswith("https://"):
+        return False
+
+    payload = {
+        "embeds": [
+            {
+                "title": title,
+                "description": body,
+                "color": 0xF85149,  # red — indicates drift/warning
+                "footer": {"text": "HarnessSync"},
+            }
+        ]
+    }
+
+    try:
+        data = _json.dumps(payload).encode("utf-8")
+        req = _urllib_request.Request(
+            webhook_url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with _urllib_request.urlopen(req, timeout=5):
+            pass
+        return True
+    except Exception:
+        return False
+
+
+def send_generic_webhook_notification(
+    webhook_url: str,
+    event: str,
+    target: str,
+    filename: str,
+    detected_at: str,
+    extra: dict | None = None,
+) -> bool:
+    """Send a structured JSON payload to a generic webhook endpoint (item 11).
+
+    Posts a JSON body that any webhook consumer (Zapier, n8n, custom server)
+    can parse. The payload is intentionally minimal: no file contents, no
+    hashes — only event metadata.
+
+    Payload schema::
+
+        {
+          "source": "harnesssync",
+          "event": "drift_detected" | "sync_complete" | "sync_failed",
+          "target": "<harness name>",
+          "filename": "<config filename>",
+          "detected_at": "<ISO 8601>",
+          "extra": {}
+        }
+
+    Args:
+        webhook_url: Any HTTPS endpoint that accepts POST with JSON body.
+        event: Event type string (e.g. "drift_detected").
+        target: Harness name (e.g. "cursor").
+        filename: Config filename that changed (no path, no content).
+        detected_at: ISO 8601 timestamp string.
+        extra: Optional additional key-value metadata (values must be JSON-safe).
+
+    Returns:
+        True if the POST succeeded (2xx response), False otherwise.
+    """
+    import json as _json
+    import urllib.request as _urllib_request
+
+    if not webhook_url or not webhook_url.startswith("https://"):
+        return False
+
+    payload = {
+        "source": "harnesssync",
+        "event": event,
+        "target": target,
+        "filename": filename,
+        "detected_at": detected_at,
+        "extra": extra or {},
+    }
+
+    try:
+        data = _json.dumps(payload).encode("utf-8")
+        req = _urllib_request.Request(
+            webhook_url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with _urllib_request.urlopen(req, timeout=5):
+            pass
+        return True
+    except Exception:
+        return False
+
+
 def make_notifying_alert_callback(
     notify: bool = True,
     threshold_minutes: float = 60.0,
     slack_webhook_url: str | None = None,
+    discord_webhook_url: str | None = None,
+    generic_webhook_url: str | None = None,
 ) -> "Callable[[DriftAlert], None]":
-    """Create an alert callback that sends OS notifications for drift (item 29).
+    """Create an alert callback that sends OS notifications for drift (item 11).
 
     The callback prints to stdout AND sends a native OS notification. A
     cooldown threshold prevents notification spam when the same file is
     detected as drifted across multiple poll cycles.
 
-    When ``slack_webhook_url`` is provided, also posts to Slack. The Slack
-    webhook URL can also be set via the HARNESSSYNC_SLACK_WEBHOOK env var.
+    Supports Slack, Discord, and generic webhooks — all resolved from
+    explicit args first, then environment variables.
 
     Args:
         notify: If False, OS notifications are disabled (stdout only).
@@ -598,21 +724,28 @@ def make_notifying_alert_callback(
                            same (target, file) pair. Default: 60 minutes.
         slack_webhook_url: Optional Slack incoming webhook URL. Falls back to
                            the HARNESSSYNC_SLACK_WEBHOOK environment variable.
+        discord_webhook_url: Optional Discord webhook URL. Falls back to
+                             HARNESSSYNC_DISCORD_WEBHOOK env var.
+        generic_webhook_url: Optional generic HTTPS webhook URL. Falls back to
+                             HARNESSSYNC_WEBHOOK_URL env var.
 
     Returns:
         Alert callback function compatible with DriftWatcher.alert_callback.
     """
     import os as _os
 
-    # Resolve Slack webhook: explicit arg takes precedence over env var
+    # Resolve all webhook URLs: explicit arg > env var
     _slack_url = slack_webhook_url or _os.environ.get("HARNESSSYNC_SLACK_WEBHOOK", "").strip()
+    _discord_url = discord_webhook_url or _os.environ.get("HARNESSSYNC_DISCORD_WEBHOOK", "").strip()
+    _generic_url = generic_webhook_url or _os.environ.get("HARNESSSYNC_WEBHOOK_URL", "").strip()
 
     last_notified: dict[tuple[str, str], float] = {}
 
     def _callback(alert: DriftAlert) -> None:
         print(alert.format())
 
-        if not notify and not _slack_url:
+        has_any_channel = notify or _slack_url or _discord_url or _generic_url
+        if not has_any_channel:
             return
 
         key = (alert.target, alert.file_path)
@@ -625,14 +758,11 @@ def make_notifying_alert_callback(
         title = "HarnessSync — Config Drift Detected"
         import os
         filename = os.path.basename(alert.file_path)
-        if alert.deleted:
-            body = f"{alert.target}: {filename} was deleted outside HarnessSync."
-        else:
-            body = f"{alert.target}: {filename} was modified outside HarnessSync."
+        status_verb = "deleted" if alert.deleted else "modified outside HarnessSync"
+        body = f"{alert.target}: {filename} was {status_verb}."
 
         sent = False
         if notify:
-            # Use the richer notify_drift_detected method when available
             try:
                 from src.desktop_notifier import DesktopNotifier
                 notifier = DesktopNotifier(enabled=True)
@@ -643,17 +773,40 @@ def make_notifying_alert_callback(
             except Exception:
                 sent = send_os_notification(title, body)
 
-        # Also post to Slack if webhook configured
+        # Slack
         if _slack_url:
             slack_body = (
                 f"*Target:* `{alert.target}`\n"
                 f"*File:* `{filename}`\n"
-                f"*Status:* {'deleted' if alert.deleted else 'modified outside HarnessSync'}\n"
+                f"*Status:* {status_verb}\n"
                 f"*Time:* {alert.detected_at}\n"
                 f"Run `/sync` to re-sync or `/sync-restore` to revert."
             )
-            send_slack_notification(_slack_url, title, slack_body)
-            sent = True
+            if send_slack_notification(_slack_url, title, slack_body):
+                sent = True
+
+        # Discord
+        if _discord_url:
+            discord_body = (
+                f"**Target:** `{alert.target}`\n"
+                f"**File:** `{filename}`\n"
+                f"**Status:** {status_verb}\n"
+                f"**Time:** {alert.detected_at}\n"
+                f"Run `/sync` to re-sync or `/sync-restore` to revert."
+            )
+            if send_discord_notification(_discord_url, title, discord_body):
+                sent = True
+
+        # Generic webhook
+        if _generic_url:
+            if send_generic_webhook_notification(
+                _generic_url,
+                event="drift_detected",
+                target=alert.target,
+                filename=filename,
+                detected_at=alert.detected_at,
+            ):
+                sent = True
 
         if sent:
             last_notified[key] = now
@@ -1362,3 +1515,155 @@ class SourceChangeWatcher:
             except Exception:
                 pass
             self._stop_event.wait(timeout=self.poll_interval)
+
+
+# ---------------------------------------------------------------------------
+# Guided merge — item 10 (Drift Detection with Guided Merge)
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass as _dc_guided
+from enum import Enum as _Enum
+
+
+class MergeChoice(_Enum):
+    """User's resolution choice from guided_merge_prompt()."""
+    SYNC_WINS = "sync"       # Overwrite with HarnessSync content
+    KEEP_MANUAL = "keep"     # Keep the manual edits as a harness-specific override
+    SKIP = "skip"            # Do nothing for now
+
+
+@_dc_guided
+class GuidedMergeResult:
+    """Result of a guided merge interaction."""
+    target: str
+    file_path: str
+    choice: MergeChoice
+    override_saved: bool = False  # True if manual edit was saved as an override
+    override_path: str = ""       # Path to saved override file (if kept)
+
+
+def _show_drift_diff(
+    source_content: str,
+    current_content: str,
+    file_label: str,
+    max_lines: int = 30,
+) -> None:
+    """Print a compact unified diff showing what the user manually changed."""
+    import difflib as _difflib
+
+    source_lines = source_content.splitlines(keepends=True)
+    current_lines = current_content.splitlines(keepends=True)
+    diff = list(_difflib.unified_diff(
+        source_lines,
+        current_lines,
+        fromfile=f"harnesssync/{file_label}",
+        tofile=f"manual/{file_label}",
+        lineterm="",
+        n=2,
+    ))
+    if not diff:
+        print(f"  (no text differences detected in {file_label})")
+        return
+
+    printed = 0
+    for line in diff:
+        if printed >= max_lines:
+            remaining = len(diff) - max_lines
+            print(f"  ... ({remaining} more diff lines)")
+            break
+        if line.startswith("+") and not line.startswith("+++"):
+            print(f"  \033[32m{line}\033[0m")  # green
+        elif line.startswith("-") and not line.startswith("---"):
+            print(f"  \033[31m{line}\033[0m")  # red
+        else:
+            print(f"  {line}")
+        printed += 1
+
+
+def guided_merge_prompt(
+    target: str,
+    file_path: str,
+    source_content: str,
+    current_content: str,
+    project_dir: "Path | None" = None,
+    non_interactive: bool = False,
+) -> GuidedMergeResult:
+    """Interactively resolve a drift conflict between HarnessSync and manual edits.
+
+    Shows the user exactly what they changed in the target config (diff),
+    then offers three choices:
+      1. Let sync win  — overwrite manual edits on next sync
+      2. Keep changes  — save manual edits as a harness-specific override
+                         in .harnesssync-overrides/<target>/ so they survive
+                         future syncs
+      3. Skip for now  — do nothing (drift remains)
+
+    Args:
+        target: Canonical harness name (e.g. "codex").
+        file_path: Absolute path to the drifted config file.
+        source_content: Last-synced content (the HarnessSync version).
+        current_content: Current on-disk content (with manual edits).
+        project_dir: Project root (for saving overrides). Defaults to cwd.
+        non_interactive: If True, skip the prompt and default to SKIP.
+
+    Returns:
+        GuidedMergeResult describing what was chosen and what was done.
+    """
+    import sys as _sys
+
+    result = GuidedMergeResult(
+        target=target,
+        file_path=file_path,
+        choice=MergeChoice.SKIP,
+    )
+
+    print(f"\n{'─' * 60}")
+    print(f"Drift detected in {target}: {file_path}")
+    print(f"{'─' * 60}")
+    print("Your manual changes vs. the last HarnessSync version:\n")
+    _show_drift_diff(source_content, current_content, file_path)
+    print()
+
+    if non_interactive or not _sys.stdin.isatty():
+        print(f"[non-interactive] Defaulting to SKIP for {target}.")
+        return result
+
+    print("How would you like to resolve this?")
+    print("  [1] Let sync win     — overwrite on next /sync (manual edits lost)")
+    print("  [2] Keep my changes  — save as a harness-specific override")
+    print("  [3] Skip for now     — leave as-is (drift remains)")
+    print()
+
+    try:
+        answer = input("Choice [1/2/3, default=3]: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\nAborted — defaulting to skip.")
+        return result
+
+    if answer == "1":
+        result.choice = MergeChoice.SYNC_WINS
+        print(f"✓ Marked: sync will overwrite {target} config on next /sync.")
+
+    elif answer == "2":
+        result.choice = MergeChoice.KEEP_MANUAL
+        # Save the manual edits as a harness-specific override
+        proj = Path(project_dir) if project_dir else Path.cwd()
+        override_dir = proj / ".harnesssync-overrides" / target
+        override_dir.mkdir(parents=True, exist_ok=True)
+        override_file = override_dir / Path(file_path).name
+        try:
+            override_file.write_text(current_content, encoding="utf-8")
+            result.override_saved = True
+            result.override_path = str(override_file)
+            print(f"✓ Manual edits saved to: {override_file}")
+            print(
+                f"  HarnessSync will merge this override on future syncs.\n"
+                f"  Commit .harnesssync-overrides/ to share with your team."
+            )
+        except OSError as e:
+            print(f"  Warning: could not save override: {e}")
+
+    else:
+        print(f"  Skipping — drift in {target} remains. Run /sync to overwrite.")
+
+    return result

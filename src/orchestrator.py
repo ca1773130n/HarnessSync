@@ -42,7 +42,8 @@ class SyncOrchestrator:
                  incremental: bool = False,
                  cli_only_targets: set = None, cli_skip_targets: set = None,
                  harness_env: str = None,
-                 cli_per_target_only: dict = None):
+                 cli_per_target_only: dict = None,
+                 minimal: bool = False):
         """Initialize orchestrator.
 
         Args:
@@ -62,10 +63,19 @@ class SyncOrchestrator:
             cli_per_target_only: Per-target section overrides from --only-for CLI flag.
                                  Maps target_name -> set of section names to sync for that target only.
                                  E.g. {"gemini": {"skills", "rules"}, "codex": {"rules", "mcp"}}
+            minimal: If True, activate Minimal Footprint Mode — sync only the highest-value
+                     subset to each target (rules + essential MCP servers only). Skills, agents,
+                     commands, and non-essential MCP servers are skipped. This is equivalent to
+                     setting only_sections={"rules", "mcp"} with essential-only MCP filtering.
         """
         self.project_dir = project_dir
         self.scope = scope
         self.dry_run = dry_run
+        self.minimal = minimal
+        # Minimal Footprint Mode: restrict to rules + essential MCP only.
+        # Applied before CLI flags so explicit --only overrides it.
+        if minimal and not only_sections:
+            only_sections = {"rules", "mcp"}
         self.allow_secrets = allow_secrets
         self.scrub_secrets = scrub_secrets
         self.account = account
@@ -205,6 +215,96 @@ class SyncOrchestrator:
             if tgt_only:
                 self._per_target_only[tgt] = tgt_only
 
+        # --- CONDITIONAL SYNC RULES ENGINE (Item 12) ---
+        # Evaluate ``sync_conditions`` entries in .harnesssync and apply their
+        # actions when their predicates are satisfied at runtime.
+        #
+        # Supported predicate keys:
+        #   "file_exists": "<relative-path>"        — true when file present
+        #   "file_missing": "<relative-path>"       — true when file absent
+        #   "file_size_gt": {"<path>": <bytes>}     — true when file exceeds size
+        #   "env_set": "<VAR_NAME>"                 — true when env var is non-empty
+        #
+        # Supported action keys:
+        #   "then_skip_targets": [...]              — add targets to skip list
+        #   "then_only_targets": [...]              — restrict to these targets only
+        #   "then_skip_sections": [...]             — add sections to skip
+        #   "then_only_sections": [...]             — restrict to these sections
+        #
+        # Example .harnesssync:
+        #   {
+        #     "sync_conditions": [
+        #       {"if_file_exists": ".cursorrules",    "then_skip_targets": ["cursor"]},
+        #       {"if_file_size_gt": {"GEMINI.md": 51200}, "then_skip_targets": ["gemini"]},
+        #       {"if_env_set": "CI", "then_skip_sections": ["commands"]}
+        #     ]
+        #   }
+        try:
+            _conditions = project_cfg.get("sync_conditions", [])
+            if _conditions and self.project_dir:
+                import os as _os
+                for _cond in _conditions:
+                    if not isinstance(_cond, dict):
+                        continue
+
+                    # --- Evaluate predicate ---
+                    _satisfied = False
+
+                    if "if_file_exists" in _cond:
+                        _fp = self.project_dir / _cond["if_file_exists"]
+                        _satisfied = _fp.exists()
+                    elif "if_file_missing" in _cond:
+                        _fp = self.project_dir / _cond["if_file_missing"]
+                        _satisfied = not _fp.exists()
+                    elif "if_file_size_gt" in _cond:
+                        _size_map = _cond["if_file_size_gt"]
+                        if isinstance(_size_map, dict):
+                            for _rel, _thresh in _size_map.items():
+                                _fp = self.project_dir / _rel
+                                if _fp.exists():
+                                    try:
+                                        if _fp.stat().st_size > int(_thresh):
+                                            _satisfied = True
+                                            break
+                                    except OSError:
+                                        pass
+                    elif "if_env_set" in _cond:
+                        _env_name = _cond["if_env_set"]
+                        _satisfied = bool(_os.environ.get(str(_env_name), "").strip())
+
+                    if not _satisfied:
+                        continue
+
+                    # --- Apply actions ---
+                    _skip_tgts = _cond.get("then_skip_targets", [])
+                    if _skip_tgts:
+                        self._project_skip_targets = self._project_skip_targets | set(_skip_tgts)
+
+                    _only_tgts = _cond.get("then_only_targets", [])
+                    if _only_tgts:
+                        existing = self._project_only_targets
+                        if existing:
+                            self._project_only_targets = existing & set(_only_tgts)
+                        else:
+                            self._project_only_targets = set(_only_tgts)
+
+                    _skip_secs = _cond.get("then_skip_sections", [])
+                    if _skip_secs:
+                        self.skip_sections = self.skip_sections | set(_skip_secs)
+
+                    _only_secs = _cond.get("then_only_sections", [])
+                    if _only_secs:
+                        if self.only_sections:
+                            self.only_sections = self.only_sections & set(_only_secs)
+                        else:
+                            self.only_sections = set(_only_secs)
+
+                    self.logger.info(
+                        f"Conditional sync rule applied: {_cond}"
+                    )
+        except Exception as _cond_err:
+            self.logger.warn(f"Conditional sync rules evaluation failed: {_cond_err}")
+
         # Apply git branch-aware profile overrides (most specific branch match wins)
         try:
             from src.branch_aware_sync import resolve_branch_profile, apply_branch_profile, describe_active_profile
@@ -266,6 +366,35 @@ class SyncOrchestrator:
         reader = SourceReader(scope=self.scope, project_dir=self.project_dir,
                               cc_home=self.cc_home)
         source_data = reader.discover_all()
+
+        # --- PRE-SYNC: SKILL DEPENDENCY CHECK (item 28) ---
+        # Build a dependency graph from skills and warn about circular deps or
+        # references to skills that don't exist — before they cause silent sync failures.
+        try:
+            from src.skill_dependency_graph import SkillDependencyGraph
+            _skill_graph = SkillDependencyGraph.from_source_data(source_data)
+            _cycles = _skill_graph.find_cycles()
+            for _cycle in _cycles:
+                self.logger.warn(
+                    f"Skill dependency cycle detected: {' \u2192 '.join(_cycle)} "
+                    "— this may cause unexpected behavior when skills are synced"
+                )
+            # Warn about edges referencing skills that don't exist in the skills dir
+            _known_skills = set(_skill_graph._nodes.keys())
+            _missing_warned: set[str] = set()
+            for _edge in _skill_graph._edges:
+                if (
+                    _edge.target not in _known_skills
+                    and _edge.kind in ("explicit", "slash")
+                    and _edge.target not in _missing_warned
+                ):
+                    _missing_warned.add(_edge.target)
+                    self.logger.warn(
+                        f"Skill '{_edge.source}' references '/{_edge.target}' which is "
+                        "not in your skills directory — dependency will be absent on sync targets"
+                    )
+        except Exception:
+            pass  # Dependency check is informational, never blocks sync
 
         # --- PRE-SYNC: CONFIG VARIABLE SUBSTITUTION (${VAR} placeholders) ---
         # Substitute ${PROJECT_NAME}, ${GIT_USER}, ${REPO_URL}, etc. in rules content.
@@ -340,7 +469,32 @@ class SyncOrchestrator:
 
         # Translate key: SourceReader uses 'mcp_servers', adapters expect 'mcp'
         adapter_data = dict(source_data)
-        adapter_data['mcp'] = adapter_data.pop('mcp_servers', {})
+        raw_mcp = adapter_data.pop('mcp_servers', {}) or {}
+
+        # Minimal Footprint Mode: strip non-essential MCP servers so each target
+        # only receives the servers marked "essential": true in .mcp.json.
+        # An MCP server without an "essential" key is treated as non-essential.
+        if self.minimal and isinstance(raw_mcp, dict):
+            essential_mcp = {
+                name: cfg for name, cfg in raw_mcp.items()
+                if isinstance(cfg, dict) and cfg.get("essential", False)
+            }
+            if not essential_mcp:
+                # No servers explicitly marked essential — keep all (better than empty)
+                essential_mcp = raw_mcp
+                self.logger.info(
+                    "Minimal mode: no MCP servers marked 'essential' — syncing all MCP servers. "
+                    "Add '\"essential\": true' to a server in .mcp.json to limit footprint."
+                )
+            else:
+                skipped_count = len(raw_mcp) - len(essential_mcp)
+                self.logger.info(
+                    f"Minimal mode: syncing {len(essential_mcp)} essential MCP server(s), "
+                    f"skipping {skipped_count} non-essential."
+                )
+            raw_mcp = essential_mcp
+
+        adapter_data['mcp'] = raw_mcp
         # Pass scoped MCP data for v2.0 scope-aware adapters
         adapter_data['mcp_scoped'] = source_data.get('mcp_servers_scoped', {})
 
@@ -453,6 +607,18 @@ class SyncOrchestrator:
                     # Block sync - return early with warning
                     formatted_warnings = secret_detector.format_warnings(detections)
                     self.logger.warn("Sync blocked: secrets detected in config files or environment variables")
+                    # Record to audit log so /sync-status can show what was blocked and why
+                    try:
+                        from src.audit_log import AuditLog
+                        _audit = AuditLog(project_dir=self.project_dir)
+                        from src.adapters import AdapterRegistry
+                        _protected = AdapterRegistry.list_targets()
+                        _audit.record_secret_block(
+                            detections=detections,
+                            protected_targets=_protected,
+                        )
+                    except Exception:
+                        pass  # Audit logging is best-effort
                     return {
                         '_blocked': True,
                         '_reason': 'secrets_detected',
@@ -1114,6 +1280,44 @@ class SyncOrchestrator:
                     results["_health_scores"] = _health_scores
             except Exception:
                 pass  # Health tracking is informational, never blocks
+
+        # --- POST-SYNC: AMBIENT SUMMARY NOTIFICATION (item 30) ---
+        # Write a one-line summary + terminal bell to /dev/tty so hook-triggered
+        # background syncs are always visible to the user without checking logs.
+        if not self.dry_run:
+            try:
+                _synced_count = sum(
+                    1 for _t in results
+                    if not _t.startswith("_") and isinstance(results.get(_t), dict)
+                )
+                _conflict_count = len(results.get("_conflicts") or {})
+                _failed_count = sum(
+                    getattr(_r, "failed", 0)
+                    for _t in results
+                    if not _t.startswith("_") and isinstance(results.get(_t), dict)
+                    for _r in results[_t].values()
+                    if hasattr(_r, "failed")
+                )
+                _parts = [f"Synced {_synced_count} target(s)"]
+                if _conflict_count:
+                    _parts.append(f"{_conflict_count} conflict(s) skipped")
+                if _failed_count:
+                    _parts.append(f"{_failed_count} item(s) failed")
+                _summary_line = "HarnessSync: " + ". ".join(_parts) + "."
+                import sys as _sys_ambient
+                try:
+                    with open("/dev/tty", "w") as _tty:
+                        _tty.write(f"\x07{_summary_line}\n")
+                        _tty.flush()
+                except OSError:
+                    if hasattr(_sys_ambient.stderr, "isatty") and _sys_ambient.stderr.isatty():
+                        try:
+                            _sys_ambient.stderr.write(f"\x07{_summary_line}\n")
+                            _sys_ambient.stderr.flush()
+                        except OSError:
+                            pass
+            except Exception:
+                pass  # Ambient notification is best-effort, never block sync
 
         return results
 

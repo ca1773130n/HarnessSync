@@ -23,9 +23,170 @@ users can see exactly what AGENTS.md / opencode.json will look like.
 
 import difflib
 import json
+import os
 import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Side-by-side diff (item 1 — Rich Sync Preview)
+# ──────────────────────────────────────────────────────────────────────────────
+
+_ANSI_GREEN = "\033[32m"
+_ANSI_RED = "\033[31m"
+_ANSI_CYAN = "\033[36m"
+_ANSI_DIM = "\033[2m"
+_ANSI_RESET = "\033[0m"
+
+
+def _supports_color() -> bool:
+    """Return True if the terminal supports ANSI color codes."""
+    # Respect NO_COLOR env var (https://no-color.org/)
+    if os.environ.get("NO_COLOR"):
+        return False
+    # Check if stdout is a TTY
+    try:
+        return os.isatty(1)
+    except Exception:
+        return False
+
+
+def _color(text: str, code: str) -> str:
+    """Wrap text in ANSI color if supported."""
+    if _supports_color():
+        return f"{code}{text}{_ANSI_RESET}"
+    return text
+
+
+def format_side_by_side(
+    old_content: str,
+    new_content: str,
+    label: str = "",
+    width: int = 0,
+    context_lines: int = 3,
+) -> str:
+    """Render a side-by-side diff of two text strings.
+
+    New lines appear in green, removed lines in red, unchanged lines
+    are collapsed to context_lines surrounding changed sections.
+
+    Args:
+        old_content: Current/left-side content.
+        new_content: Proposed/right-side content.
+        label: Optional section header.
+        width: Terminal column width (0 = auto-detect).
+        context_lines: Lines of unchanged context around each change hunk.
+
+    Returns:
+        Formatted string suitable for terminal output.
+    """
+    if not width:
+        try:
+            width = shutil.get_terminal_size(fallback=(160, 40)).columns
+        except Exception:
+            width = 160
+
+    # Each column gets roughly half, minus 3 chars for the separator
+    col_w = max(20, (width - 3) // 2)
+
+    old_lines = old_content.splitlines()
+    new_lines = new_content.splitlines()
+
+    # Build a sequence matcher to get change opcodes
+    matcher = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
+    opcodes = matcher.get_opcodes()
+
+    # Expand opcodes to include context lines, collapsing equal runs
+    visible: list[tuple[str, int | None, int | None]] = []
+    # visible entries: (tag, old_idx, new_idx) where None means blank
+
+    def _add_equal(start_a: int, end_a: int, start_b: int, end_b: int) -> None:
+        """Add up to context_lines lines from equal block, adding skip marker."""
+        count = end_a - start_a
+        if count <= context_lines * 2 + 1:
+            for i in range(count):
+                visible.append(("equal", start_a + i, start_b + i))
+        else:
+            for i in range(context_lines):
+                visible.append(("equal", start_a + i, start_b + i))
+            visible.append(("skip", None, None))
+            for i in range(count - context_lines, count):
+                visible.append(("equal", start_a + i, start_b + i))
+
+    for tag, a0, a1, b0, b1 in opcodes:
+        if tag == "equal":
+            _add_equal(a0, a1, b0, b1)
+        elif tag == "replace":
+            for i in range(max(a1 - a0, b1 - b0)):
+                oi = a0 + i if a0 + i < a1 else None
+                ni = b0 + i if b0 + i < b1 else None
+                visible.append(("replace", oi, ni))
+        elif tag == "delete":
+            for i in range(a1 - a0):
+                visible.append(("delete", a0 + i, None))
+        elif tag == "insert":
+            for i in range(b1 - b0):
+                visible.append(("insert", None, b0 + i))
+
+    def _pad(text: str, w: int) -> str:
+        """Truncate or pad text to exactly w characters."""
+        if len(text) > w:
+            return text[: w - 1] + "…"
+        return text.ljust(w)
+
+    lines_out: list[str] = []
+
+    # Header
+    if label:
+        header = f"── {label} "
+        lines_out.append(_color(header + "─" * max(0, width - len(header)), _ANSI_CYAN))
+    else:
+        lines_out.append(_color("─" * width, _ANSI_CYAN))
+
+    col_header = _pad("  CURRENT", col_w) + " │ " + _pad("  AFTER SYNC", col_w)
+    lines_out.append(_color(col_header, _ANSI_DIM))
+    lines_out.append(_color("─" * col_w + "─┼─" + "─" * col_w, _ANSI_DIM))
+
+    has_changes = False
+
+    for tag, oi, ni in visible:
+        if tag == "skip":
+            skip_line = _pad("  ⋮", col_w) + " │ " + _pad("  ⋮", col_w)
+            lines_out.append(_color(skip_line, _ANSI_DIM))
+            continue
+
+        old_text = old_lines[oi] if oi is not None else ""
+        new_text = new_lines[ni] if ni is not None else ""
+
+        if tag == "equal":
+            left = _pad("  " + old_text, col_w)
+            right = _pad("  " + new_text, col_w)
+            lines_out.append(left + " │ " + right)
+        elif tag in ("delete", "replace") and oi is not None and ni is None:
+            # Deletion: show old on left, empty on right
+            left = _color(_pad("- " + old_text, col_w), _ANSI_RED)
+            right = _pad("", col_w)
+            lines_out.append(left + " │ " + right)
+            has_changes = True
+        elif tag in ("insert", "replace") and oi is None and ni is not None:
+            # Insertion: empty on left, show new on right
+            left = _pad("", col_w)
+            right = _color(_pad("+ " + new_text, col_w), _ANSI_GREEN)
+            lines_out.append(left + " │ " + right)
+            has_changes = True
+        elif tag == "replace":
+            # Both sides changed
+            left = _color(_pad("- " + old_text, col_w), _ANSI_RED)
+            right = _color(_pad("+ " + new_text, col_w), _ANSI_GREEN)
+            lines_out.append(left + " │ " + right)
+            has_changes = True
+
+    if not has_changes:
+        lines_out.append(_color("  (no changes)", _ANSI_DIM))
+
+    return "\n".join(lines_out)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -543,18 +704,158 @@ class DiffFormatter:
         result.extend(f"  {line}" for line in semantic_lines)
         return "\n".join(result)
 
+    def format_side_by_side_report(self, width: int = 0, context_lines: int = 3) -> str:
+        """Render all accumulated text diffs as side-by-side views.
+
+        For each target file that has changes, produces a two-column view:
+        left = current content, right = post-sync content, with removed
+        lines in red and added lines in green.
+
+        Args:
+            width: Terminal column width (0 = auto-detect).
+            context_lines: Unchanged context lines to show around each hunk.
+
+        Returns:
+            Complete formatted string, or empty string if no text diffs.
+        """
+        parts: list[str] = []
+        for entry in self.diffs:
+            if not entry.startswith("--- ") or "[no changes]" in entry:
+                continue
+            # Extract label from "--- label ---\n<diff>"
+            first_line, _, rest = entry.partition("\n")
+            label = first_line.strip("- ").strip()
+            if not rest.strip() or rest.strip().startswith("---"):
+                continue
+            # Reconstruct old/new from unified diff lines
+            old_lines: list[str] = []
+            new_lines: list[str] = []
+            for dl in rest.splitlines():
+                if dl.startswith("+++") or dl.startswith("---") or dl.startswith("@@"):
+                    continue
+                if dl.startswith("+"):
+                    new_lines.append(dl[1:])
+                elif dl.startswith("-"):
+                    old_lines.append(dl[1:])
+                else:
+                    # Context line: appears in both
+                    old_lines.append(dl[1:] if dl.startswith(" ") else dl)
+                    new_lines.append(dl[1:] if dl.startswith(" ") else dl)
+            if not old_lines and not new_lines:
+                continue
+            parts.append(format_side_by_side(
+                "\n".join(old_lines),
+                "\n".join(new_lines),
+                label=label,
+                width=width,
+                context_lines=context_lines,
+            ))
+
+        if not parts:
+            return _color("[no file changes to preview]", _ANSI_DIM)
+        return "\n\n".join(parts)
+
+    def format_file_change_list(self, color: bool | None = None) -> str:
+        """Render a concise color-coded per-file change list (item 28).
+
+        Shows one line per file with:
+        - Green '+ NEW' for new files (no prior content)
+        - Red   '- DEL' for deletions
+        - Cyan  '~ MOD' for modifications, with +N/-N line counts
+        - Dim   '  ---' for unchanged files
+
+        This is the quick-scan view users see before deciding whether to
+        proceed with a sync. Designed to fit in a narrow terminal window.
+
+        Args:
+            color: Force color on/off. None = auto-detect from TTY.
+
+        Returns:
+            Formatted multi-line string.
+        """
+        use_color = _supports_color() if color is None else color
+
+        def _c(text: str, code: str) -> str:
+            return f"{code}{text}{_ANSI_RESET}" if use_color else text
+
+        lines: list[str] = [
+            _c("File Changes (dry-run)", _ANSI_CYAN),
+            _c("─" * 52, _ANSI_DIM),
+        ]
+
+        new_count = mod_count = del_count = unc_count = 0
+
+        for entry in self.diffs:
+            if not entry.startswith("--- "):
+                continue
+            first_line, _, rest = entry.partition("\n")
+            label = first_line.strip("- ").strip()
+
+            # Skip semantic/native preview sections in this view
+            if label.startswith("semantic diff:") or label.startswith("native preview:"):
+                continue
+
+            no_change = "[no changes]" in rest or not rest.strip()
+            is_new = "new file" in rest.lower() or (not rest.strip() and "[no changes]" not in entry)
+
+            # Count added/removed lines from embedded unified diff
+            added = sum(
+                1 for l in rest.splitlines()
+                if l.startswith("+") and not l.startswith("+++")
+            )
+            removed = sum(
+                1 for l in rest.splitlines()
+                if l.startswith("-") and not l.startswith("---")
+            )
+
+            if no_change:
+                unc_count += 1
+                lines.append(_c(f"  ---  {label}", _ANSI_DIM))
+            elif removed > 0 and added == 0:
+                del_count += 1
+                lines.append(_c(f"  DEL  {label}", _ANSI_RED))
+            elif added > 0 and removed == 0:
+                new_count += 1
+                lines.append(_c(f"  NEW  {label}  (+{added})", _ANSI_GREEN))
+            else:
+                mod_count += 1
+                delta = f"+{added}/-{removed}"
+                lines.append(_c(f"  MOD  {label}  ({delta})", _ANSI_CYAN))
+
+        lines.append(_c("─" * 52, _ANSI_DIM))
+        summary_parts = []
+        if new_count:
+            summary_parts.append(_c(f"{new_count} new", _ANSI_GREEN))
+        if mod_count:
+            summary_parts.append(_c(f"{mod_count} modified", _ANSI_CYAN))
+        if del_count:
+            summary_parts.append(_c(f"{del_count} deleted", _ANSI_RED))
+        if unc_count:
+            summary_parts.append(_c(f"{unc_count} unchanged", _ANSI_DIM))
+        if summary_parts:
+            lines.append("  " + "  ·  ".join(summary_parts))
+        else:
+            lines.append(_c("  (no file changes)", _ANSI_DIM))
+
+        return "\n".join(lines)
+
     def format_full_dry_run(self) -> str:
-        """Format a complete dry-run report: summary table + diffs + cost estimate.
+        """Format a complete dry-run report: file list + summary table + diffs + cost.
 
         Intended as the canonical output for ``--dry-run`` mode. Provides:
-          1. Per-harness summary table (quick scan)
-          2. Full unified diffs (detailed review)
-          3. Cost estimate (time / write count)
+          1. Color-coded per-file change list (quick at-a-glance)
+          2. Per-harness summary table (target breakdown)
+          3. Full unified diffs (detailed review)
+          4. Cost estimate (time / write count)
 
         Returns:
             Complete formatted string.
         """
         parts: list[str] = []
+
+        file_list = self.format_file_change_list()
+        if file_list:
+            parts.append(file_list)
 
         summary = self.format_per_harness_summary()
         if summary:
@@ -563,7 +864,7 @@ class DiffFormatter:
         diff_output = self.format_output()
         if diff_output and diff_output != "[no changes detected]":
             parts.append(diff_output)
-        elif not summary:
+        elif not summary and not file_list:
             parts.append("[no changes detected]")
 
         cost = self.estimate_cost()
