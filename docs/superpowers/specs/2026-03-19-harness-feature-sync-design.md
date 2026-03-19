@@ -427,8 +427,6 @@ For each Claude Code plugin:
 
 ### Settings Keys to Map
 
-| Claude Code setting | Codex | Gemini | OpenCode |
-|---|---|---|---|
 | Claude Code setting | Codex | Gemini | OpenCode | Skip rationale |
 |---|---|---|---|---|
 | `modelOverrides` | `[profiles.*]` section | Skip | Skip | Gemini/OpenCode don't have user-configurable model profiles |
