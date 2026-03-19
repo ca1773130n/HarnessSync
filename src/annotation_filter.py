@@ -76,9 +76,9 @@ class AnnotationDirective:
         if self.mode == "skip_all":
             return False
         if self.mode == "only":
-            return t in [h.lower() for h in self.harnesses]
+            return t in self.harnesses
         if self.mode == "skip":
-            return t not in [h.lower() for h in self.harnesses]
+            return t not in self.harnesses
         return True
 
 
@@ -229,24 +229,12 @@ class AnnotationFilter:
             {"cursor": ["only"], "aider": ["skip"], "all": ["skip_all"]}
         """
         summary: dict[str, list[str]] = {}
-        for m in _ANN_RE.finditer(content):
-            if m.group("skip_all"):
+        for d in _parse_annotations(content):
+            if d.mode == "skip_all":
                 summary.setdefault("all", []).append("skip_all")
-            elif m.group("only_single"):
-                h = m.group("only_harness").lower()
-                summary.setdefault(h, []).append("only")
-            elif m.group("skip_specific"):
-                raw = m.group("skip_list") or ""
-                for h in raw.split(","):
-                    h = h.strip().lower()
-                    if h:
-                        summary.setdefault(h, []).append("skip")
-            elif m.group("only_specific"):
-                raw = m.group("only_list") or ""
-                for h in raw.split(","):
-                    h = h.strip().lower()
-                    if h:
-                        summary.setdefault(h, []).append("only")
+            else:
+                for h in d.harnesses:
+                    summary.setdefault(h, []).append(d.mode)
         return summary
 
     @staticmethod

@@ -769,11 +769,11 @@ class SyncOrchestrator:
         _rules_have_annotations = False
         try:
             from src.annotation_filter import AnnotationFilter as _AnnFilter
-            _ann_combined = "\n".join(
-                r.get('content', '') for r in adapter_data.get('rules', [])
+            _rules_have_annotations = any(
+                _AnnFilter.has_annotations(r.get('content', ''))
+                for r in adapter_data.get('rules', [])
                 if isinstance(r, dict)
             )
-            _rules_have_annotations = _AnnFilter.has_annotations(_ann_combined)
             if _rules_have_annotations:
                 self.logger.info(
                     f"Inline harness annotations detected — will filter per target"
@@ -805,6 +805,7 @@ class SyncOrchestrator:
         # --- SYNC: EXECUTE ADAPTERS (wrapped in BackupContext if available) ---
         for target in targets:
             adapter = AdapterRegistry.get_adapter(target, self.project_dir)
+            _tmp_dir = None  # Temp dir for agent translation hints; cleaned up in finally
 
             # --- INCREMENTAL: skip target if no source files changed ---
             if self.incremental and _current_hashes:
@@ -861,7 +862,6 @@ class SyncOrchestrator:
                 # Step 2b: filter inline harness annotations (<!-- cursor-only -->, <!-- skip:aider -->)
                 if _rules_have_annotations:
                     try:
-                        from src.annotation_filter import AnnotationFilter as _AnnFilter
                         _ann_rules = target_data.get('rules', adapter_data.get('rules', []))
                         _ann_filtered = _AnnFilter.filter_rules_for_target(_ann_rules, target)
                         if isinstance(_ann_filtered, list):
@@ -987,7 +987,6 @@ class SyncOrchestrator:
                 # Prepend inline comments to agent files explaining what Claude Code
                 # features are not available in the target harness, so users know
                 # what to expect when a skill behaves differently.
-                _tmp_dir = None
                 try:
                     from src.skill_translator import inject_agent_translation_hints
                     import tempfile as _tempfile
