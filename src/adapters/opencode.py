@@ -64,10 +64,12 @@ class OpenCodeAdapter(AdapterBase):
         return "opencode"
 
     def sync_rules(self, rules: list[dict]) -> SyncResult:
-        """Sync CLAUDE.md rules to AGENTS.md with managed markers.
+        """Sync CLAUDE.md rules to AGENTS.md or instructions array in opencode.json.
 
-        Concatenates all rule file contents into a single managed section in AGENTS.md.
-        Preserves any user content outside HarnessSync markers. Writes to project root.
+        When multiple rule sources exist, writes individual rule files to
+        ``.opencode/rules/`` and references them as an ``instructions`` array
+        in opencode.json. When only one rule source exists, falls back to the
+        traditional AGENTS.md approach for backward compatibility.
 
         Args:
             rules: List of rule dicts with 'path' (Path) and 'content' (str) keys
@@ -81,7 +83,15 @@ class OpenCodeAdapter(AdapterBase):
                 skipped_files=["AGENTS.md: no rules to sync"]
             )
 
-        # Concatenate all rule contents
+        # Multi-source: write individual rule files + instructions array
+        if len(rules) > 1:
+            return self._sync_rules_multi_source(rules)
+
+        # Single source: backward-compatible AGENTS.md approach
+        return self._sync_rules_single_source(rules)
+
+    def _sync_rules_single_source(self, rules: list[dict]) -> SyncResult:
+        """Write rules to AGENTS.md (single source, backward compatible)."""
         rule_contents = [rule['content'] for rule in rules]
         concatenated = '\n\n---\n\n'.join(rule_contents)
 
@@ -115,6 +125,54 @@ class OpenCodeAdapter(AdapterBase):
             adapted=len(rules),
             synced_files=[str(self.agents_md_path)]
         )
+
+    def _sync_rules_multi_source(self, rules: list[dict]) -> SyncResult:
+        """Write individual rule files to .opencode/rules/ and reference in opencode.json."""
+        result = SyncResult()
+        rules_dir = self.opencode_dir / "rules"
+        ensure_dir(rules_dir)
+
+        instruction_paths: list[str] = []
+
+        for rule in rules:
+            # Determine a filename from the source path
+            source_path = rule.get('path')
+            if source_path:
+                source_path = Path(source_path)
+                # Use scope-based naming: user-rules.md, project-rules.md, etc.
+                scope = rule.get('scope', 'project')
+                name_stem = source_path.stem.lower().replace(' ', '-')
+                filename = f"{scope}-{name_stem}.md"
+            else:
+                filename = f"rules-{len(instruction_paths)}.md"
+
+            rule_file = rules_dir / filename
+            try:
+                rule_file.write_text(rule['content'], encoding='utf-8')
+                # Path relative to project root for opencode.json
+                rel_path = f".opencode/rules/{filename}"
+                instruction_paths.append(rel_path)
+                result.synced += 1
+                result.synced_files.append(str(rule_file))
+            except OSError as e:
+                result.failed += 1
+                result.failed_files.append(f"{filename}: {e}")
+
+        # Write instructions array to opencode.json
+        if instruction_paths:
+            try:
+                existing_config = read_json_safe(self.opencode_json_path)
+                existing_config['instructions'] = instruction_paths
+                if '$schema' not in existing_config:
+                    existing_config['$schema'] = 'https://opencode.ai/config.json'
+                write_json_atomic(self.opencode_json_path, existing_config)
+                result.synced_files.append(str(self.opencode_json_path))
+            except Exception as e:
+                result.failed += 1
+                result.failed_files.append(f"opencode.json instructions: {e}")
+
+        result.adapted = len(rules)
+        return result
 
     def sync_skills(self, skills: dict[str, Path]) -> SyncResult:
         """Sync skills to .opencode/skills/ via symlinks.
@@ -175,10 +233,24 @@ class OpenCodeAdapter(AdapterBase):
         return result
 
     def sync_agents(self, agents: dict[str, Path]) -> SyncResult:
-        """Sync agents to .opencode/agents/ via symlinks.
+        """Sync agents to .opencode/agents/ via symlinks AND write agent config to opencode.json.
 
         Creates symlinks from source agent .md files to .opencode/agents/{name}.md.
         Cleans up stale symlinks after creating all new symlinks.
+
+        Additionally writes the new ``agent`` config shape to opencode.json::
+
+            {
+                "agent": {
+                    "primary": "<first_agent>",
+                    "agents": {
+                        "<name>": {"instructions": "<content>"},
+                        ...
+                    }
+                }
+            }
+
+        This replaces the deprecated ``mode`` key.
 
         Args:
             agents: Dict mapping agent name to agent .md file path
@@ -195,6 +267,9 @@ class OpenCodeAdapter(AdapterBase):
         # Ensure agents directory exists
         ensure_dir(target_dir)
 
+        # Build agent config for opencode.json
+        agent_configs: dict[str, dict] = {}
+
         # Create symlinks for each agent
         for name, agent_path in agents.items():
             target_path = target_dir / f"{name}.md"
@@ -209,6 +284,17 @@ class OpenCodeAdapter(AdapterBase):
                 else:
                     result.synced += 1
                     result.synced_files.append(f"{name} ({method})")
+
+                # Read agent content for opencode.json agent config
+                try:
+                    if agent_path.is_file():
+                        content = agent_path.read_text(encoding='utf-8', errors='replace')
+                        # Extract instructions from agent content (strip frontmatter)
+                        instructions = self._extract_agent_instructions(content)
+                        if instructions:
+                            agent_configs[name] = {"instructions": instructions}
+                except OSError:
+                    pass  # Symlink created, just skip JSON config for this agent
             else:
                 result.failed += 1
                 result.failed_files.append(f"{name}: {method}")
@@ -218,7 +304,45 @@ class OpenCodeAdapter(AdapterBase):
         if cleaned > 0:
             result.skipped_files.append(f"cleaned: {cleaned} stale symlinks")
 
+        # Write agent config to opencode.json (new shape, replacing deprecated "mode")
+        if agent_configs:
+            try:
+                existing_config = read_json_safe(self.opencode_json_path)
+                # Remove deprecated "mode" key
+                existing_config.pop('mode', None)
+                # Determine primary agent (first in sorted order for determinism)
+                primary = sorted(agent_configs.keys())[0]
+                existing_config['agent'] = {
+                    "primary": primary,
+                    "agents": agent_configs,
+                }
+                if '$schema' not in existing_config:
+                    existing_config['$schema'] = 'https://opencode.ai/config.json'
+                write_json_atomic(self.opencode_json_path, existing_config)
+                result.adapted += len(agent_configs)
+            except Exception as e:
+                result.failed_files.append(f"opencode.json agent config: {e}")
+
         return result
+
+    @staticmethod
+    def _extract_agent_instructions(content: str) -> str:
+        """Extract instructions from agent .md content.
+
+        Strips YAML frontmatter (between --- delimiters) and returns the body.
+        Falls back to full content if no frontmatter found.
+
+        Args:
+            content: Raw agent .md file content
+
+        Returns:
+            Instruction text (body after frontmatter)
+        """
+        if content.startswith('---'):
+            match = re.match(r'^---\n.*?\n---\n(.*)$', content, re.DOTALL)
+            if match:
+                return match.group(1).strip()
+        return content.strip()
 
     def sync_commands(self, commands: dict[str, Path]) -> SyncResult:
         """Sync commands to .opencode/commands/ via symlinks.

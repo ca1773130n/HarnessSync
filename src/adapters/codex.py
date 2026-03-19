@@ -67,15 +67,21 @@ class CodexAdapter(AdapterBase):
         """
         return "codex"
 
-    def sync_rules(self, rules: list[dict]) -> SyncResult:
+    def sync_rules(self, rules: list[dict], rules_files: list[dict] | None = None) -> SyncResult:
         """Sync CLAUDE.md rules to AGENTS.md with managed markers.
 
         Concatenates all rule file contents into a single managed section in AGENTS.md.
         Preserves any user content above the HarnessSync marker. If AGENTS.md doesn't
         exist, creates it with just the managed section.
 
+        When *rules_files* contains entries with subdirectory paths (relative to the
+        project root), additional AGENTS.md files are created in those subdirectories
+        to leverage Codex's ``child_agents_md`` discovery mechanism.
+
         Args:
             rules: List of rule dicts with 'path' (Path) and 'content' (str) keys
+            rules_files: Optional list of rules_files dicts with 'path', 'content',
+                        'scope', 'scope_patterns' keys. Used for hierarchical AGENTS.md.
 
         Returns:
             SyncResult with synced=1 if rules written, skipped=1 if no rules
@@ -115,11 +121,105 @@ class CodexAdapter(AdapterBase):
         # Write AGENTS.md
         self._write_agents_md(final_content)
 
-        return SyncResult(
+        result = SyncResult(
             synced=1,
             adapted=len(rules),
             synced_files=[str(self.agents_md_path)]
         )
+
+        # Write hierarchical AGENTS.md for subdirectory rules_files
+        if rules_files:
+            sub_result = self._write_subdirectory_agents_md(rules_files, timestamp)
+            result = result.merge(sub_result)
+
+        return result
+
+    def _write_subdirectory_agents_md(self, rules_files: list[dict], timestamp: str) -> SyncResult:
+        """Write AGENTS.md files in subdirectories for Codex child_agents_md discovery.
+
+        Codex discovers AGENTS.md files in subdirectories automatically. When Claude Code
+        has project-scoped rules in .claude/rules/ with path-based scoping, we create
+        AGENTS.md files in the corresponding subdirectories.
+
+        Args:
+            rules_files: List of rules_files dicts with 'path', 'content', 'scope_patterns'
+            timestamp: ISO timestamp string for managed section
+
+        Returns:
+            SyncResult tracking subdirectory AGENTS.md files written
+        """
+        result = SyncResult()
+
+        for rule_file in rules_files:
+            scope_patterns = rule_file.get('scope_patterns', [])
+            content = rule_file.get('content', '')
+            if not scope_patterns or not content.strip():
+                continue
+
+            # Use the first scope pattern to determine subdirectory
+            for pattern in scope_patterns:
+                # Extract directory prefix from glob pattern (e.g., "src/api/**" -> "src/api")
+                subdir = self._extract_subdir_from_pattern(pattern)
+                if not subdir:
+                    continue
+
+                subdir_path = self.project_dir / subdir
+                if not subdir_path.is_dir():
+                    # Only create if the directory already exists in the project
+                    continue
+
+                sub_agents_md = subdir_path / AGENTS_MD
+                managed = f"""{HARNESSSYNC_MARKER}
+# Subdirectory rules synced from Claude Code
+
+{content}
+
+---
+*Last synced by HarnessSync: {timestamp}*
+{HARNESSSYNC_MARKER_END}"""
+
+                try:
+                    # Read existing or create
+                    existing = ""
+                    if sub_agents_md.exists():
+                        existing = sub_agents_md.read_text(encoding='utf-8', errors='replace')
+                    final = self._replace_managed_section(existing, managed)
+                    sub_agents_md.write_text(final, encoding='utf-8')
+                    result.synced += 1
+                    result.synced_files.append(str(sub_agents_md))
+                except OSError as e:
+                    result.failed += 1
+                    result.failed_files.append(f"{sub_agents_md}: {e}")
+                break  # Only use first matching pattern per rule file
+
+        return result
+
+    @staticmethod
+    def _extract_subdir_from_pattern(pattern: str) -> str:
+        """Extract the directory prefix from a glob/path pattern.
+
+        Examples:
+            "src/api/**/*.ts"  -> "src/api"
+            "src/components/*" -> "src/components"
+            "**/*.py"          -> ""  (no fixed prefix)
+            "docs/"            -> "docs"
+
+        Args:
+            pattern: Glob pattern string
+
+        Returns:
+            Directory prefix, or empty string if no fixed prefix
+        """
+        # Remove trailing slash
+        pattern = pattern.rstrip('/')
+        parts = pattern.split('/')
+        # Collect parts before any glob wildcard
+        prefix_parts = []
+        for part in parts:
+            if '*' in part or '?' in part or '[' in part:
+                break
+            prefix_parts.append(part)
+        return '/'.join(prefix_parts)
 
     def sync_skills(self, skills: dict[str, Path]) -> SyncResult:
         """Sync skills to .agents/skills/ via symlinks.
@@ -291,6 +391,69 @@ class CodexAdapter(AdapterBase):
                 result.failed_files.append(f"{cmd_name}: {str(e)}")
 
         return result
+
+    def sync_all(self, source_data: dict) -> dict[str, SyncResult]:
+        """Override sync_all to pass rules_files to sync_rules for hierarchical AGENTS.md.
+
+        Args:
+            source_data: Dict with keys 'rules', 'rules_files', 'skills', 'agents',
+                        'commands', 'mcp', 'settings'
+
+        Returns:
+            Dict mapping config type to SyncResult
+        """
+        results = {}
+
+        # Pre-sync: warn about deprecated config fields
+        settings_output = source_data.get('settings', {})
+        if settings_output:
+            dep_warnings = self.check_deprecations(settings_output)
+            for w in dep_warnings:
+                import sys
+                print(f"  \u26a0  {w}", file=sys.stderr)
+
+        # Sync rules with rules_files for hierarchical AGENTS.md
+        try:
+            results['rules'] = self.sync_rules(
+                source_data.get('rules', []),
+                rules_files=source_data.get('rules_files', None),
+            )
+        except Exception as e:
+            results['rules'] = SyncResult(
+                failed=1,
+                failed_files=[f'rules: {str(e)}']
+            )
+
+        # Sync remaining types via parent class pattern
+        for config_type, method_name, data_key, default in [
+            ('skills', 'sync_skills', 'skills', {}),
+            ('agents', 'sync_agents', 'agents', {}),
+            ('commands', 'sync_commands', 'commands', {}),
+            ('settings', 'sync_settings', 'settings', {}),
+        ]:
+            try:
+                method = getattr(self, method_name)
+                results[config_type] = method(source_data.get(data_key, default))
+            except Exception as e:
+                results[config_type] = SyncResult(
+                    failed=1,
+                    failed_files=[f'{config_type}: {str(e)}']
+                )
+
+        # Sync MCP servers (use scoped data if available, fall back to flat)
+        try:
+            mcp_scoped = source_data.get('mcp_scoped', {})
+            if mcp_scoped:
+                results['mcp'] = self.sync_mcp_scoped(mcp_scoped)
+            else:
+                results['mcp'] = self.sync_mcp(source_data.get('mcp', {}))
+        except Exception as e:
+            results['mcp'] = SyncResult(
+                failed=1,
+                failed_files=[f'mcp: {str(e)}']
+            )
+
+        return results
 
     # Environment variable key substrings that indicate bearer token / auth credentials
     _AUTH_ENV_KEYWORDS = ('TOKEN', 'KEY', 'AUTH', 'BEARER', 'SECRET')

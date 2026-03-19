@@ -19,6 +19,7 @@ import re
 from pathlib import Path
 from src.utils.paths import read_json_safe
 from src.utils.permissions import extract_permissions
+from src.utils.includes import resolve_includes, extract_include_refs
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Inline harness annotation parsing (item 2 — Per-Harness Rule Overrides)
@@ -354,8 +355,13 @@ class SourceReader:
         Returns:
             Combined rules string with section headers, or empty string if none found.
             Multiple sections joined with "\\n\\n---\\n\\n".
+
+        Side-effect:
+            Populates ``self._include_refs`` with raw ``@include`` paths found
+            during resolution, available via :meth:`get_include_refs`.
         """
         rules = []
+        all_include_refs: list[str] = []
 
         if self.scope in ("user", "all"):
             # User-level CLAUDE.md
@@ -363,6 +369,10 @@ class SourceReader:
             if user_claude_md.exists():
                 try:
                     content = user_claude_md.read_text(encoding='utf-8', errors='replace')
+                    # Collect raw include refs before resolution
+                    all_include_refs.extend(extract_include_refs(content))
+                    # Resolve @include directives
+                    content, _included = resolve_includes(content, user_claude_md.parent)
                     rules.append(f"# [User-level rules from ~/.claude/CLAUDE.md]\n\n{content}")
                 except (OSError, UnicodeDecodeError):
                     pass  # Skip on error
@@ -374,6 +384,8 @@ class SourceReader:
                 if p.exists():
                     try:
                         content = p.read_text(encoding='utf-8', errors='replace')
+                        all_include_refs.extend(extract_include_refs(content))
+                        content, _included = resolve_includes(content, p.parent)
                         rules.append(f"# [Project rules from {claude_md_name}]\n\n{content}")
                     except (OSError, UnicodeDecodeError):
                         pass
@@ -383,11 +395,25 @@ class SourceReader:
             if p.exists():
                 try:
                     content = p.read_text(encoding='utf-8', errors='replace')
+                    all_include_refs.extend(extract_include_refs(content))
+                    content, _included = resolve_includes(content, p.parent)
                     rules.append(f"# [Project rules from .claude/CLAUDE.md]\n\n{content}")
                 except (OSError, UnicodeDecodeError):
                     pass
 
+        # Store include refs for discover_all() to expose
+        self._include_refs = all_include_refs
+
         return "\n\n---\n\n".join(rules)
+
+    def get_include_refs(self) -> list[str]:
+        """Return raw ``@include`` path strings found during the last ``get_rules()`` call.
+
+        Returns:
+            List of raw include path strings. Empty if ``get_rules()`` has not been called
+            or no ``@include`` directives were found.
+        """
+        return getattr(self, '_include_refs', [])
 
     def get_rules_for_harness(self, target: str) -> str:
         """Return rules filtered by inline ``<!-- harness:X -->`` annotations.
@@ -1015,13 +1041,18 @@ class SourceReader:
         Convenience method to get all config types at once.
 
         Returns:
-            Dictionary with keys: rules, skills, agents, commands,
+            Dictionary with keys: rules (fully resolved with includes inlined),
+            include_refs (raw @include paths for adapters that prefer native imports),
+            rules_files, skills, agents, commands,
             mcp_servers (flat), mcp_servers_scoped (with metadata), settings
         """
         scoped = self.get_mcp_servers_with_scope()
         flat = {name: entry["config"] for name, entry in scoped.items()}
+        # get_rules() populates self._include_refs as a side-effect
+        rules = self.get_rules()
         return {
-            "rules": self.get_rules(),
+            "rules": rules,
+            "include_refs": self.get_include_refs(),
             "rules_files": self.get_rules_files(),
             "skills": self.get_skills(),
             "agents": self.get_agents(),

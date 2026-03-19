@@ -23,6 +23,10 @@ from .result import SyncResult
 from src.utils.paths import ensure_dir, read_json_safe, write_json_atomic
 from src.utils.env_translator import check_transport_support
 from src.utils.permissions import extract_permissions, parse_permission_string
+from src.utils.includes import extract_include_refs
+
+# Regex for @include directives (same pattern as in includes.py)
+_INCLUDE_RE = re.compile(r'(?:^|(?<=\s))@include\s+(\S+)', re.MULTILINE)
 
 
 # Gemini CLI constants
@@ -55,14 +59,36 @@ class GeminiAdapter(AdapterBase):
         """
         return "gemini"
 
-    def sync_rules(self, rules: list[dict]) -> SyncResult:
+    @staticmethod
+    def convert_includes_to_native(content: str) -> str:
+        """Convert ``@include path/to/file.md`` directives to Gemini ``@file.md`` syntax.
+
+        Gemini CLI supports native ``@path/to/file.md`` imports. This method
+        replaces HarnessSync ``@include`` directives with Gemini's native form
+        so that modularity is preserved in the target config rather than inlining.
+
+        Args:
+            content: Rule content potentially containing ``@include`` directives.
+
+        Returns:
+            Content with ``@include X`` replaced by ``@X``.
+        """
+        return _INCLUDE_RE.sub(lambda m: f'@{m.group(1)}', content)
+
+    def sync_rules(self, rules: list[dict], include_refs: list[str] | None = None) -> SyncResult:
         """Sync CLAUDE.md rules to GEMINI.md with managed markers.
 
         Concatenates all rule file contents into a single managed section in GEMINI.md.
         Preserves any user content outside HarnessSync markers.
 
+        When *include_refs* is provided (non-empty), the adapter converts
+        ``@include`` directives to Gemini's native ``@file.md`` import syntax
+        instead of using the pre-resolved (inlined) content.
+
         Args:
             rules: List of rule dicts with 'path' (Path) and 'content' (str) keys
+            include_refs: Optional list of raw @include path strings. When present,
+                         the adapter uses native import conversion instead of inlining.
 
         Returns:
             SyncResult with synced=1 if rules written, skipped=1 if no rules
@@ -76,6 +102,10 @@ class GeminiAdapter(AdapterBase):
         # Concatenate all rule contents
         rule_contents = [rule['content'] for rule in rules]
         concatenated = '\n\n---\n\n'.join(rule_contents)
+
+        # If include_refs are available, convert @include to Gemini native @file.md
+        if include_refs:
+            concatenated = self.convert_includes_to_native(concatenated)
 
         # Build managed section
         timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
@@ -800,14 +830,68 @@ class GeminiAdapter(AdapterBase):
         if all three native-format syncs (skills, agents, commands) completed
         without failures, to avoid data loss.
 
+        Also passes ``include_refs`` from source_data to sync_rules so that
+        ``@include`` directives are converted to Gemini native ``@file.md`` syntax.
+
         Args:
             source_data: Dict with keys 'rules', 'skills', 'agents',
-                        'commands', 'mcp', 'settings'
+                        'commands', 'mcp', 'settings', optionally 'include_refs'
 
         Returns:
             Dict mapping config type to SyncResult
         """
-        results = super().sync_all(source_data)
+        # Override rules sync to pass include_refs
+        results = {}
+
+        # Pre-sync: warn about deprecated config fields
+        settings_output = source_data.get('settings', {})
+        if settings_output:
+            dep_warnings = self.check_deprecations(settings_output)
+            for w in dep_warnings:
+                import sys
+                print(f"  \u26a0  {w}", file=sys.stderr)
+
+        # Sync rules with include_refs support
+        try:
+            include_refs = source_data.get('include_refs', [])
+            results['rules'] = self.sync_rules(
+                source_data.get('rules', []),
+                include_refs=include_refs if include_refs else None,
+            )
+        except Exception as e:
+            results['rules'] = SyncResult(
+                failed=1,
+                failed_files=[f'rules: {str(e)}']
+            )
+
+        # Sync remaining types via base class individual methods
+        for config_type, method_name, data_key, default in [
+            ('skills', 'sync_skills', 'skills', {}),
+            ('agents', 'sync_agents', 'agents', {}),
+            ('commands', 'sync_commands', 'commands', {}),
+            ('settings', 'sync_settings', 'settings', {}),
+        ]:
+            try:
+                method = getattr(self, method_name)
+                results[config_type] = method(source_data.get(data_key, default))
+            except Exception as e:
+                results[config_type] = SyncResult(
+                    failed=1,
+                    failed_files=[f'{config_type}: {str(e)}']
+                )
+
+        # Sync MCP servers (use scoped data if available, fall back to flat)
+        try:
+            mcp_scoped = source_data.get('mcp_scoped', {})
+            if mcp_scoped:
+                results['mcp'] = self.sync_mcp_scoped(mcp_scoped)
+            else:
+                results['mcp'] = self.sync_mcp(source_data.get('mcp', {}))
+        except Exception as e:
+            results['mcp'] = SyncResult(
+                failed=1,
+                failed_files=[f'mcp: {str(e)}']
+            )
 
         # Only cleanup if all three native-format syncs succeeded (no failures)
         skills_ok = results.get('skills', SyncResult()).failed == 0
