@@ -34,11 +34,11 @@ from src.utils.permissions import extract_permissions, parse_permission_string
 
 # Codex CLI constants
 HARNESSSYNC_MARKER = "<!-- Managed by HarnessSync -->"
+HARNESSSYNC_MARKER_END = "<!-- End HarnessSync managed content -->"
 
 # Thresholds for intent-based approval policy mapping (see _map_approval_policy)
 CODEX_DENY_THRESHOLD = 3    # deny_list >= this -> "untrusted"
 CODEX_ALLOW_THRESHOLD = 5   # allow_list >= this (with no denies) -> "never"
-HARNESSSYNC_MARKER_END = "<!-- End HarnessSync managed content -->"
 AGENTS_MD = "AGENTS.md"
 SKILLS_DIR = ".agents/skills"
 CONFIG_TOML = "config.toml"

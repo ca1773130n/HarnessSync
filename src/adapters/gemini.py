@@ -514,7 +514,7 @@ class GeminiAdapter(AdapterBase):
                 # - timeout: not supported
                 # - oauth_scopes: not supported
                 # - elicitation: not supported
-                # - enabled_tools / disabled_tools: use includeTools / excludeTools instead
+                # - enabled_tools / disabled_tools: dropped (Gemini uses native includeTools/excludeTools if provided directly)
 
                 # Add to mcpServers (override if exists)
                 existing_settings['mcpServers'][server_name] = server_config
