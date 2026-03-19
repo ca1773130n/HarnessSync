@@ -56,7 +56,7 @@ def parse_permission_string(perm: str) -> tuple[str, str]:
         "Read"                      -> ("Read", "")
         "Bash(npm *)"               -> ("Bash", "npm *")
         "Bash(git push *)"          -> ("Bash", "git push *")
-        "WebFetch(https://x.com/*)" -> ("WebFetch", "https://x.com/*)")
+        "WebFetch(https://x.com/*)" -> ("WebFetch", "https://x.com/*")
                                        Note: nested parens preserved.
         ""                          -> ("", "")
 

@@ -455,8 +455,11 @@ class OpenCodeAdapter(AdapterBase):
                     if not tool:
                         continue
 
-                    # Translate Claude Code colon-separated patterns to space-separated
-                    # e.g. "git commit:*" -> "git commit *"
+                    # Translate Claude Code colon-separated patterns to space-separated.
+                    # Claude Code historically uses colons in some permission globs
+                    # (e.g. "Bash(git commit:*)"), but OpenCode expects spaces in
+                    # its permission dict keys (e.g. "git commit *").  This was the
+                    # original behaviour before parse_permission_string was extracted.
                     if args:
                         args = args.replace(':', ' ')
 

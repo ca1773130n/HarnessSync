@@ -34,6 +34,10 @@ from src.utils.permissions import extract_permissions, parse_permission_string
 
 # Codex CLI constants
 HARNESSSYNC_MARKER = "<!-- Managed by HarnessSync -->"
+
+# Thresholds for intent-based approval policy mapping (see _map_approval_policy)
+CODEX_DENY_THRESHOLD = 3    # deny_list >= this -> "untrusted"
+CODEX_ALLOW_THRESHOLD = 5   # allow_list >= this (with no denies) -> "never"
 HARNESSSYNC_MARKER_END = "<!-- End HarnessSync managed content -->"
 AGENTS_MD = "AGENTS.md"
 SKILLS_DIR = ".agents/skills"
@@ -546,11 +550,11 @@ class CodexAdapter(AdapterBase):
             Codex approval_policy string
         """
         # Restrictive: many deny rules indicate a locked-down stance
-        if len(deny_list) >= 3:
+        if len(deny_list) >= CODEX_DENY_THRESHOLD:
             return "untrusted"
 
         # Permissive: many allow rules with no deny rules
-        if len(allow_list) >= 5 and not deny_list:
+        if len(allow_list) >= CODEX_ALLOW_THRESHOLD and not deny_list:
             return "never"
 
         # Balanced: everything else

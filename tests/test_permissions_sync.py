@@ -541,6 +541,32 @@ class TestOpenCodePermissionMapping:
         assert perm["bash"]["*"] == "ask"
         assert perm["bash"]["npm install *"] == "allow"
 
+    def test_colon_to_space_translation(self, tmp_path):
+        """Colons in Claude Code permission globs are translated to spaces for OpenCode.
+
+        Claude Code uses colon-separated patterns (e.g. "git commit:*") while
+        OpenCode expects space-separated keys in its permission dict.
+        """
+        from src.adapters.opencode import OpenCodeAdapter
+
+        adapter = OpenCodeAdapter(project_dir=tmp_path)
+
+        settings = {
+            "permissions": {
+                "allow": ["Bash(git commit:*)"],
+                "deny": [],
+                "ask": [],
+            }
+        }
+        adapter.sync_settings(settings)
+
+        config = json.loads((tmp_path / "opencode.json").read_text())
+        perm = config.get("permission", {})
+        assert isinstance(perm.get("bash"), dict)
+        # Colon should be translated to space
+        assert "git commit *" in perm["bash"]
+        assert perm["bash"]["git commit *"] == "allow"
+
     def test_empty_settings(self, tmp_path):
         from src.adapters.opencode import OpenCodeAdapter
 
