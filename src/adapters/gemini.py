@@ -627,6 +627,15 @@ class GeminiAdapter(AdapterBase):
                     "yolo mode: not enabled (conservative default, Claude Code had auto-approval)"
                 )
 
+            # Map respectGitignore -> fileFiltering.respectGitignore
+            respect_gitignore = settings.get('respectGitignore')
+            if isinstance(respect_gitignore, bool):
+                file_filtering = existing_settings.get('fileFiltering', {})
+                if not isinstance(file_filtering, dict):
+                    file_filtering = {}
+                file_filtering['respectGitignore'] = respect_gitignore
+                existing_settings['fileFiltering'] = file_filtering
+
             # Write atomically
             write_json_atomic(self.settings_path, existing_settings)
 

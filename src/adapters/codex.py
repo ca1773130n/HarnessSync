@@ -1125,6 +1125,10 @@ class CodexAdapter(AdapterBase):
         | Balanced (default ask)     | "on-request"          |
         | Permissive (many allows)   | "never"               |
 
+        Additional settings mapped:
+        - modelOverrides -> [profiles.*] TOML sections
+        - attribution -> command_attribution boolean
+
         Specific deny rules are documented as warnings in AGENTS.md since Codex
         cannot express per-tool restrictions. The mapping is intentionally lossy.
 
@@ -1173,7 +1177,23 @@ class CodexAdapter(AdapterBase):
                 f'sandbox_mode = "{sandbox_mode}"',
                 f'approval_policy = "{approval_policy}"',
             ]
+
+            # Map attribution -> command_attribution
+            attribution = settings.get('attribution')
+            if attribution is not None:
+                attr_value = self._map_attribution(attribution)
+                if attr_value is not None:
+                    settings_lines.append(
+                        f'command_attribution = {format_toml_value(attr_value)}'
+                    )
+
             settings_section = '\n'.join(settings_lines)
+
+            # Build profiles section from modelOverrides
+            profiles_section = ''
+            model_overrides = settings.get('modelOverrides')
+            if isinstance(model_overrides, dict) and model_overrides:
+                profiles_section = self._map_model_overrides(model_overrides)
 
             # Preserve MCP servers section if present
             mcp_section = ''
@@ -1185,7 +1205,10 @@ class CodexAdapter(AdapterBase):
             preserved = self._extract_unmanaged_toml(config_path)
 
             # Build complete config.toml
-            final_toml = self._build_config_toml(settings_section, mcp_section, preserved)
+            final_toml = self._build_config_toml(
+                settings_section, mcp_section, preserved,
+                profiles_section=profiles_section,
+            )
 
             # Write atomically
             write_toml_atomic(config_path, final_toml)
@@ -1204,6 +1227,75 @@ class CodexAdapter(AdapterBase):
             result.failed_files.append(f"Settings: {str(e)}")
 
         return result
+
+    @staticmethod
+    def _map_attribution(attribution) -> bool | None:
+        """Convert Claude Code attribution setting to Codex command_attribution boolean.
+
+        Handles multiple input shapes:
+        - bool: direct passthrough
+        - str: "true"/"false" (case-insensitive), any other truthy string -> True
+        - dict with 'enabled' key: use that value
+        - None / unrecognized: return None (skip)
+
+        Args:
+            attribution: Raw attribution value from Claude Code settings
+
+        Returns:
+            Boolean for Codex command_attribution, or None to skip
+        """
+        if isinstance(attribution, bool):
+            return attribution
+        if isinstance(attribution, str):
+            lower = attribution.lower().strip()
+            if lower == 'false':
+                return False
+            if lower == 'true' or lower:
+                return True
+            return None
+        if isinstance(attribution, dict):
+            enabled = attribution.get('enabled')
+            if isinstance(enabled, bool):
+                return enabled
+            if isinstance(enabled, str):
+                return enabled.lower().strip() != 'false'
+            return None
+        return None
+
+    @staticmethod
+    def _map_model_overrides(model_overrides: dict) -> str:
+        """Convert Claude Code modelOverrides to Codex [profiles.*] TOML sections.
+
+        Claude Code format:
+            {"planning": "opus", "coding": "sonnet", "review": "opus"}
+
+        Codex format:
+            [profiles.planning]
+            model = "opus"
+
+            [profiles.coding]
+            model = "sonnet"
+
+            [profiles.review]
+            model = "opus"
+
+        Args:
+            model_overrides: Dict mapping task type to model name
+
+        Returns:
+            TOML string with [profiles.*] sections
+        """
+        lines = []
+        for task_type, model_name in model_overrides.items():
+            if not isinstance(task_type, str) or not task_type.strip():
+                continue
+            if not isinstance(model_name, str) or not model_name.strip():
+                continue
+            if lines:
+                lines.append('')
+            lines.append(f'[profiles.{task_type}]')
+            lines.append(f'model = {format_toml_value(model_name)}')
+        return '\n'.join(lines)
 
     def _map_approval_policy(
         self,
@@ -1543,16 +1635,18 @@ description: {quoted_desc}
                 continue
             if stripped.startswith('approval_policy') and '=' in stripped:
                 continue
+            if stripped.startswith('command_attribution') and '=' in stripped:
+                continue
 
             # Track table headers
             if stripped.startswith('['):
-                if stripped.startswith('[mcp_servers'):
+                if stripped.startswith('[mcp_servers') or stripped.startswith('[profiles.'):
                     in_mcp_section = True
                     continue
                 else:
                     in_mcp_section = False
 
-            # Skip lines inside mcp_servers sections
+            # Skip lines inside managed sections (mcp_servers, profiles)
             if in_mcp_section:
                 continue
 
@@ -1562,12 +1656,20 @@ description: {quoted_desc}
         result = '\n'.join(kept_lines).strip()
         return result
 
-    def _build_config_toml(self, settings_section: str, mcp_section: str, preserved_sections: str = '') -> str:
-        """Combine settings and MCP sections into complete config.toml.
+    def _build_config_toml(
+        self,
+        settings_section: str,
+        mcp_section: str,
+        preserved_sections: str = '',
+        profiles_section: str = '',
+    ) -> str:
+        """Combine settings, profiles, and MCP sections into complete config.toml.
 
         Args:
-            settings_section: Settings TOML content (sandbox_mode, approval_policy)
+            settings_section: Settings TOML content (sandbox_mode, approval_policy, etc.)
             mcp_section: MCP servers TOML content
+            preserved_sections: Non-managed TOML sections to preserve
+            profiles_section: [profiles.*] TOML sections from modelOverrides
 
         Returns:
             Complete config.toml string with header comment
@@ -1580,6 +1682,10 @@ description: {quoted_desc}
 
         if settings_section:
             lines.append(settings_section)
+            lines.append('')
+
+        if profiles_section:
+            lines.append(profiles_section)
             lines.append('')
 
         if mcp_section:
