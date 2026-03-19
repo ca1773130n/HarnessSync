@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 
 # Matches @include at start of line or after whitespace
-_INCLUDE_RE = re.compile(r'(?:^|(?<=\s))@include\s+(\S+)', re.MULTILINE)
+INCLUDE_RE = re.compile(r'(?:^|(?<=\s))@include\s+(\S+)', re.MULTILINE)
 
 MAX_INCLUDE_DEPTH = 10
 
@@ -65,8 +65,9 @@ def resolve_includes(
         if target in _seen:
             return f"<!-- @include {raw_path}: circular include detected -->"
 
-        # Symlink boundary: don't follow symlinks outside base_dir's parent tree
-        # We compare against the original base_dir's parent (project root-ish)
+        # NOTE: Symlink boundary check is defense-in-depth. Since Path.resolve()
+        # follows symlinks, target.is_symlink() will be False for most resolved
+        # paths. This catches the edge case of unresolvable or chained symlinks.
         try:
             anchor = base_dir.resolve()
             # Walk up to find a reasonable boundary (use the original base_dir's root)
@@ -96,7 +97,7 @@ def resolve_includes(
             return f"<!-- @include {raw_path}: could not read file -->"
 
         # Track this path
-        if target not in [p for p in included_paths]:
+        if target not in included_paths:
             included_paths.append(target)
 
         # Mark as seen for cycle detection in this branch
@@ -117,7 +118,7 @@ def resolve_includes(
 
         return resolved
 
-    result = _INCLUDE_RE.sub(_replace_include, content)
+    result = INCLUDE_RE.sub(_replace_include, content)
     return result, included_paths
 
 
@@ -133,4 +134,4 @@ def extract_include_refs(content: str) -> list[str]:
     Returns:
         List of raw path strings in encounter order.
     """
-    return _INCLUDE_RE.findall(content)
+    return INCLUDE_RE.findall(content)

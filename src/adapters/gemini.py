@@ -23,10 +23,7 @@ from .result import SyncResult
 from src.utils.paths import ensure_dir, read_json_safe, write_json_atomic
 from src.utils.env_translator import check_transport_support
 from src.utils.permissions import extract_permissions, parse_permission_string
-from src.utils.includes import extract_include_refs
-
-# Regex for @include directives (same pattern as in includes.py)
-_INCLUDE_RE = re.compile(r'(?:^|(?<=\s))@include\s+(\S+)', re.MULTILINE)
+from src.utils.includes import extract_include_refs, INCLUDE_RE
 
 
 # Gemini CLI constants
@@ -73,7 +70,7 @@ class GeminiAdapter(AdapterBase):
         Returns:
             Content with ``@include X`` replaced by ``@X``.
         """
-        return _INCLUDE_RE.sub(lambda m: f'@{m.group(1)}', content)
+        return INCLUDE_RE.sub(lambda m: f'@{m.group(1)}', content)
 
     def sync_rules(self, rules: list[dict], include_refs: list[str] | None = None) -> SyncResult:
         """Sync CLAUDE.md rules to GEMINI.md with managed markers.
