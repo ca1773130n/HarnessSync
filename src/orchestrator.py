@@ -676,7 +676,8 @@ class SyncOrchestrator:
             from src.sync_policy import PolicyEnforcer
             _policy = PolicyEnforcer(project_dir=self.project_dir)
             if _policy.has_policy:
-                _policy_result = _policy.check_all(source_data, targets=targets)
+                _pre_policy_targets = AdapterRegistry.list_targets()
+                _policy_result = _policy.check_all(source_data, targets=_pre_policy_targets)
                 if _policy_result.any_blocked:
                     self.logger.warn("Sync blocked by policy:")
                     for _pr in _policy_result.reports:
@@ -764,6 +765,22 @@ class SyncOrchestrator:
             if isinstance(r, dict)
         )
 
+        # Detect if any rules have inline harness annotations (<!-- cursor-only -->, <!-- skip:aider -->)
+        _rules_have_annotations = False
+        try:
+            from src.annotation_filter import AnnotationFilter as _AnnFilter
+            _ann_combined = "\n".join(
+                r.get('content', '') for r in adapter_data.get('rules', [])
+                if isinstance(r, dict)
+            )
+            _rules_have_annotations = _AnnFilter.has_annotations(_ann_combined)
+            if _rules_have_annotations:
+                self.logger.info(
+                    f"Inline harness annotations detected — will filter per target"
+                )
+        except Exception:
+            pass  # Annotation filter is best-effort
+
         # --- USER-DEFINED TRANSFORM RULES: load once per sync run ---
         _transform_engine = None
         try:
@@ -841,6 +858,17 @@ class SyncOrchestrator:
                         for r in _rules_source
                         if isinstance(r, dict)
                     ]
+                # Step 2b: filter inline harness annotations (<!-- cursor-only -->, <!-- skip:aider -->)
+                if _rules_have_annotations:
+                    try:
+                        from src.annotation_filter import AnnotationFilter as _AnnFilter
+                        _ann_rules = target_data.get('rules', adapter_data.get('rules', []))
+                        _ann_filtered = _AnnFilter.filter_rules_for_target(_ann_rules, target)
+                        if isinstance(_ann_filtered, list):
+                            target_data['rules'] = _ann_filtered
+                    except Exception:
+                        pass  # Annotation filter is best-effort
+
                 # Step 3: apply user-defined transform rules
                 if _transform_engine and _transform_engine.has_rules():
                     target_data['rules'] = _transform_engine.apply_to_rules(
@@ -959,6 +987,7 @@ class SyncOrchestrator:
                 # Prepend inline comments to agent files explaining what Claude Code
                 # features are not available in the target harness, so users know
                 # what to expect when a skill behaves differently.
+                _tmp_dir = None
                 try:
                     from src.skill_translator import inject_agent_translation_hints
                     import tempfile as _tempfile
@@ -1000,6 +1029,14 @@ class SyncOrchestrator:
                     results[target] = {
                         'error': SyncResult(failed=1, failed_files=[str(e)])
                     }
+                finally:
+                    # Clean up temp directory from agent translation hints
+                    if _tmp_dir and _tmp_dir.exists():
+                        import shutil as _shutil
+                        try:
+                            _shutil.rmtree(_tmp_dir)
+                        except OSError:
+                            pass
 
         # --- POST-SYNC: RESTORE USER ANNOTATIONS (skip in dry-run) ---
         if not self.dry_run and _captured_annotations:
@@ -1077,7 +1114,6 @@ class SyncOrchestrator:
         if not self.dry_run:
             try:
                 from src.audit_log import AuditLog
-                from src.utils.hashing import hash_file_sha256
                 _audit = AuditLog(project_dir=self.project_dir)
                 _synced_targets = [
                     t for t in results
@@ -1139,12 +1175,6 @@ class SyncOrchestrator:
                 from src.adapters.base import BaseAdapter
                 integrity_store = SyncIntegrityStore(project_dir=self.project_dir)
                 files_to_sign: list[Path] = []
-                for target, target_results in results.items():
-                    if target.startswith("_") or not isinstance(target_results, dict):
-                        continue
-                    # Collect written output files for each adapter
-                    for adapter in [a for a in targets if a == target]:
-                        pass  # adapters variable holds adapter objects, not names
                 # Sign well-known output files for each registered target
                 for t_name in list(results.keys()):
                     if t_name.startswith("_"):

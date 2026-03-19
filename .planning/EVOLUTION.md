@@ -5645,3 +5645,108 @@ None
 None
 
 ---
+## Iteration 88
+_2026-03-18T02:15:46.454Z_
+
+### Items Attempted
+
+- **Auto-sync on git commit** — pass
+- **Live capability gap matrix** — pass
+- **Team config broadcast** — pass
+- **Config conflict merge assistant** — pass
+- **Section-level selective sync** — pass
+- **MCP server portability checker** — pass
+- **New harness onboarding wizard** — pass
+- **Environment variable translation map** — pass
+- **Permission downgrade guardian** — pass
+- **Persistent sync health dashboard** — pass
+- **Config time machine / rollback** — pass
+- **Skill compatibility transpiler** — pass
+- **CI/CD sync action** — pass
+- **Rules inheritance model** — pass
+- **Natural language sync query** — pass
+- **Community preset library** — pass
+- **Sync impact analysis** — pass
+- **Config lint with auto-fix** — pass
+- **Harness feature watchlist** — pass
+- **Auto sync changelog** — pass
+- **Per-project sync profiles** — pass
+- **Harness response benchmark** — pass
+- **Sensitive content redactor** — pass
+- **Scheduled background sync** — pass
+- **Harness migration assistant** — pass
+- **Inline annotation sync control** — pass
+- **Sync webhook notifications** — pass
+- **Harness schema registry** — pass
+
+### Decisions Made
+
+- Fixed sync_git_hook.py: --post-merge and --pre-push flags were parsed as argparse arguments and fully imported from git_hook_installer, but were never wired into the install/uninstall/status action branches — a silent dead-code bug. Added post_merge/pre_push variable extraction and all three action handlers.
+- Implemented FeatureWatchlist in src/feature_watchlist.py with atomic JSON persistence at ~/.harnesssync/watchlist.json. Used the existing HarnessFeatureMatrix.query_feature() as the ground truth so watchlist checks always reflect the current matrix, not stale data.
+- Integrated watchlist as --watchlist, --watchlist-add, --watchlist-remove, --watchlist-check flags on the existing /sync-gaps command rather than a separate command, keeping related gap-tracking functionality co-located.
+- WatchlistHit tracks both improved and regressed support levels so users are notified of regressions (a harness removing a feature) as well as additions — direction is computed from a 4-level rank: native > partial > adapter > unsupported.
+- Watchlist records the support level at the time of add() so first check() is always relative to when the user started watching, not to any historical snapshot.
+
+### Patterns Discovered
+
+- The codebase has a recurring pattern of defining argparse arguments and importing functions but failing to wire them into the action dispatch — sync_git_hook.py had both --post-merge and --pre-push fully defined and imported but falling through to the default else branch. Always trace every defined arg through to its action handler.
+- Most product-ideation items from the 28-item list were already implemented across 100+ src/ files. The genuine gaps were in wiring (dead-code paths) rather than missing modules.
+- Atomic write pattern (NamedTemporaryFile + os.replace + os.fsync) is used consistently across state_manager, audit_log, and now feature_watchlist — safe to copy verbatim.
+- The _level_rank dict pattern (native=3, partial=2, adapter=1, unsupported=0) enables ordinal comparison of support levels without string comparison — used in both FeatureWatchlist and in the existing HarnessFeatureMatrix.
+
+### Takeaways
+
+- The codebase is so feature-complete that iterating on it requires searching for dead-code wiring gaps rather than missing modules. A codebase audit tool checking 'every parsed arg has a handler' would catch bugs like the post-merge/pre-push gap automatically.
+- The deepeval pytest plugin is incompatible with Python 3.9 (uses X | Y union syntax). Tests must be run with -p no:deepeval to avoid collection errors — this is a pre-existing environment issue unrelated to our changes.
+- Feature watchlist (item 19) was the only item from the 28 that was completely unimplemented — all others had corresponding src/ modules. This confirms the evolve loop is converging on genuine gaps.
+- Integrating new features into existing commands (sync-gaps) rather than adding new slash commands keeps the UX surface area small and avoids menu bloat.
+
+---
+## Iteration 89
+_2026-03-18T02:28:47.014Z_
+
+### Items Attempted
+
+- **Pre-Sync Visual Diff** — fail
+- **Harness-Specific Rule Overrides** — fail
+- **Named Sync Profiles** — fail
+- **Harness Config Import Wizard** — fail
+- **Config Portability Score** — fail
+- **Drift Push Notifications** — fail
+- **Reverse-Promote Target Edits** — fail
+- **CI Sync Gate** — fail
+- **MCP Server Compatibility Checker** — fail
+- **Rule Usage Analytics** — fail
+- **Section-Level Sync Targeting** — fail
+- **Rule Template Library** — fail
+- **Sync Changelog Feed** — fail
+- **Config Size Impact Analyzer** — fail
+- **Auto-Generate Harness Changelogs** — fail
+- **Interactive Conflict Resolver** — fail
+- **Sync Failure Alerts via Webhook** — fail
+- **Native Format Preview** — fail
+- **Per-Project Sync Exclusions** — fail
+- **Change Impact Analysis** — fail
+- **Capability Gap Explainer** — fail
+- **Target Config Version Pinning** — fail
+- **First-Run Setup Wizard** — fail
+- **Environment Variable Translator** — fail
+- **Weekly Sync Health Digest** — fail
+- **User-Defined Adapter Hooks** — fail
+- **Dry-Run Summary Report** — fail
+- **Inter-Rule Conflict Detector** — fail
+- **New Harness Onboarding Flow** — fail
+
+### Decisions Made
+
+None
+
+### Patterns Discovered
+
+None
+
+### Takeaways
+
+None
+
+---

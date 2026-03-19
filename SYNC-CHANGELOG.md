@@ -2724,3 +2724,25 @@
 - **zed** ✓  synced=1 skipped=5 failed=0
   - `/Users/neo/Developer/Projects/HarnessSync/.zed/system-prompt.md`
 
+## 2026-03-18T13:38:11   scope=all
+
+<!-- attribution: author: Cameleon X <ca1773130n@gmail.com> | commit: db0ecb5 — evolve(iteration-88): miscellaneous -->
+
+- **aider** ✓  synced=2 skipped=2 failed=0
+  - `/Users/neo/Developer/Projects/HarnessSync/CONVENTIONS.md`
+  - `.aider.conf.yml`
+- **cline** ✓  synced=2 skipped=4 failed=0
+- **codex** ✓  synced=1 skipped=0 failed=0
+  - `/Users/neo/Developer/Projects/HarnessSync/AGENTS.md`
+- **continue** ✓  synced=1 skipped=5 failed=0
+  - `/Users/neo/Developer/Projects/HarnessSync/.continue/rules/harnesssync.md`
+- **cursor** ✓  synced=1 skipped=5 failed=0
+- **gemini** ✓  synced=1 skipped=0 failed=0
+  - `/Users/neo/Developer/Projects/HarnessSync/GEMINI.md`
+- **neovim** ✓  synced=2 skipped=5 failed=0
+- **opencode** ✓  synced=1 skipped=0 failed=0
+  - `/Users/neo/Developer/Projects/HarnessSync/AGENTS.md`
+- **windsurf** ✓  synced=0 skipped=1 failed=0
+- **zed** ✓  synced=1 skipped=5 failed=0
+  - `/Users/neo/Developer/Projects/HarnessSync/.zed/system-prompt.md`
+
