@@ -657,6 +657,168 @@ class OpenCodeAdapter(AdapterBase):
 
         return result
 
+    # ── Plugin Sync ─────────────────────────────────────────────────────────
+
+    def sync_plugins(self, plugins: dict[str, dict]) -> SyncResult:
+        """Sync plugins to OpenCode: native npm plugin first, decompose as fallback.
+
+        For each Claude Code plugin:
+        1. Check for native OpenCode npm plugin via _find_native_plugin()
+           - If found -> add to opencode.json plugins array
+        2. No equivalent -> decompose through existing pipelines
+           - Skip TypeScript-specific event hooks (can't translate from shell/prompt hooks)
+
+        Args:
+            plugins: Dict mapping plugin_name -> plugin metadata dict
+
+        Returns:
+            SyncResult tracking synced/skipped/decomposed plugins
+        """
+        if not plugins:
+            return SyncResult()
+
+        result = SyncResult()
+        native_plugins: list[dict] = []
+
+        for plugin_name, meta in plugins.items():
+            if not meta.get("enabled", True):
+                result.skipped += 1
+                result.skipped_files.append(f"{plugin_name}: disabled")
+                continue
+
+            native = self._find_native_plugin(plugin_name, meta.get("manifest", {}))
+
+            if native:
+                native_plugins.append({
+                    "name": plugin_name,
+                    "native_id": native,
+                    "version": meta.get("version", "unknown"),
+                })
+                result.synced += 1
+                result.synced_files.append(f"{plugin_name} -> {native} (native)")
+            else:
+                # Decompose: route plugin contents through existing pipelines
+                install_path = meta.get("install_path")
+                if not install_path:
+                    result.skipped += 1
+                    result.skipped_files.append(f"{plugin_name}: no install path")
+                    continue
+
+                install_path = Path(install_path)
+                decomposed = False
+
+                # Route skills
+                if meta.get("has_skills"):
+                    try:
+                        skills_dir = install_path / "skills"
+                        plugin_skills = {}
+                        for d in skills_dir.iterdir():
+                            if d.is_dir() and (d / "SKILL.md").exists():
+                                plugin_skills[d.name] = d
+                        if plugin_skills:
+                            self.sync_skills(plugin_skills)
+                            decomposed = True
+                    except Exception:
+                        pass
+
+                # Route agents
+                if meta.get("has_agents"):
+                    try:
+                        agents_dir = install_path / "agents"
+                        plugin_agents = {}
+                        for f in agents_dir.iterdir():
+                            if f.suffix == ".md" and f.is_file():
+                                plugin_agents[f.stem] = f
+                        if plugin_agents:
+                            self.sync_agents(plugin_agents)
+                            decomposed = True
+                    except Exception:
+                        pass
+
+                # Route commands
+                if meta.get("has_commands"):
+                    try:
+                        commands_dir = install_path / "commands"
+                        plugin_commands = {}
+                        for f in commands_dir.iterdir():
+                            if f.suffix == ".md" and f.is_file():
+                                plugin_commands[f.stem] = f
+                        if plugin_commands:
+                            self.sync_commands(plugin_commands)
+                            decomposed = True
+                    except Exception:
+                        pass
+
+                # Route MCP servers
+                if meta.get("has_mcp"):
+                    try:
+                        mcp_json = install_path / ".mcp.json"
+                        if mcp_json.exists():
+                            mcp_data = read_json_safe(mcp_json)
+                            servers = mcp_data.get("mcpServers", mcp_data)
+                            if isinstance(servers, dict) and servers:
+                                self.sync_mcp(servers)
+                                decomposed = True
+                    except Exception:
+                        pass
+
+                # Skip hooks for OpenCode: TypeScript-specific event hooks
+                # can't be translated from shell/prompt hooks
+                if meta.get("has_hooks"):
+                    result.skipped_files.append(
+                        f"{plugin_name}: hooks skipped (OpenCode uses TS event hooks)"
+                    )
+
+                if decomposed:
+                    result.synced += 1
+                    result.synced_files.append(f"{plugin_name} (decomposed)")
+                else:
+                    result.skipped += 1
+                    result.skipped_files.append(f"{plugin_name}: nothing to decompose")
+
+        # Write native plugins to opencode.json
+        if native_plugins:
+            try:
+                self._write_native_plugins_json(native_plugins)
+            except Exception:
+                pass  # Best-effort
+
+        return result
+
+    def _write_native_plugins_json(self, native_plugins: list[dict]) -> None:
+        """Write native plugin references to opencode.json plugins array.
+
+        Args:
+            native_plugins: List of dicts with name, native_id, version
+        """
+        existing_config = read_json_safe(self.opencode_json_path)
+
+        plugins_array = existing_config.get("plugins", [])
+        if not isinstance(plugins_array, list):
+            plugins_array = []
+
+        # Build set of existing plugin IDs for dedup
+        existing_ids = {
+            p.get("id") or p.get("name", "")
+            for p in plugins_array
+            if isinstance(p, dict)
+        }
+
+        for plugin in native_plugins:
+            native_id = plugin["native_id"]
+            if native_id not in existing_ids:
+                plugins_array.append({
+                    "id": native_id,
+                    "_source": f"harnesssync:{plugin['name']}",
+                })
+
+        existing_config["plugins"] = plugins_array
+
+        if '$schema' not in existing_config:
+            existing_config['$schema'] = 'https://opencode.ai/config.json'
+
+        write_json_atomic(self.opencode_json_path, existing_config)
+
     # Helper methods for AGENTS.md management
 
     def _read_agents_md(self) -> str:

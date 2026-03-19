@@ -145,6 +145,43 @@ class AdapterBase(ABC):
         """
         pass
 
+    def sync_plugins(self, plugins: dict[str, dict]) -> SyncResult:
+        """Sync plugins to target format.
+
+        Default no-op implementation -- returns all plugins as skipped.
+        Adapters with native plugin support override this to implement
+        the two-tier strategy: native equivalent first, decompose as fallback.
+
+        Args:
+            plugins: Dict mapping plugin_name -> plugin metadata dict.
+                     Each dict has: enabled, version, install_path,
+                     has_skills, has_agents, has_commands, has_mcp, has_hooks,
+                     manifest.
+
+        Returns:
+            SyncResult with all plugins skipped
+        """
+        return SyncResult(skipped=len(plugins))
+
+    def _find_native_plugin(self, plugin_name: str, manifest: dict) -> str | None:
+        """Check if a native equivalent exists for a Claude Code plugin.
+
+        Looks up PLUGIN_EQUIVALENTS + user overrides from `.harnesssync` config.
+
+        Args:
+            plugin_name: Claude Code plugin identifier
+            manifest: Plugin manifest dict (currently unused, reserved for future matching)
+
+        Returns:
+            Native plugin identifier string if equivalent found, or None
+        """
+        try:
+            from src.plugin_registry import lookup_native_equivalent, load_user_plugin_map
+            user_overrides = load_user_plugin_map(self.project_dir)
+            return lookup_native_equivalent(plugin_name, self.target_name, user_overrides)
+        except Exception:
+            return None
+
     def sync_hooks(self, hooks: dict) -> SyncResult:
         """Sync hooks to target format.
 
@@ -299,6 +336,15 @@ class AdapterBase(ABC):
             results['hooks'] = SyncResult(
                 failed=1,
                 failed_files=[f'hooks: {str(e)}']
+            )
+
+        # Sync plugins
+        try:
+            results['plugins'] = self.sync_plugins(source_data.get('plugins', {}))
+        except Exception as e:
+            results['plugins'] = SyncResult(
+                failed=1,
+                failed_files=[f'plugins: {str(e)}']
             )
 
         return results

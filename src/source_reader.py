@@ -884,6 +884,147 @@ class SourceReader:
 
         return settings
 
+    def get_plugins(self) -> dict[str, dict]:
+        """Discover Claude Code plugins with full metadata.
+
+        Combines _get_enabled_plugins() and _get_plugin_install_paths() to
+        return rich metadata for each installed plugin. Inspects each plugin's
+        install directory for skills, agents, commands, MCP servers, and hooks.
+
+        Returns:
+            Dict mapping plugin_name -> {
+                "enabled": bool,
+                "version": str,
+                "install_path": Path,
+                "has_skills": bool,
+                "has_agents": bool,
+                "has_commands": bool,
+                "has_mcp": bool,
+                "has_hooks": bool,
+                "manifest": dict,
+            }
+        """
+        plugins: dict[str, dict] = {}
+
+        if not self.cc_plugins_registry.exists():
+            return plugins
+
+        registry = read_json_safe(self.cc_plugins_registry)
+        plugins_data = registry.get("plugins", {})
+        if not isinstance(plugins_data, dict):
+            return plugins
+
+        # Get set of enabled plugin identifiers
+        enabled_set = self._get_enabled_plugins()
+
+        for plugin_key, installs in plugins_data.items():
+            if not isinstance(installs, list):
+                installs = [installs]
+
+            for install in installs:
+                if not isinstance(install, dict):
+                    continue
+
+                install_path_str = install.get("installPath", "")
+                if not install_path_str:
+                    continue
+
+                try:
+                    install_path = Path(install_path_str)
+                    if not install_path.exists():
+                        continue
+                except (OSError, ValueError):
+                    continue
+
+                # Extract plugin name (strip version suffix like "@1.0.0")
+                plugin_name = plugin_key.split("@")[0]
+                version = install.get("version", "unknown")
+
+                # Determine enabled status: check if explicitly listed in enabledPlugins
+                # _get_enabled_plugins returns only explicitly enabled ones.
+                # A plugin is disabled only if explicitly set to False in settings.
+                # If enabledPlugins doesn't mention this plugin at all, treat as enabled.
+                is_enabled = True
+                if self.cc_settings.exists():
+                    settings_data = read_json_safe(self.cc_settings)
+                    ep = settings_data.get("enabledPlugins", {})
+                    if isinstance(ep, dict):
+                        # Check both plugin_name and plugin_key forms
+                        if plugin_name in ep:
+                            is_enabled = bool(ep[plugin_name])
+                        elif plugin_key in ep:
+                            is_enabled = bool(ep[plugin_key])
+
+                # Inspect install directory for capabilities
+                has_skills = (install_path / "skills").is_dir() and any(
+                    (d / "SKILL.md").exists()
+                    for d in (install_path / "skills").iterdir()
+                    if d.is_dir()
+                ) if (install_path / "skills").is_dir() else False
+
+                has_agents = (install_path / "agents").is_dir() and any(
+                    f.suffix == ".md" and f.is_file()
+                    for f in (install_path / "agents").iterdir()
+                ) if (install_path / "agents").is_dir() else False
+
+                has_commands = (install_path / "commands").is_dir() and any(
+                    f.suffix == ".md" and f.is_file()
+                    for f in (install_path / "commands").iterdir()
+                ) if (install_path / "commands").is_dir() else False
+
+                has_mcp = (install_path / ".mcp.json").exists()
+                if not has_mcp:
+                    # Check for inline mcpServers in plugin.json
+                    for pj in [
+                        install_path / ".claude-plugin" / "plugin.json",
+                        install_path / "plugin.json",
+                    ]:
+                        if pj.exists():
+                            pj_data = read_json_safe(pj)
+                            if pj_data.get("mcpServers"):
+                                has_mcp = True
+                            break
+
+                has_hooks = False
+                hooks_json = install_path / "hooks" / "hooks.json"
+                if hooks_json.exists():
+                    has_hooks = True
+                else:
+                    # Check plugin.json for hooks
+                    for pj in [
+                        install_path / ".claude-plugin" / "plugin.json",
+                        install_path / "plugin.json",
+                    ]:
+                        if pj.exists():
+                            pj_data = read_json_safe(pj)
+                            if pj_data.get("hooks"):
+                                has_hooks = True
+                            break
+
+                # Read manifest (plugin.json)
+                manifest: dict = {}
+                for pj in [
+                    install_path / ".claude-plugin" / "plugin.json",
+                    install_path / "plugin.json",
+                ]:
+                    if pj.exists():
+                        manifest = read_json_safe(pj)
+                        break
+
+                plugins[plugin_name] = {
+                    "enabled": is_enabled,
+                    "version": version,
+                    "install_path": install_path,
+                    "has_skills": has_skills,
+                    "has_agents": has_agents,
+                    "has_commands": has_commands,
+                    "has_mcp": has_mcp,
+                    "has_hooks": has_hooks,
+                    "manifest": manifest,
+                }
+
+        return plugins
+
     def get_hooks(self) -> dict:
         """Discover hooks from settings.json and project-level hooks/hooks.json.
 
@@ -1205,6 +1346,7 @@ class SourceReader:
             "permissions": self.get_permissions(),
             "harness_overrides": self.get_harness_override_paths(),
             "hooks": self.get_hooks(),
+            "plugins": self.get_plugins(),
         }
 
     def get_source_paths(self) -> dict[str, list[Path]]:

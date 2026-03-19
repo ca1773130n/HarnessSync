@@ -825,6 +825,163 @@ class GeminiAdapter(AdapterBase):
             f"--max-time {timeout_sec} {url}"
         )
 
+    # ── Plugin Sync ─────────────────────────────────────────────────────────
+
+    def sync_plugins(self, plugins: dict[str, dict]) -> SyncResult:
+        """Sync plugins to Gemini: native extension first, decompose as fallback.
+
+        For each Claude Code plugin:
+        1. Check for native Gemini extension via _find_native_plugin()
+           - If found -> reference in .gemini/settings.json extensions config
+        2. No equivalent -> decompose through existing pipelines
+
+        Args:
+            plugins: Dict mapping plugin_name -> plugin metadata dict
+
+        Returns:
+            SyncResult tracking synced/skipped/decomposed plugins
+        """
+        if not plugins:
+            return SyncResult()
+
+        result = SyncResult()
+        native_extensions: list[dict] = []
+
+        for plugin_name, meta in plugins.items():
+            if not meta.get("enabled", True):
+                result.skipped += 1
+                result.skipped_files.append(f"{plugin_name}: disabled")
+                continue
+
+            native = self._find_native_plugin(plugin_name, meta.get("manifest", {}))
+
+            if native:
+                native_extensions.append({
+                    "name": plugin_name,
+                    "native_id": native,
+                    "version": meta.get("version", "unknown"),
+                })
+                result.synced += 1
+                result.synced_files.append(f"{plugin_name} -> {native} (native)")
+            else:
+                # Decompose: route plugin contents through existing pipelines
+                install_path = meta.get("install_path")
+                if not install_path:
+                    result.skipped += 1
+                    result.skipped_files.append(f"{plugin_name}: no install path")
+                    continue
+
+                from pathlib import Path
+                install_path = Path(install_path)
+                decomposed = False
+
+                # Route skills
+                if meta.get("has_skills"):
+                    try:
+                        skills_dir = install_path / "skills"
+                        plugin_skills = {}
+                        for d in skills_dir.iterdir():
+                            if d.is_dir() and (d / "SKILL.md").exists():
+                                plugin_skills[d.name] = d
+                        if plugin_skills:
+                            self.sync_skills(plugin_skills)
+                            decomposed = True
+                    except Exception:
+                        pass
+
+                # Route agents
+                if meta.get("has_agents"):
+                    try:
+                        agents_dir = install_path / "agents"
+                        plugin_agents = {}
+                        for f in agents_dir.iterdir():
+                            if f.suffix == ".md" and f.is_file():
+                                plugin_agents[f.stem] = f
+                        if plugin_agents:
+                            self.sync_agents(plugin_agents)
+                            decomposed = True
+                    except Exception:
+                        pass
+
+                # Route commands
+                if meta.get("has_commands"):
+                    try:
+                        commands_dir = install_path / "commands"
+                        plugin_commands = {}
+                        for f in commands_dir.iterdir():
+                            if f.suffix == ".md" and f.is_file():
+                                plugin_commands[f.stem] = f
+                        if plugin_commands:
+                            self.sync_commands(plugin_commands)
+                            decomposed = True
+                    except Exception:
+                        pass
+
+                # Route MCP servers
+                if meta.get("has_mcp"):
+                    try:
+                        mcp_json = install_path / ".mcp.json"
+                        if mcp_json.exists():
+                            mcp_data = read_json_safe(mcp_json)
+                            servers = mcp_data.get("mcpServers", mcp_data)
+                            if isinstance(servers, dict) and servers:
+                                self.sync_mcp(servers)
+                                decomposed = True
+                    except Exception:
+                        pass
+
+                # Route hooks
+                if meta.get("has_hooks"):
+                    try:
+                        hooks_json = install_path / "hooks" / "hooks.json"
+                        if hooks_json.exists():
+                            hooks_data = read_json_safe(hooks_json)
+                            if hooks_data:
+                                self.sync_hooks(hooks_data)
+                                decomposed = True
+                    except Exception:
+                        pass
+
+                if decomposed:
+                    result.synced += 1
+                    result.synced_files.append(f"{plugin_name} (decomposed)")
+                else:
+                    result.skipped += 1
+                    result.skipped_files.append(f"{plugin_name}: nothing to decompose")
+
+        # Write native extensions to settings.json
+        if native_extensions:
+            try:
+                self._write_native_extensions(native_extensions)
+            except Exception:
+                pass  # Best-effort
+
+        return result
+
+    def _write_native_extensions(self, native_extensions: list[dict]) -> None:
+        """Write native extension references to Gemini settings.json.
+
+        Args:
+            native_extensions: List of dicts with name, native_id, version
+        """
+        existing_settings = read_json_safe(self.settings_path)
+
+        extensions = existing_settings.get("extensions", {})
+        if not isinstance(extensions, dict):
+            extensions = {}
+
+        for ext in native_extensions:
+            extensions[ext["native_id"]] = {
+                "enabled": True,
+                "_source": f"harnesssync:{ext['name']}",
+                "_version": ext["version"],
+            }
+
+        existing_settings["extensions"] = extensions
+
+        ensure_dir(self.settings_path.parent)
+        write_json_atomic(self.settings_path, existing_settings)
+
     # Helper methods for parsing and formatting
 
     def _parse_frontmatter(self, content: str) -> tuple[dict, str]:
@@ -1049,6 +1206,15 @@ class GeminiAdapter(AdapterBase):
             results['hooks'] = SyncResult(
                 failed=1,
                 failed_files=[f'hooks: {str(e)}']
+            )
+
+        # Sync plugins
+        try:
+            results['plugins'] = self.sync_plugins(source_data.get('plugins', {}))
+        except Exception as e:
+            results['plugins'] = SyncResult(
+                failed=1,
+                failed_files=[f'plugins: {str(e)}']
             )
 
         # Only cleanup if all three native-format syncs succeeded (no failures)

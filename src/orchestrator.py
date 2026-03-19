@@ -1399,6 +1399,7 @@ class SyncOrchestrator:
             "mcp_scoped": {},
             "settings": {},
             "hooks": {},
+            "plugins": {},
         }
 
         filtered = dict(data)

@@ -463,6 +463,15 @@ class CodexAdapter(AdapterBase):
                 failed_files=[f'hooks: {str(e)}']
             )
 
+        # Sync plugins
+        try:
+            results['plugins'] = self.sync_plugins(source_data.get('plugins', {}))
+        except Exception as e:
+            results['plugins'] = SyncResult(
+                failed=1,
+                failed_files=[f'plugins: {str(e)}']
+            )
+
         return results
 
     # ── Hooks Sync ─────────────────────────────────────────────────────────────
@@ -664,6 +673,239 @@ class CodexAdapter(AdapterBase):
             self._write_agents_md(final)
         elif existing:
             self._write_agents_md(f"{existing.rstrip()}\n{hook_section}\n")
+
+    # ── Plugin Sync ─────────────────────────────────────────────────────────
+
+    def sync_plugins(self, plugins: dict[str, dict]) -> SyncResult:
+        """Sync plugins to Codex: native equivalent first, decompose as fallback.
+
+        For each Claude Code plugin:
+        1. Check for native Codex equivalent via _find_native_plugin()
+           - If found -> add to .codex/config.toml plugins section
+        2. No equivalent -> decompose through existing pipelines
+           - Skills -> sync_skills()
+           - Agents -> sync_agents()
+           - Commands -> sync_commands()
+           - MCP servers -> sync_mcp()
+           - Hooks -> sync_hooks()
+        3. Plugin metadata -> surface in AGENTS.md as informational context
+
+        Args:
+            plugins: Dict mapping plugin_name -> plugin metadata dict
+
+        Returns:
+            SyncResult tracking synced/skipped/decomposed plugins
+        """
+        if not plugins:
+            return SyncResult()
+
+        result = SyncResult()
+        native_plugins: list[dict] = []
+        decomposed_names: list[str] = []
+
+        for plugin_name, meta in plugins.items():
+            if not meta.get("enabled", True):
+                result.skipped += 1
+                result.skipped_files.append(f"{plugin_name}: disabled")
+                continue
+
+            # Check for native equivalent
+            native = self._find_native_plugin(plugin_name, meta.get("manifest", {}))
+
+            if native:
+                native_plugins.append({
+                    "name": plugin_name,
+                    "native_id": native,
+                    "version": meta.get("version", "unknown"),
+                })
+                result.synced += 1
+                result.synced_files.append(f"{plugin_name} -> {native} (native)")
+            else:
+                # Decompose: route plugin contents through existing pipelines
+                install_path = meta.get("install_path")
+                if not install_path:
+                    result.skipped += 1
+                    result.skipped_files.append(f"{plugin_name}: no install path")
+                    continue
+
+                from pathlib import Path
+                install_path = Path(install_path)
+                decomposed = False
+
+                # Route skills
+                if meta.get("has_skills"):
+                    try:
+                        skills_dir = install_path / "skills"
+                        plugin_skills = {}
+                        for d in skills_dir.iterdir():
+                            if d.is_dir() and (d / "SKILL.md").exists():
+                                plugin_skills[d.name] = d
+                        if plugin_skills:
+                            self.sync_skills(plugin_skills)
+                            decomposed = True
+                    except Exception:
+                        pass
+
+                # Route agents
+                if meta.get("has_agents"):
+                    try:
+                        agents_dir = install_path / "agents"
+                        plugin_agents = {}
+                        for f in agents_dir.iterdir():
+                            if f.suffix == ".md" and f.is_file():
+                                plugin_agents[f.stem] = f
+                        if plugin_agents:
+                            self.sync_agents(plugin_agents)
+                            decomposed = True
+                    except Exception:
+                        pass
+
+                # Route commands
+                if meta.get("has_commands"):
+                    try:
+                        commands_dir = install_path / "commands"
+                        plugin_commands = {}
+                        for f in commands_dir.iterdir():
+                            if f.suffix == ".md" and f.is_file():
+                                plugin_commands[f.stem] = f
+                        if plugin_commands:
+                            self.sync_commands(plugin_commands)
+                            decomposed = True
+                    except Exception:
+                        pass
+
+                # Route MCP servers
+                if meta.get("has_mcp"):
+                    try:
+                        from src.utils.paths import read_json_safe
+                        mcp_json = install_path / ".mcp.json"
+                        if mcp_json.exists():
+                            mcp_data = read_json_safe(mcp_json)
+                            servers = mcp_data.get("mcpServers", mcp_data)
+                            if isinstance(servers, dict) and servers:
+                                self.sync_mcp(servers)
+                                decomposed = True
+                    except Exception:
+                        pass
+
+                # Route hooks
+                if meta.get("has_hooks"):
+                    try:
+                        hooks_json = install_path / "hooks" / "hooks.json"
+                        if hooks_json.exists():
+                            from src.utils.paths import read_json_safe
+                            hooks_data = read_json_safe(hooks_json)
+                            if hooks_data:
+                                self.sync_hooks(hooks_data)
+                                decomposed = True
+                    except Exception:
+                        pass
+
+                if decomposed:
+                    result.synced += 1
+                    result.synced_files.append(f"{plugin_name} (decomposed)")
+                    decomposed_names.append(plugin_name)
+                else:
+                    result.skipped += 1
+                    result.skipped_files.append(f"{plugin_name}: nothing to decompose")
+
+        # Write native plugins to config.toml plugins section
+        if native_plugins:
+            try:
+                self._write_native_plugins_toml(native_plugins)
+            except Exception:
+                pass  # Best-effort
+
+        # Document plugin info in AGENTS.md
+        if native_plugins or decomposed_names:
+            try:
+                self._document_plugins_in_agents_md(native_plugins, decomposed_names)
+            except Exception:
+                pass  # Best-effort
+
+        return result
+
+    def _write_native_plugins_toml(self, native_plugins: list[dict]) -> None:
+        """Write native plugin references to Codex config.toml.
+
+        Args:
+            native_plugins: List of dicts with name, native_id, version
+        """
+        config_path = self.project_dir / ".codex" / CONFIG_TOML
+
+        existing_raw = ""
+        if config_path.exists():
+            try:
+                existing_raw = config_path.read_text(encoding="utf-8")
+            except OSError:
+                pass
+
+        # Remove existing HarnessSync plugins section
+        import re as _re
+        cleaned = _re.sub(
+            r'# Plugins managed by HarnessSync.*?(?=\n(?:\[(?!plugins)|# [A-Z]|$))',
+            '', existing_raw, flags=_re.DOTALL
+        ).rstrip()
+
+        # Build plugins TOML section
+        plugin_lines = [
+            "",
+            "# Plugins managed by HarnessSync",
+            "# Do not edit manually - changes will be overwritten on next sync",
+        ]
+
+        for plugin in native_plugins:
+            plugin_lines.append("")
+            plugin_lines.append(f'[[plugins]]')
+            plugin_lines.append(f'name = {format_toml_value(plugin["native_id"])}')
+            plugin_lines.append(f'# source: {plugin["name"]} v{plugin["version"]}')
+
+        final = cleaned + "\n" + "\n".join(plugin_lines) + "\n"
+        write_toml_atomic(config_path, final)
+
+    def _document_plugins_in_agents_md(
+        self, native_plugins: list[dict], decomposed_names: list[str]
+    ) -> None:
+        """Document synced plugin information in AGENTS.md.
+
+        Args:
+            native_plugins: List of native plugin reference dicts
+            decomposed_names: List of plugin names that were decomposed
+        """
+        lines = [
+            "",
+            "## Synced Plugins (from Claude Code)",
+            "",
+        ]
+
+        if native_plugins:
+            lines.append("### Native Equivalents")
+            lines.append("")
+            for p in native_plugins:
+                lines.append(f"- **{p['name']}** -> `{p['native_id']}` (native Codex plugin)")
+            lines.append("")
+
+        if decomposed_names:
+            lines.append("### Decomposed Plugins")
+            lines.append("")
+            lines.append("> These plugins had no native Codex equivalent.")
+            lines.append("> Their skills, agents, commands, MCP servers, and hooks were synced individually.")
+            lines.append("")
+            for name in decomposed_names:
+                lines.append(f"- **{name}**")
+            lines.append("")
+
+        plugin_section = "\n".join(lines)
+
+        existing = self._read_agents_md()
+        if existing and HARNESSSYNC_MARKER_END in existing:
+            end_idx = existing.find(HARNESSSYNC_MARKER_END)
+            before = existing[:end_idx].rstrip()
+            after = existing[end_idx:]
+            final = f"{before}\n{plugin_section}\n{after}"
+            self._write_agents_md(final)
+        elif existing:
+            self._write_agents_md(f"{existing.rstrip()}\n{plugin_section}\n")
 
     # Environment variable key substrings that indicate bearer token / auth credentials
     _AUTH_ENV_KEYWORDS = ('TOKEN', 'KEY', 'AUTH', 'BEARER', 'SECRET')
