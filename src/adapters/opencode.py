@@ -706,6 +706,7 @@ class OpenCodeAdapter(AdapterBase):
 
                 install_path = Path(install_path)
                 decomposed = False
+                decompose_failures: list[str] = []
 
                 # Route skills
                 if meta.get("has_skills"):
@@ -719,7 +720,7 @@ class OpenCodeAdapter(AdapterBase):
                             self.sync_skills(plugin_skills)
                             decomposed = True
                     except Exception:
-                        pass
+                        decompose_failures.append("skills")
 
                 # Route agents
                 if meta.get("has_agents"):
@@ -733,7 +734,7 @@ class OpenCodeAdapter(AdapterBase):
                             self.sync_agents(plugin_agents)
                             decomposed = True
                     except Exception:
-                        pass
+                        decompose_failures.append("agents")
 
                 # Route commands
                 if meta.get("has_commands"):
@@ -747,7 +748,7 @@ class OpenCodeAdapter(AdapterBase):
                             self.sync_commands(plugin_commands)
                             decomposed = True
                     except Exception:
-                        pass
+                        decompose_failures.append("commands")
 
                 # Route MCP servers
                 if meta.get("has_mcp"):
@@ -760,7 +761,7 @@ class OpenCodeAdapter(AdapterBase):
                                 self.sync_mcp(servers)
                                 decomposed = True
                     except Exception:
-                        pass
+                        decompose_failures.append("mcp")
 
                 # Skip hooks for OpenCode: TypeScript-specific event hooks
                 # can't be translated from shell/prompt hooks
@@ -772,6 +773,11 @@ class OpenCodeAdapter(AdapterBase):
                 if decomposed:
                     result.synced += 1
                     result.synced_files.append(f"{plugin_name} (decomposed)")
+                    if decompose_failures:
+                        result.failed_files.extend(
+                            f"{plugin_name}: decompose failed for {comp}"
+                            for comp in decompose_failures
+                        )
                 else:
                     result.skipped += 1
                     result.skipped_files.append(f"{plugin_name}: nothing to decompose")

@@ -15,6 +15,7 @@ instead of inlining content into GEMINI.md. Only rules remain in GEMINI.md.
 """
 
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from .base import AdapterBase
@@ -880,9 +881,9 @@ class GeminiAdapter(AdapterBase):
                     result.skipped_files.append(f"{plugin_name}: no install path")
                     continue
 
-                from pathlib import Path
                 install_path = Path(install_path)
                 decomposed = False
+                decompose_failures: list[str] = []
 
                 # Route skills
                 if meta.get("has_skills"):
@@ -896,7 +897,7 @@ class GeminiAdapter(AdapterBase):
                             self.sync_skills(plugin_skills)
                             decomposed = True
                     except Exception:
-                        pass
+                        decompose_failures.append("skills")
 
                 # Route agents
                 if meta.get("has_agents"):
@@ -910,7 +911,7 @@ class GeminiAdapter(AdapterBase):
                             self.sync_agents(plugin_agents)
                             decomposed = True
                     except Exception:
-                        pass
+                        decompose_failures.append("agents")
 
                 # Route commands
                 if meta.get("has_commands"):
@@ -924,7 +925,7 @@ class GeminiAdapter(AdapterBase):
                             self.sync_commands(plugin_commands)
                             decomposed = True
                     except Exception:
-                        pass
+                        decompose_failures.append("commands")
 
                 # Route MCP servers
                 if meta.get("has_mcp"):
@@ -937,7 +938,7 @@ class GeminiAdapter(AdapterBase):
                                 self.sync_mcp(servers)
                                 decomposed = True
                     except Exception:
-                        pass
+                        decompose_failures.append("mcp")
 
                 # Route hooks
                 if meta.get("has_hooks"):
@@ -949,11 +950,16 @@ class GeminiAdapter(AdapterBase):
                                 self.sync_hooks(hooks_data)
                                 decomposed = True
                     except Exception:
-                        pass
+                        decompose_failures.append("hooks")
 
                 if decomposed:
                     result.synced += 1
                     result.synced_files.append(f"{plugin_name} (decomposed)")
+                    if decompose_failures:
+                        result.failed_files.extend(
+                            f"{plugin_name}: decompose failed for {comp}"
+                            for comp in decompose_failures
+                        )
                 else:
                     result.skipped += 1
                     result.skipped_files.append(f"{plugin_name}: nothing to decompose")
@@ -1163,7 +1169,6 @@ class GeminiAdapter(AdapterBase):
         if settings_output:
             dep_warnings = self.check_deprecations(settings_output)
             for w in dep_warnings:
-                import sys
                 print(f"  \u26a0  {w}", file=sys.stderr)
 
         # Sync rules with include_refs support

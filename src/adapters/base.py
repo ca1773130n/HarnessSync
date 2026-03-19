@@ -3,13 +3,15 @@ from __future__ import annotations
 """Abstract base class for target adapters.
 
 AdapterBase defines the interface all target adapters (Codex, Gemini, OpenCode)
-must implement. It enforces 6 sync methods for different configuration types:
+must implement. It enforces 8 sync methods for different configuration types:
 - sync_rules: CLAUDE.md rules
 - sync_skills: Skills directory
 - sync_agents: Agent .md files
 - sync_commands: Command .md files
 - sync_mcp: MCP server configurations
 - sync_settings: General settings
+- sync_hooks: Hook configurations
+- sync_plugins: Plugin configurations
 
 The abstract base class pattern ensures type safety and prevents incomplete
 adapter implementations.
@@ -29,6 +31,7 @@ Example usage:
 """
 
 import re
+import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
 from .result import SyncResult
@@ -118,7 +121,7 @@ class AdapterBase(ABC):
     def sync_mcp_scoped(self, mcp_servers_scoped: dict[str, dict]) -> SyncResult:
         """Translate MCP server configs with scope metadata to target format.
 
-        Receives Phase 9 scoped format:
+        Receives scoped format:
             {server_name: {"config": {...}, "metadata": {"scope": "user|project|local", "source": "file|plugin", ...}}}
 
         Default implementation falls back to sync_mcp() with flat config for
@@ -251,7 +254,7 @@ class AdapterBase(ABC):
     def sync_all(self, source_data: dict) -> dict[str, SyncResult]:
         """Sync all configuration types.
 
-        Calls all 6 sync methods and returns results by config type.
+        Calls all sync methods and returns results by config type.
         Wraps each call in try/except to report failures without aborting.
 
         Args:
@@ -268,7 +271,6 @@ class AdapterBase(ABC):
         if settings_output:
             dep_warnings = self.check_deprecations(settings_output)
             for w in dep_warnings:
-                import sys
                 print(f"  ⚠  {w}", file=sys.stderr)
 
         # Sync rules

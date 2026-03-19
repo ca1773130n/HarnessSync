@@ -711,3 +711,119 @@ class TestRoundTrip:
             adapter = AdapterClass(project_dir=adapter_dir)
             result = adapter.sync_settings(settings)
             assert result.failed == 0, f"{AdapterClass.__name__} failed with no permissions"
+
+
+# ---------------------------------------------------------------------------
+# Codex deny-rule safety: ANY deny rules prevent auto-approve
+# ---------------------------------------------------------------------------
+
+class TestCodexDenyPreventsAutoApprove:
+    """Verify that any deny rules prevent the 'never' (auto-approve) policy."""
+
+    def test_few_denies_with_many_allows_returns_on_request(self, tmp_path):
+        """1 deny rule + 5 allow rules -> 'on-request', NOT 'never'.
+
+        This is the critical regression test: before the fix, the code would
+        return 'never' (auto-approve) when deny_list had fewer than 3 entries
+        but allow_list had 5+, silently dropping the deny restrictions.
+        """
+        from src.adapters.codex import CodexAdapter
+
+        adapter = CodexAdapter(project_dir=tmp_path)
+
+        settings = {
+            "permissions": {
+                "allow": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+                "deny": ["Bash(rm -rf *)"],
+                "ask": [],
+            }
+        }
+        result = adapter.sync_settings(settings)
+        assert result.synced == 1
+
+        config_path = tmp_path / ".codex" / "config.toml"
+        content = config_path.read_text()
+        assert 'approval_policy = "on-request"' in content
+        # Must NOT be "never" (auto-approve)
+        assert 'approval_policy = "never"' not in content
+
+    def test_two_denies_with_many_allows_returns_on_request(self, tmp_path):
+        """2 deny rules + 6 allow rules -> 'on-request', NOT 'never'."""
+        from src.adapters.codex import CodexAdapter
+
+        adapter = CodexAdapter(project_dir=tmp_path)
+
+        settings = {
+            "permissions": {
+                "allow": ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+                "deny": ["Bash(rm -rf *)", "Bash(sudo *)"],
+                "ask": [],
+            }
+        }
+        result = adapter.sync_settings(settings)
+        assert result.synced == 1
+
+        config_path = tmp_path / ".codex" / "config.toml"
+        content = config_path.read_text()
+        assert 'approval_policy = "on-request"' in content
+
+
+# ---------------------------------------------------------------------------
+# Gemini deny policy file content verification
+# ---------------------------------------------------------------------------
+
+class TestGeminiDenyPolicyContent:
+    """Verify Gemini policy file JSON structure and deny rule content."""
+
+    def test_deny_policy_json_structure(self, tmp_path):
+        """sync_settings with deny rules creates a well-formed policy JSON
+        with the expected deny rules, tool names, and patterns."""
+        from src.adapters.gemini import GeminiAdapter
+
+        adapter = GeminiAdapter(project_dir=tmp_path)
+
+        settings = {
+            "permissions": {
+                "allow": ["Read"],
+                "deny": [
+                    "Bash(rm -rf /)",
+                    "Bash(sudo *)",
+                    "WebFetch",
+                ],
+                "ask": [],
+            }
+        }
+        result = adapter.sync_settings(settings)
+        assert result.synced == 1
+        assert result.failed == 0
+
+        # Read back the policy file
+        policy_path = tmp_path / ".gemini" / "policies" / "harnesssync-policy.json"
+        assert policy_path.exists(), "Policy file was not created"
+
+        policy = json.loads(policy_path.read_text())
+
+        # Top-level structure
+        assert "_comment" in policy
+        assert "rules" in policy
+        assert isinstance(policy["rules"], list)
+        assert len(policy["rules"]) == 3
+
+        # Verify each deny rule
+        rules = policy["rules"]
+
+        # Rule 1: Bash(rm -rf /)
+        assert rules[0]["action"] == "deny"
+        assert rules[0]["tool"] == "bash"
+        assert rules[0]["pattern"] == "rm -rf /"
+        assert "description" in rules[0]
+
+        # Rule 2: Bash(sudo *)
+        assert rules[1]["action"] == "deny"
+        assert rules[1]["tool"] == "bash"
+        assert rules[1]["pattern"] == "sudo *"
+
+        # Rule 3: WebFetch (bare tool, no pattern)
+        assert rules[2]["action"] == "deny"
+        assert rules[2]["tool"] == "webfetch"
+        assert "pattern" not in rules[2]

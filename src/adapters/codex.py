@@ -7,20 +7,21 @@ Implements adapter for Codex CLI, syncing Claude Code configuration to Codex for
 - Skills → Symlinks in .agents/skills/
 - Agents → SKILL.md format in .agents/skills/{name}/
 - Commands → SKILL.md format in .agents/skills/cmd-{name}/
-- MCP servers → config.toml (deferred to Plan 02-03)
-- Settings → config.toml sandbox/approval settings (deferred to Plan 02-03)
+- MCP servers → config.toml
+- Settings → config.toml sandbox/approval settings
 
 The adapter preserves user-created content in AGENTS.md outside HarnessSync markers
 and uses symlinks for zero-copy skill sharing.
 """
 
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from .base import AdapterBase
 from .registry import AdapterRegistry
 from .result import SyncResult
-from src.utils.paths import create_symlink_with_fallback, ensure_dir
+from src.utils.paths import create_symlink_with_fallback, ensure_dir, read_json_safe
 from src.utils.toml_writer import (
     format_mcp_servers_toml,
     format_mcp_server_toml,
@@ -410,7 +411,6 @@ class CodexAdapter(AdapterBase):
         if settings_output:
             dep_warnings = self.check_deprecations(settings_output)
             for w in dep_warnings:
-                import sys
                 print(f"  \u26a0  {w}", file=sys.stderr)
 
         # Sync rules with rules_files for hierarchical AGENTS.md
@@ -605,10 +605,9 @@ class CodexAdapter(AdapterBase):
                 pass
 
         # Remove existing HarnessSync hooks sections
-        import re as _re
-        cleaned = _re.sub(
+        cleaned = re.sub(
             r'# Hooks managed by HarnessSync.*?(?=\n(?:\[(?!hooks\.)|# [A-Z]|$))',
-            '', existing_raw, flags=_re.DOTALL
+            '', existing_raw, flags=re.DOTALL
         ).rstrip()
 
         # Build hooks TOML sections
@@ -728,9 +727,9 @@ class CodexAdapter(AdapterBase):
                     result.skipped_files.append(f"{plugin_name}: no install path")
                     continue
 
-                from pathlib import Path
                 install_path = Path(install_path)
                 decomposed = False
+                decompose_failures: list[str] = []
 
                 # Route skills
                 if meta.get("has_skills"):
@@ -744,7 +743,7 @@ class CodexAdapter(AdapterBase):
                             self.sync_skills(plugin_skills)
                             decomposed = True
                     except Exception:
-                        pass
+                        decompose_failures.append("skills")
 
                 # Route agents
                 if meta.get("has_agents"):
@@ -758,7 +757,7 @@ class CodexAdapter(AdapterBase):
                             self.sync_agents(plugin_agents)
                             decomposed = True
                     except Exception:
-                        pass
+                        decompose_failures.append("agents")
 
                 # Route commands
                 if meta.get("has_commands"):
@@ -772,12 +771,11 @@ class CodexAdapter(AdapterBase):
                             self.sync_commands(plugin_commands)
                             decomposed = True
                     except Exception:
-                        pass
+                        decompose_failures.append("commands")
 
                 # Route MCP servers
                 if meta.get("has_mcp"):
                     try:
-                        from src.utils.paths import read_json_safe
                         mcp_json = install_path / ".mcp.json"
                         if mcp_json.exists():
                             mcp_data = read_json_safe(mcp_json)
@@ -786,25 +784,29 @@ class CodexAdapter(AdapterBase):
                                 self.sync_mcp(servers)
                                 decomposed = True
                     except Exception:
-                        pass
+                        decompose_failures.append("mcp")
 
                 # Route hooks
                 if meta.get("has_hooks"):
                     try:
                         hooks_json = install_path / "hooks" / "hooks.json"
                         if hooks_json.exists():
-                            from src.utils.paths import read_json_safe
                             hooks_data = read_json_safe(hooks_json)
                             if hooks_data:
                                 self.sync_hooks(hooks_data)
                                 decomposed = True
                     except Exception:
-                        pass
+                        decompose_failures.append("hooks")
 
                 if decomposed:
                     result.synced += 1
                     result.synced_files.append(f"{plugin_name} (decomposed)")
                     decomposed_names.append(plugin_name)
+                    if decompose_failures:
+                        result.failed_files.extend(
+                            f"{plugin_name}: decompose failed for {comp}"
+                            for comp in decompose_failures
+                        )
                 else:
                     result.skipped += 1
                     result.skipped_files.append(f"{plugin_name}: nothing to decompose")
@@ -841,10 +843,9 @@ class CodexAdapter(AdapterBase):
                 pass
 
         # Remove existing HarnessSync plugins section
-        import re as _re
-        cleaned = _re.sub(
+        cleaned = re.sub(
             r'# Plugins managed by HarnessSync.*?(?=\n(?:\[(?!plugins)|# [A-Z]|$))',
-            '', existing_raw, flags=_re.DOTALL
+            '', existing_raw, flags=re.DOTALL
         ).rstrip()
 
         # Build plugins TOML section
@@ -1326,8 +1327,12 @@ class CodexAdapter(AdapterBase):
         if len(deny_list) >= CODEX_DENY_THRESHOLD:
             return "untrusted"
 
+        # ANY deny rules -> never auto-approve, even with many allows
+        if deny_list:
+            return "on-request"
+
         # Permissive: many allow rules with no deny rules
-        if len(allow_list) >= CODEX_ALLOW_THRESHOLD and not deny_list:
+        if len(allow_list) >= CODEX_ALLOW_THRESHOLD:
             return "never"
 
         # Balanced: everything else

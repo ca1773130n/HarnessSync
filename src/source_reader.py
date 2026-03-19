@@ -917,6 +917,10 @@ class SourceReader:
         # Get set of enabled plugin identifiers
         enabled_set = self._get_enabled_plugins()
 
+        # Cache settings for enabledPlugins lookup (avoid re-reading inside loop)
+        settings_data = read_json_safe(self.cc_settings) if self.cc_settings.exists() else {}
+        ep = settings_data.get("enabledPlugins", {}) if isinstance(settings_data, dict) else {}
+
         for plugin_key, installs in plugins_data.items():
             if not isinstance(installs, list):
                 installs = [installs]
@@ -945,15 +949,12 @@ class SourceReader:
                 # A plugin is disabled only if explicitly set to False in settings.
                 # If enabledPlugins doesn't mention this plugin at all, treat as enabled.
                 is_enabled = True
-                if self.cc_settings.exists():
-                    settings_data = read_json_safe(self.cc_settings)
-                    ep = settings_data.get("enabledPlugins", {})
-                    if isinstance(ep, dict):
-                        # Check both plugin_name and plugin_key forms
-                        if plugin_name in ep:
-                            is_enabled = bool(ep[plugin_name])
-                        elif plugin_key in ep:
-                            is_enabled = bool(ep[plugin_key])
+                if isinstance(ep, dict):
+                    # Check both plugin_name and plugin_key forms
+                    if plugin_name in ep:
+                        is_enabled = bool(ep[plugin_name])
+                    elif plugin_key in ep:
+                        is_enabled = bool(ep[plugin_key])
 
                 # Inspect install directory for capabilities
                 has_skills = (install_path / "skills").is_dir() and any(
@@ -1327,7 +1328,8 @@ class SourceReader:
             Dictionary with keys: rules (fully resolved with includes inlined),
             include_refs (raw @include paths for adapters that prefer native imports),
             rules_files, skills, agents, commands,
-            mcp_servers (flat), mcp_servers_scoped (with metadata), settings
+            mcp_servers (flat), mcp_servers_scoped (with metadata), settings,
+            permissions, hooks, plugins
         """
         scoped = self.get_mcp_servers_with_scope()
         flat = {name: entry["config"] for name, entry in scoped.items()}
@@ -1363,7 +1365,7 @@ class SourceReader:
             - For skills: returns skill directory paths (not SKILL.md files)
             - For agents/commands: returns .md file paths
             - For rules/mcp/settings: returns source file paths
-            - NEW method added in Task 2 for state manager integration
+            - Used for state tracking (hash each source file for drift detection)
         """
         paths = {
             "rules": [],
