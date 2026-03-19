@@ -1601,8 +1601,9 @@ description: {quoted_desc}
 
         Managed content (will be regenerated):
         - Header comments (# ... HarnessSync ..., # Do not edit ...)
-        - sandbox_mode and approval_policy top-level keys
+        - sandbox_mode, approval_policy, and command_attribution top-level keys
         - All [mcp_servers.*] sections
+        - All [profiles.*] sections
 
         Everything else is preserved verbatim.
 
