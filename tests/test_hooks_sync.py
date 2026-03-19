@@ -725,3 +725,161 @@ class TestCodexFeatureGate:
     def test_no_config_file(self, tmp_path):
         from src.adapters.codex import CodexAdapter
         assert CodexAdapter._codex_hooks_feature_enabled(tmp_path / "nonexistent.toml") is False
+
+
+# ---------------------------------------------------------------------------
+# Integration: sync_all() dispatches sync_hooks() in adapter overrides
+# ---------------------------------------------------------------------------
+
+class TestCodexSyncAllDispatchesHooks:
+    """Verify CodexAdapter.sync_all() dispatches sync_hooks() and includes 'hooks' in results."""
+
+    def test_sync_all_includes_hooks_in_results(self, tmp_path):
+        """CodexAdapter.sync_all() must include 'hooks' key in returned results dict."""
+        from src.adapters.codex import CodexAdapter
+
+        adapter = CodexAdapter(tmp_path)
+        # Enable feature gate so hooks are actually written
+        config_dir = tmp_path / ".codex"
+        config_dir.mkdir()
+        (config_dir / "config.toml").write_text('[features]\nhooks = true\n')
+
+        source_data = {
+            "rules": [{"path": Path("CLAUDE.md"), "content": "# Test rule"}],
+            "skills": {},
+            "agents": {},
+            "commands": {},
+            "mcp": {},
+            "settings": {},
+            "hooks": {
+                "hooks": [
+                    {"event": "SessionStart", "type": "shell", "command": "echo start", "scope": "user"},
+                    {"event": "PostToolUse", "type": "shell", "command": "echo post", "matcher": "Edit", "scope": "project"},
+                ]
+            },
+        }
+        results = adapter.sync_all(source_data)
+        assert "hooks" in results, "sync_all() must dispatch sync_hooks() and include 'hooks' in results"
+        assert results["hooks"].synced == 2
+        assert results["hooks"].failed == 0
+
+    def test_sync_all_hooks_empty_source(self, tmp_path):
+        """sync_all() with no hooks data still includes 'hooks' key with zero counts."""
+        from src.adapters.codex import CodexAdapter
+
+        adapter = CodexAdapter(tmp_path)
+        source_data = {
+            "rules": [],
+            "skills": {},
+            "agents": {},
+            "commands": {},
+            "mcp": {},
+            "settings": {},
+            "hooks": {},
+        }
+        results = adapter.sync_all(source_data)
+        assert "hooks" in results
+        assert results["hooks"].synced == 0
+        assert results["hooks"].failed == 0
+
+    def test_sync_all_hooks_with_skipped_events(self, tmp_path):
+        """sync_all() correctly propagates skipped hooks (e.g., PreToolUse unsupported by Codex)."""
+        from src.adapters.codex import CodexAdapter
+
+        adapter = CodexAdapter(tmp_path)
+        config_dir = tmp_path / ".codex"
+        config_dir.mkdir()
+        (config_dir / "config.toml").write_text('[features]\nhooks = true\n')
+
+        source_data = {
+            "rules": [],
+            "skills": {},
+            "agents": {},
+            "commands": {},
+            "mcp": {},
+            "settings": {},
+            "hooks": {
+                "hooks": [
+                    {"event": "PreToolUse", "type": "shell", "command": "echo pre", "scope": "user"},
+                ]
+            },
+        }
+        results = adapter.sync_all(source_data)
+        assert "hooks" in results
+        assert results["hooks"].skipped >= 1
+        assert results["hooks"].synced == 0
+
+
+class TestGeminiSyncAllDispatchesHooks:
+    """Verify GeminiAdapter.sync_all() dispatches sync_hooks() and includes 'hooks' in results."""
+
+    def test_sync_all_includes_hooks_in_results(self, tmp_path):
+        """GeminiAdapter.sync_all() must include 'hooks' key in returned results dict."""
+        from src.adapters.gemini import GeminiAdapter
+
+        adapter = GeminiAdapter(tmp_path)
+        source_data = {
+            "rules": [{"path": Path("CLAUDE.md"), "content": "# Test rule"}],
+            "skills": {},
+            "agents": {},
+            "commands": {},
+            "mcp": {},
+            "settings": {},
+            "hooks": {
+                "hooks": [
+                    {"event": "PreToolUse", "type": "shell", "command": "echo pre", "matcher": "Edit|Write", "scope": "user"},
+                    {"event": "Stop", "type": "shell", "command": "echo stop", "scope": "user"},
+                ]
+            },
+        }
+        results = adapter.sync_all(source_data)
+        assert "hooks" in results, "sync_all() must dispatch sync_hooks() and include 'hooks' in results"
+        assert results["hooks"].synced == 2
+        assert results["hooks"].failed == 0
+
+    def test_sync_all_hooks_empty_source(self, tmp_path):
+        """sync_all() with no hooks data still includes 'hooks' key with zero counts."""
+        from src.adapters.gemini import GeminiAdapter
+
+        adapter = GeminiAdapter(tmp_path)
+        source_data = {
+            "rules": [],
+            "skills": {},
+            "agents": {},
+            "commands": {},
+            "mcp": {},
+            "settings": {},
+            "hooks": {},
+        }
+        results = adapter.sync_all(source_data)
+        assert "hooks" in results
+        assert results["hooks"].synced == 0
+        assert results["hooks"].failed == 0
+
+    def test_sync_all_hooks_http_converted_to_curl(self, tmp_path):
+        """sync_all() dispatches sync_hooks() which converts HTTP hooks to curl wrappers."""
+        from src.adapters.gemini import GeminiAdapter
+
+        adapter = GeminiAdapter(tmp_path)
+        source_data = {
+            "rules": [],
+            "skills": {},
+            "agents": {},
+            "commands": {},
+            "mcp": {},
+            "settings": {},
+            "hooks": {
+                "hooks": [
+                    {"event": "PostToolUse", "type": "http", "url": "https://example.com/hook", "timeout": 5000, "scope": "user"},
+                ]
+            },
+        }
+        results = adapter.sync_all(source_data)
+        assert "hooks" in results
+        assert results["hooks"].synced == 1
+
+        # Verify the curl wrapper was written to settings.json
+        settings = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
+        assert "hooks" in settings
+        hook = settings["hooks"]["PostToolUse"][0]
+        assert "curl" in hook["command"]

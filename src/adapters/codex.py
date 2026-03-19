@@ -454,6 +454,15 @@ class CodexAdapter(AdapterBase):
                 failed_files=[f'mcp: {str(e)}']
             )
 
+        # Sync hooks
+        try:
+            results['hooks'] = self.sync_hooks(source_data.get('hooks', {}))
+        except Exception as e:
+            results['hooks'] = SyncResult(
+                failed=1,
+                failed_files=[f'hooks: {str(e)}']
+            )
+
         return results
 
     # ── Hooks Sync ─────────────────────────────────────────────────────────────

@@ -1035,6 +1035,15 @@ class GeminiAdapter(AdapterBase):
                 failed_files=[f'mcp: {str(e)}']
             )
 
+        # Sync hooks
+        try:
+            results['hooks'] = self.sync_hooks(source_data.get('hooks', {}))
+        except Exception as e:
+            results['hooks'] = SyncResult(
+                failed=1,
+                failed_files=[f'hooks: {str(e)}']
+            )
+
         # Only cleanup if all three native-format syncs succeeded (no failures)
         skills_ok = results.get('skills', SyncResult()).failed == 0
         agents_ok = results.get('agents', SyncResult()).failed == 0
