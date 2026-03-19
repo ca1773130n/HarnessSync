@@ -18,6 +18,7 @@ import json
 import re
 from pathlib import Path
 from src.utils.paths import read_json_safe
+from src.utils.permissions import extract_permissions
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Inline harness annotation parsing (item 2 — Per-Harness Rule Overrides)
@@ -857,6 +858,26 @@ class SourceReader:
 
         return settings
 
+    def get_permissions(self) -> dict:
+        """Extract structured permissions from Claude Code settings.
+
+        Convenience method that calls :meth:`get_settings` and then
+        :func:`extract_permissions` to return a pre-extracted permissions
+        dict. This is provided as a dedicated key in :meth:`discover_all`
+        so adapters can consume permissions directly without digging into
+        the nested ``settings["permissions"]`` structure.
+
+        Returns:
+            Dict with keys ``"allow"``, ``"deny"``, ``"ask"``, each
+            mapping to a list of permission strings. Always returns
+            all three keys (empty lists if no permissions configured).
+        """
+        try:
+            settings = self.get_settings()
+            return extract_permissions(settings)
+        except Exception:
+            return {"allow": [], "deny": [], "ask": []}
+
     def get_harness_override(self, target_name: str) -> str:
         """Read per-harness override file (e.g. CLAUDE.codex.md) if present.
 
@@ -1008,6 +1029,7 @@ class SourceReader:
             "mcp_servers": flat,
             "mcp_servers_scoped": scoped,
             "settings": self.get_settings(),
+            "permissions": self.get_permissions(),
             "harness_overrides": self.get_harness_override_paths(),
         }
 

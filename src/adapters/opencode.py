@@ -28,6 +28,7 @@ from src.utils.paths import (
     write_json_atomic,
 )
 from src.utils.env_translator import check_transport_support, translate_env_vars_for_opencode_headers
+from src.utils.permissions import extract_permissions, parse_permission_string
 
 
 # OpenCode CLI constants
@@ -406,12 +407,17 @@ class OpenCodeAdapter(AdapterBase):
     def sync_settings(self, settings: dict) -> SyncResult:
         """Map Claude Code settings to opencode.json permission (singular).
 
-        Maps Claude Code permission settings to OpenCode per-tool permission format.
-        Uses allow/ask/deny values per tool identifier:
-        - Deny list tools -> "deny"
-        - Allow list tools -> "allow"
-        - Bash patterns (e.g. Bash(git commit:*)) -> permission.bash dict with wildcards
-        - NEVER sets unrestricted mode
+        Maps Claude Code permission settings to OpenCode per-tool permission format
+        using ``parse_permission_string()`` to group by tool name:
+
+        | Claude Code                      | opencode.json permission               |
+        |----------------------------------|-----------------------------------------|
+        | ``permissions.allow: ["Bash(npm *)"]`` | ``{"permission": {"bash": {"npm *": "allow"}}}`` |
+        | ``permissions.deny: ["Bash(rm -rf *)"]`` | ``{"permission": {"bash": {"rm -rf *": "deny"}}}`` |
+        | ``permissions.ask: ["Bash(git push *)"]`` | ``{"permission": {"bash": {"git push *": "ask"}}}`` |
+
+        Format: group by tool name (lowercased), then glob pattern -> permission level.
+        NEVER sets unrestricted mode.
 
         Args:
             settings: Settings dict from Claude Code configuration
@@ -429,39 +435,55 @@ class OpenCodeAdapter(AdapterBase):
             existing_config = read_json_safe(self.opencode_json_path)
 
             # Extract permissions from Claude Code settings
-            permissions = settings.get('permissions', {})
+            permissions = extract_permissions(settings)
             allow_list = permissions.get('allow', [])
             deny_list = permissions.get('deny', [])
+            ask_list = permissions.get('ask', [])
 
-            # Build per-tool permission config
-            permission_config = {}
+            # Build per-tool permission config using parse_permission_string
+            # Group by tool name (lowercased), then pattern -> level
+            permission_config: dict = {}
 
-            # Process deny list: map each tool to "deny"
-            for tool in deny_list:
-                oc_tool = self.TOOL_MAPPING.get(tool)
-                if oc_tool:
-                    permission_config[oc_tool] = 'deny'
+            # Process all three lists with their respective levels
+            for perm_list, level in [
+                (deny_list, 'deny'),
+                (allow_list, 'allow'),
+                (ask_list, 'ask'),
+            ]:
+                for perm in perm_list:
+                    tool, args = parse_permission_string(perm)
+                    if not tool:
+                        continue
 
-            # Process allow list: handle bash patterns and simple tool mappings
-            for tool in allow_list:
-                if tool.startswith('Bash(') and tool.endswith(')'):
-                    # Extract bash pattern: Bash(git commit:*) -> "git commit *"
-                    pattern = tool[5:-1].replace(':', ' ')
-                    # Initialize bash as dict if needed
-                    if 'bash' not in permission_config or isinstance(permission_config.get('bash'), str):
-                        old_val = permission_config.get('bash')
-                        permission_config['bash'] = {}
-                        if isinstance(old_val, str):
-                            permission_config['bash']['*'] = old_val
-                    permission_config['bash'][pattern] = 'allow'
-                else:
-                    oc_tool = self.TOOL_MAPPING.get(tool)
-                    if oc_tool:
-                        permission_config[oc_tool] = 'allow'
+                    # Translate Claude Code colon-separated patterns to space-separated
+                    # e.g. "git commit:*" -> "git commit *"
+                    if args:
+                        args = args.replace(':', ' ')
 
-            # If bash has specific patterns but no default, add "*": "ask"
-            if isinstance(permission_config.get('bash'), dict) and '*' not in permission_config['bash']:
-                permission_config['bash']['*'] = 'ask'
+                    # Map Claude Code tool name to OpenCode identifier
+                    oc_tool = self.TOOL_MAPPING.get(tool, tool.lower())
+
+                    if args:
+                        # Tool with pattern args -> nested dict
+                        if oc_tool not in permission_config:
+                            permission_config[oc_tool] = {}
+                        elif isinstance(permission_config[oc_tool], str):
+                            # Upgrade from simple string to dict
+                            old_val = permission_config[oc_tool]
+                            permission_config[oc_tool] = {'*': old_val}
+                        permission_config[oc_tool][args] = level
+                    else:
+                        # Bare tool name -> simple string value
+                        if isinstance(permission_config.get(oc_tool), dict):
+                            # Already has patterns; set default wildcard
+                            permission_config[oc_tool]['*'] = level
+                        else:
+                            permission_config[oc_tool] = level
+
+            # If any tool has specific patterns but no default, add "*": "ask"
+            for tool_key, tool_val in permission_config.items():
+                if isinstance(tool_val, dict) and '*' not in tool_val:
+                    permission_config[tool_key]['*'] = 'ask'
 
             # Write permission (singular) key; remove old permissions (plural) if present
             if 'permissions' in existing_config:

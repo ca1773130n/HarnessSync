@@ -29,6 +29,7 @@ from src.utils.toml_writer import (
     read_toml_safe,
 )
 from src.utils.env_translator import translate_env_vars_for_codex, check_transport_support
+from src.utils.permissions import extract_permissions, parse_permission_string
 
 
 # Codex CLI constants
@@ -430,9 +431,17 @@ class CodexAdapter(AdapterBase):
     def sync_settings(self, settings: dict) -> SyncResult:
         """Map Claude Code settings to Codex configuration.
 
-        Maps Claude Code permission settings to Codex sandbox_mode and approval_policy.
-        Uses conservative defaults: any denied tool -> read-only sandbox.
-        Never auto-maps to danger-full-access.
+        Maps Claude Code permission settings to Codex sandbox_mode and approval_policy
+        using intent-based mapping:
+
+        | Claude Code stance         | Codex approval_policy |
+        |----------------------------|-----------------------|
+        | Restrictive (many denies)  | "untrusted"           |
+        | Balanced (default ask)     | "on-request"          |
+        | Permissive (many allows)   | "never"               |
+
+        Specific deny rules are documented as warnings in AGENTS.md since Codex
+        cannot express per-tool restrictions. The mapping is intentionally lossy.
 
         Args:
             settings: Settings dict from Claude Code configuration
@@ -449,25 +458,27 @@ class CodexAdapter(AdapterBase):
             # Config target path
             config_path = self.project_dir / ".codex" / CONFIG_TOML
 
-            # Extract permissions
-            permissions = settings.get('permissions', {})
+            # Extract permissions (use pre-extracted if available, fall back to settings)
+            permissions = extract_permissions(settings)
             allow_list = permissions.get('allow', [])
             deny_list = permissions.get('deny', [])
+            ask_list = permissions.get('ask', [])
 
             # Determine sandbox_mode (conservative mapping)
             sandbox_mode = 'workspace-write'  # Default
             if deny_list:
                 # ANY denied tool -> most restrictive
                 sandbox_mode = 'read-only'
-            elif allow_list and any(tool in allow_list for tool in ['Write', 'Edit', 'Bash']):
+            elif allow_list and any(
+                parse_permission_string(tool)[0] in ('Write', 'Edit', 'Bash')
+                for tool in allow_list
+            ):
                 sandbox_mode = 'workspace-write'
 
-            # Determine approval_policy
-            approval_mode = settings.get('approval_mode', 'ask')
-            if approval_mode == 'auto':
-                approval_policy = 'on-request'
-            else:
-                approval_policy = 'on-request'  # Conservative default
+            # Determine approval_policy using intent-based mapping
+            approval_policy = self._map_approval_policy(
+                allow_list, deny_list, ask_list, settings
+            )
 
             # Read existing config to preserve MCP servers
             existing_config = self._read_existing_config()
@@ -494,6 +505,10 @@ class CodexAdapter(AdapterBase):
             # Write atomically
             write_toml_atomic(config_path, final_toml)
 
+            # Document specific deny/ask rules in AGENTS.md (lossy mapping notice)
+            if deny_list or ask_list:
+                self._append_permission_warnings_to_agents_md(deny_list, ask_list)
+
             # Track results
             result.synced = 1
             result.adapted = 1
@@ -504,6 +519,106 @@ class CodexAdapter(AdapterBase):
             result.failed_files.append(f"Settings: {str(e)}")
 
         return result
+
+    def _map_approval_policy(
+        self,
+        allow_list: list,
+        deny_list: list,
+        ask_list: list,
+        settings: dict,
+    ) -> str:
+        """Map Claude Code permission stance to Codex approval_policy.
+
+        Intent mapping:
+        - Restrictive (3+ deny rules)     -> "untrusted"
+        - Balanced (default, or ask-heavy) -> "on-request"
+        - Permissive (5+ allow, no deny)   -> "never" (auto-approve)
+
+        Falls back to "on-request" as the conservative default.
+
+        Args:
+            allow_list: Permission allow entries
+            deny_list: Permission deny entries
+            ask_list: Permission ask entries
+            settings: Full settings dict for additional signals
+
+        Returns:
+            Codex approval_policy string
+        """
+        # Restrictive: many deny rules indicate a locked-down stance
+        if len(deny_list) >= 3:
+            return "untrusted"
+
+        # Permissive: many allow rules with no deny rules
+        if len(allow_list) >= 5 and not deny_list:
+            return "never"
+
+        # Balanced: everything else
+        return "on-request"
+
+    def _append_permission_warnings_to_agents_md(
+        self, deny_list: list, ask_list: list
+    ) -> None:
+        """Append permission restriction warnings to AGENTS.md.
+
+        Codex cannot express per-tool permission restrictions, so we document
+        the source deny/ask rules in the AGENTS.md rules section as warnings
+        so users are aware of the intent that was lost in translation.
+
+        Args:
+            deny_list: List of denied permission strings
+            ask_list: List of ask-required permission strings
+        """
+        if not deny_list and not ask_list:
+            return
+
+        lines = [
+            "",
+            "## Permission Restrictions (from Claude Code)",
+            "",
+            "> **Note:** Codex uses coarse approval policies and cannot enforce",
+            "> per-tool restrictions. The following Claude Code rules are documented",
+            "> here for reference but are NOT enforced by Codex.",
+            "",
+        ]
+
+        if deny_list:
+            lines.append("### Denied Operations")
+            lines.append("")
+            for perm in deny_list:
+                tool, args = parse_permission_string(perm)
+                if args:
+                    lines.append(f"- **{tool}**: `{args}` (DENIED)")
+                else:
+                    lines.append(f"- **{tool}** (DENIED)")
+            lines.append("")
+
+        if ask_list:
+            lines.append("### Requires Confirmation")
+            lines.append("")
+            for perm in ask_list:
+                tool, args = parse_permission_string(perm)
+                if args:
+                    lines.append(f"- **{tool}**: `{args}` (requires approval)")
+                else:
+                    lines.append(f"- **{tool}** (requires approval)")
+            lines.append("")
+
+        warning_section = "\n".join(lines)
+
+        # Read existing AGENTS.md and append within managed section
+        existing = self._read_agents_md()
+        if existing and HARNESSSYNC_MARKER_END in existing:
+            # Insert before the end marker
+            end_idx = existing.find(HARNESSSYNC_MARKER_END)
+            before = existing[:end_idx].rstrip()
+            after = existing[end_idx:]
+            final = f"{before}\n{warning_section}\n{after}"
+            self._write_agents_md(final)
+        elif existing:
+            # No managed section — append at end
+            self._write_agents_md(f"{existing.rstrip()}\n{warning_section}\n")
+        # If no AGENTS.md exists, skip — sync_rules will create it
 
     # Helper methods for parsing and formatting
 
