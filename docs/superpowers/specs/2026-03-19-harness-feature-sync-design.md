@@ -3,7 +3,7 @@
 **Date:** 2026-03-19
 **Scope:** Full round-trip sync for Claude Code, Codex CLI, Gemini CLI, OpenCode + opportunistic updates to Cursor/Cline/Windsurf
 **Approach:** Vertical slices (source + adapters per feature), source-first within each slice
-**Slices:** 6 independent PRs — Permissions, MCP, Skills/Agents/Config, Hooks, Plugins, New Settings
+**Slices:** 6 PRs — Permissions, MCP, Skills/Agents/Config, Hooks, Plugins, New Settings (Slice 5 depends on Slice 4)
 
 ---
 
@@ -54,6 +54,10 @@ Helper in `src/utils/permissions.py`:
 - `extract_permissions(settings: dict) -> dict` — pulls from `permissions.allow`, `permissions.deny`, `permissions.ask` keys
 - `parse_permission_string(perm: str) -> tuple[str, str]` — parses `"Bash(npm *)"` into `("Bash", "npm *")`
 
+**Data flow:** `get_permissions()` provides a pre-extracted convenience in `source_data["permissions"]`. Adapters consume this for the new permission-mapping logic instead of digging into `source_data["settings"]["permissions"]`. Existing `sync_settings()` logic continues handling non-permission settings fields — the permission keys are not removed from settings, just also provided separately for cleaner adapter code.
+
+**`discover_all()` update:** Add `"permissions": self.get_permissions()` to the returned dict.
+
 ### Codex Adapter
 
 Map Claude Code permissions to Codex's coarser model:
@@ -82,11 +86,11 @@ Closest 1:1 mapping of all three:
 
 | Claude Code | opencode.json `permission` |
 |---|---|
-| `permissions.allow: ["Bash(npm *)"]` | `"allow": {"Bash": ["npm *"]}` |
-| `permissions.deny: ["Bash(rm -rf *)"]` | `"deny": {"Bash": ["rm -rf *"]}` |
-| `permissions.ask: ["Bash(git push *)"]` | `"ask": {"Bash": ["git push *"]}` |
+| `permissions.allow: ["Bash(npm *)"]` | `{"permission": {"bash": {"npm *": "allow"}}}` |
+| `permissions.deny: ["Bash(rm -rf *)"]` | `{"permission": {"bash": {"rm -rf *": "deny"}}}` |
+| `permissions.ask: ["Bash(git push *)"]` | `{"permission": {"bash": {"git push *": "ask"}}}` |
 
-Parse permission strings into tool + glob pattern using `parse_permission_string()`.
+Format follows OpenCode's existing schema: group by tool name (lowercased), then glob pattern → permission level. This matches the existing adapter code at `opencode.py` lines 392-464. Parse permission strings using `parse_permission_string()`, then invert the grouping.
 
 ### Files
 
@@ -104,7 +108,9 @@ Parse permission strings into tool + glob pattern using `parse_permission_string
 
 ### SourceReader Enhancement
 
-`get_mcp_servers()` already filters for `command`/`url`/`type`. Enhancement: preserve all additional fields from the source config dict instead of stripping unknown keys. New fields that pass through:
+The existing SourceReader already preserves all fields from source config dicts — the `command`/`url`/`type` check only gates whether a server entry is included, not which fields survive. **No SourceReader changes needed for field passthrough.** The real work is in adapter mapping tables below, where each adapter selects and transforms the fields it understands.
+
+New fields now available in MCP config dicts (already present in source JSON, just not previously consumed by adapters):
 
 - `essential` (bool)
 - `timeout` (int, milliseconds)
@@ -112,8 +118,6 @@ Parse permission strings into tool + glob pattern using `parse_permission_string
 - `elicitation` (bool or dict)
 - `cwd` (str)
 - `enabled_tools` / `disabled_tools` (list[str])
-
-No schema validation on these — just pass through what's present.
 
 ### Codex Adapter
 
@@ -123,7 +127,7 @@ No schema validation on these — just pass through what's present.
 | `url` (remote) | `url` + `bearer_token_env_var` if auth env var present |
 | `oauth_scopes` | `scopes = [...]` |
 | `essential` | Drop silently |
-| `elicitation` | Pass through (Codex supports natively since 0.114) |
+| `elicitation` | Pass through (Codex supports natively since 0.114; unknown keys are silently ignored by Codex's TOML parser so passthrough is safe regardless of Codex version) |
 | `enabled_tools` | `enabled_tools` (direct) |
 | `disabled_tools` | `disabled_tools` (direct) |
 
@@ -157,7 +161,7 @@ All three get `timeout` and `url` field passthrough in their respective MCP JSON
 
 ### Files
 
-- Modified: `src/source_reader.py` (preserve additional MCP fields)
+- No SourceReader changes (fields already pass through)
 - Modified: `src/adapters/codex.py`
 - Modified: `src/adapters/gemini.py`
 - Modified: `src/adapters/opencode.py`
@@ -170,9 +174,9 @@ All three get `timeout` and `url` field passthrough in their respective MCP JSON
 
 ## Slice 3: Skills, Agents, and Config Updates
 
-### @include Directive Resolution (Orchestrator)
+### @include Directive Resolution (SourceReader)
 
-New function in orchestrator's pre-sync pipeline:
+New utility function in `src/utils/includes.py` (follows the canonical-read-path pattern — SourceReader handles all source reading, not the orchestrator):
 
 ```python
 def resolve_includes(content: str, base_dir: Path) -> tuple[str, list[Path]]
@@ -180,12 +184,12 @@ def resolve_includes(content: str, base_dir: Path) -> tuple[str, list[Path]]
 
 - Scans for `@include path/to/file.md` patterns
 - Resolves relative paths against source file's directory
-- Inlines included content with cycle detection (max depth: 10)
+- Inlines included content with cycle detection (tracks seen paths, max depth: 10)
 - Returns resolved content AND list of included file paths (for hashing)
 
-The orchestrator provides **both** resolved content and original include references in `source_data`:
+SourceReader calls `resolve_includes()` inside `get_rules()` after reading each CLAUDE.md file. The `discover_all()` dict provides **both** forms:
 - `source_data["rules"]` — fully resolved (includes inlined)
-- `source_data["include_refs"]` — list of raw include paths for adapters that prefer native imports
+- `source_data["include_refs"]` — list of raw include paths for adapters that prefer native imports (e.g., Gemini's `@file.md`)
 
 ### Gemini: @file.md Native Imports
 
@@ -235,7 +239,8 @@ Codex supports `child_agents_md` feature for discovering AGENTS.md in subdirecto
 
 ### Files
 
-- Modified: `src/orchestrator.py` (add `resolve_includes()`, route include_refs)
+- New: `src/utils/includes.py` (`resolve_includes()` function)
+- Modified: `src/source_reader.py` (call `resolve_includes()` in `get_rules()`, expose `include_refs` in `discover_all()`)
 - Modified: `src/adapters/gemini.py` (@file.md conversion)
 - Modified: `src/adapters/opencode.py` (instructions array, agent config)
 - Modified: `src/adapters/codex.py` (hierarchical AGENTS.md)
@@ -274,6 +279,10 @@ Normalized return structure:
 
 New method with default no-op (returns `SyncResult(skipped=len(hooks))`). Only Codex and Gemini override.
 
+**Wiring:** `AdapterBase.sync_all()` must be updated to dispatch `sync_hooks(source_data.get('hooks', []))` after the existing 6 calls, wrapped in the same try/except pattern. The orchestrator's `_apply_section_filter()` must add `'hooks': []` to `section_defaults`.
+
+**`discover_all()` update:** Add `"hooks": self.get_hooks()` to the returned dict.
+
 ### Codex Adapter
 
 Codex hooks are experimental (gated behind `[features] hooks = true`).
@@ -299,9 +308,11 @@ Richest hook target — 11 events in `.gemini/settings.json` under `"hooks"`.
 | `SessionStart` | `SessionStart` | `exact` |
 | `Stop` | `Stop` | `exact` |
 | `Notification` | `Notification` | `exact` |
-| `PreCompact` | `PreCompact` | `exact` (if supported) |
-| `PostCompact` | `PostCompact` | `exact` (if supported) |
-| HTTP hooks | Convert to curl wrapper | shell command: `curl -X POST -d '...' URL` |
+| `PreCompact` | Drop (not supported in Gemini as of March 2026) | — |
+| `PostCompact` | Drop (not supported in Gemini as of March 2026) | — |
+| HTTP hooks | Convert to curl wrapper | See below |
+
+**HTTP-to-curl conversion spec:** Generate a shell command: `curl -sS -X POST -H 'Content-Type: application/json' -d '{"event":"EVENT","tool":"$TOOL_NAME"}' --max-time TIMEOUT_SEC URL`. The `$TOOL_NAME` variable is populated by Gemini's hook context. Timeout defaults to 10s if not specified. No authentication headers — if the HTTP hook requires auth, skip it and log a warning (Gemini hooks don't support bearer token injection).
 
 ### Files
 
@@ -363,6 +374,10 @@ def _find_native_plugin(self, plugin_name: str, manifest: dict) -> str | None
 
 Checks `PLUGIN_EQUIVALENTS` + user overrides from `.harnesssync` config.
 
+**Wiring:** `AdapterBase.sync_all()` must be updated to dispatch `sync_plugins(source_data.get('plugins', {}))` after `sync_hooks`, wrapped in the same try/except pattern. The orchestrator's `_apply_section_filter()` must add `'plugins': {}` to `section_defaults`.
+
+**`discover_all()` update:** Add `"plugins": self.get_plugins()` to the returned dict.
+
 ### Two-Tier Sync Strategy
 
 For each Claude Code plugin:
@@ -374,7 +389,9 @@ For each Claude Code plugin:
    - Agents → route through `sync_agents()`
    - Commands → route through `sync_commands()`
    - MCP servers → route through `sync_mcp()`
-   - Hooks → route through `sync_hooks()`
+   - Hooks → route through `sync_hooks()` (requires Slice 4 to have landed first)
+
+**Dependency note:** Slice 5 depends on Slice 4 for hooks decomposition. Slice 4 must land before Slice 5. If hooks decomposition is needed before Slice 4, the fallback routes through skills/agents/commands/mcp only and skips hooks.
 
 ### Codex Adapter
 
@@ -412,14 +429,14 @@ For each Claude Code plugin:
 
 | Claude Code setting | Codex | Gemini | OpenCode |
 |---|---|---|---|
-| `modelOverrides` | `[profiles.*]` section | Skip | Skip |
-| `attribution` | `command_attribution` | Skip | Skip |
-| `respectGitignore` | Skip | `fileFiltering.respectGitignore` | Skip |
-| `autoMemoryDirectory` | Skip | Skip | Skip |
-| `language` | Skip | Skip | Skip |
-| `cleanupPeriodDays` | Skip | Skip | Skip |
-
-Most new settings are Claude Code-specific. Only `modelOverrides` → Codex profiles and `respectGitignore` → Gemini have clean mappings.
+| Claude Code setting | Codex | Gemini | OpenCode | Skip rationale |
+|---|---|---|---|---|
+| `modelOverrides` | `[profiles.*]` section | Skip | Skip | Gemini/OpenCode don't have user-configurable model profiles |
+| `attribution` | `command_attribution` | Skip | Skip | Only Codex has commit co-author hooks |
+| `respectGitignore` | Skip | `fileFiltering.respectGitignore` | Skip | Codex/OpenCode handle gitignore natively without config |
+| `autoMemoryDirectory` | Skip | Skip | Skip | Claude Code-internal memory storage path; no equivalent concept |
+| `language` | Skip | Skip | Skip | UI language preference; all targets use system locale |
+| `cleanupPeriodDays` | Skip | Skip | Skip | Claude Code-internal cache management; no equivalent concept |
 
 ### Files
 
@@ -437,7 +454,7 @@ Each slice gets its own test file:
 |---|---|---|
 | 1. Permissions | `tests/test_permissions_sync.py` | Permission string parsing, per-adapter format mapping, round-trip |
 | 2. MCP | `tests/test_mcp_enhancements.py` | Field passthrough, timeout ms→sec, type discrimination, opportunistic adapters |
-| 3. Skills/Config | `tests/test_skills_agents_config.py` | @include resolution, cycle detection, @file.md conversion, instructions array |
+| 3. Skills/Config | `tests/test_skills_agents_config.py` | @include resolution (happy path, self-referential, diamond graph, missing file, symlink boundary, depth=10 limit, depth=11 rejection), @file.md conversion, instructions array |
 | 4. Hooks | `tests/test_hooks_sync.py` | Hook normalization, event mapping, HTTP→curl, feature gate behavior |
 | 5. Plugins | `tests/test_plugins_sync.py` | Equivalence lookup, user override, decomposition, native plugin reference |
 | 6. Settings | `tests/test_new_settings_sync.py` | Per-setting mapping, skip behavior for unsupported keys |
@@ -456,11 +473,11 @@ Slice 1: Permissions ───────────────────�
 Slice 2: MCP Enhancements ────────────────────── PR #2
 Slice 3: Skills/Agents/Config ─────────────────── PR #3
 Slice 4: Hooks ────────────────────────────────── PR #4
-Slice 5: Plugins ──────────────────────────────── PR #5
+Slice 5: Plugins ──────────────────────────────── PR #5 (depends on PR #4)
 Slice 6: New Settings ─────────────────────────── PR #6
 ```
 
-Each PR is independently shippable. No cross-slice dependencies — each slice touches the source reader + adapters + tests for one feature category.
+Slices 1-4 and 6 are independently shippable in any order. Slice 5 (Plugins) depends on Slice 4 (Hooks) because plugin decomposition routes extracted hooks through `sync_hooks()`.
 
 ---
 
@@ -468,6 +485,7 @@ Each PR is independently shippable. No cross-slice dependencies — each slice t
 
 ### New files
 - `src/utils/permissions.py` — Permission string parsing and extraction
+- `src/utils/includes.py` — @include directive resolution with cycle detection
 - `src/plugin_registry.py` — Static plugin equivalence mapping
 - `tests/test_permissions_sync.py`
 - `tests/test_mcp_enhancements.py`
@@ -477,12 +495,12 @@ Each PR is independently shippable. No cross-slice dependencies — each slice t
 - `tests/test_new_settings_sync.py`
 
 ### Modified files
-- `src/source_reader.py` — `get_hooks()`, `get_plugins()`, `get_permissions()`, MCP field passthrough
-- `src/adapters/base.py` — `sync_hooks()`, `sync_plugins()` defaults
+- `src/source_reader.py` — `get_hooks()`, `get_plugins()`, `get_permissions()`, @include resolution in `get_rules()`, `discover_all()` updated with hooks/plugins/permissions/include_refs keys
+- `src/adapters/base.py` — `sync_hooks()`, `sync_plugins()` defaults; `sync_all()` updated to dispatch hooks and plugins
 - `src/adapters/codex.py` — All 6 slices
 - `src/adapters/gemini.py` — All 6 slices
 - `src/adapters/opencode.py` — Slices 1-5
 - `src/adapters/cursor.py` — Slice 2 (MCP)
 - `src/adapters/cline.py` — Slice 2 (MCP)
 - `src/adapters/windsurf.py` — Slice 2 (MCP)
-- `src/orchestrator.py` — @include resolution, permissions extraction, new source_data routing
+- `src/orchestrator.py` — Permissions extraction, new source_data routing, `_apply_section_filter` updated with hooks/plugins defaults
