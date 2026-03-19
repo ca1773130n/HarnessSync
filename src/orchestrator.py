@@ -375,8 +375,9 @@ class SyncOrchestrator:
             _skill_graph = SkillDependencyGraph.from_source_data(source_data)
             _cycles = _skill_graph.find_cycles()
             for _cycle in _cycles:
+                _arrow = " \u2192 "
                 self.logger.warn(
-                    f"Skill dependency cycle detected: {' \u2192 '.join(_cycle)} "
+                    f"Skill dependency cycle detected: {_arrow.join(_cycle)} "
                     "— this may cause unexpected behavior when skills are synced"
                 )
             # Warn about edges referencing skills that don't exist in the skills dir
@@ -1397,6 +1398,7 @@ class SyncOrchestrator:
             "mcp": {},
             "mcp_scoped": {},
             "settings": {},
+            "hooks": {},
         }
 
         filtered = dict(data)

@@ -884,6 +884,148 @@ class SourceReader:
 
         return settings
 
+    def get_hooks(self) -> dict:
+        """Discover hooks from settings.json and project-level hooks/hooks.json.
+
+        Reads from two locations and normalizes to a common shape:
+        1. settings.json -> 'hooks' key (new format: event-keyed arrays)
+        2. Project-level hooks/hooks.json (legacy plugin format)
+
+        User-scope hooks from settings.json come first; project-level hooks
+        are merged after (duplicates by command+event are not deduplicated —
+        both are kept).
+
+        Returns:
+            Dict with 'hooks' key containing a list of normalized hook dicts.
+            Each hook dict has: event, type, command/url, matcher, timeout, scope.
+        """
+        hooks: list[dict] = []
+
+        # Source 1: settings.json 'hooks' key (new format)
+        # Format: {"hooks": {"PreToolUse": [{"type": "command", "command": "...", "matcher": "..."}], ...}}
+        if self.scope in ("user", "all"):
+            if self.cc_settings.exists():
+                settings = read_json_safe(self.cc_settings)
+                hooks_section = settings.get("hooks", {})
+                if isinstance(hooks_section, dict):
+                    for event, entries in hooks_section.items():
+                        if not isinstance(entries, list):
+                            continue
+                        for entry in entries:
+                            if not isinstance(entry, dict):
+                                continue
+                            hooks.append(self._normalize_settings_hook(entry, event, "user"))
+
+        if self.scope in ("project", "all") and self.project_dir:
+            proj_settings = self.project_dir / ".claude" / "settings.json"
+            if proj_settings.exists():
+                settings = read_json_safe(proj_settings)
+                hooks_section = settings.get("hooks", {})
+                if isinstance(hooks_section, dict):
+                    for event, entries in hooks_section.items():
+                        if not isinstance(entries, list):
+                            continue
+                        for entry in entries:
+                            if not isinstance(entry, dict):
+                                continue
+                            hooks.append(self._normalize_settings_hook(entry, event, "project"))
+
+        # Source 2: project-level hooks/hooks.json (legacy plugin format)
+        # Format: {"hooks": {"PostToolUse": [{"matcher": "...", "hooks": [{"type": "command", "command": "..."}]}]}}
+        if self.scope in ("project", "all") and self.project_dir:
+            hooks_json = self.project_dir / "hooks" / "hooks.json"
+            if hooks_json.exists():
+                data = read_json_safe(hooks_json)
+                hooks_section = data.get("hooks", {})
+                if isinstance(hooks_section, dict):
+                    for event, event_entries in hooks_section.items():
+                        if not isinstance(event_entries, list):
+                            continue
+                        for group in event_entries:
+                            if not isinstance(group, dict):
+                                continue
+                            matcher = group.get("matcher", "")
+                            inner_hooks = group.get("hooks", [])
+                            if not isinstance(inner_hooks, list):
+                                continue
+                            for hook_entry in inner_hooks:
+                                if not isinstance(hook_entry, dict):
+                                    continue
+                                hooks.append(self._normalize_legacy_hook(hook_entry, event, matcher, "project"))
+
+        return {"hooks": hooks}
+
+    @staticmethod
+    def _normalize_settings_hook(entry: dict, event: str, scope: str) -> dict:
+        """Normalize a hook entry from settings.json format.
+
+        Args:
+            entry: Raw hook dict from settings.json (has type, command/url, matcher, timeout)
+            event: Event name (e.g. 'PreToolUse')
+            scope: 'user' or 'project'
+
+        Returns:
+            Normalized hook dict
+        """
+        hook_type = entry.get("type", "command")
+        # Normalize type: "command" -> "shell"
+        if hook_type == "command":
+            hook_type = "shell"
+
+        normalized: dict = {
+            "event": event,
+            "type": hook_type,
+            "scope": scope,
+        }
+
+        if hook_type == "shell":
+            normalized["command"] = entry.get("command", "")
+        elif hook_type == "http":
+            normalized["url"] = entry.get("url", "")
+
+        if entry.get("matcher"):
+            normalized["matcher"] = entry["matcher"]
+        if entry.get("timeout"):
+            normalized["timeout"] = entry["timeout"]
+
+        return normalized
+
+    @staticmethod
+    def _normalize_legacy_hook(entry: dict, event: str, matcher: str, scope: str) -> dict:
+        """Normalize a hook entry from legacy hooks/hooks.json format.
+
+        Args:
+            entry: Raw hook dict from hooks.json (has type, command)
+            event: Event name (e.g. 'PostToolUse')
+            matcher: Matcher string from parent group (e.g. 'Edit|Write')
+            scope: 'user' or 'project'
+
+        Returns:
+            Normalized hook dict
+        """
+        hook_type = entry.get("type", "command")
+        # Normalize type: "command" -> "shell"
+        if hook_type == "command":
+            hook_type = "shell"
+
+        normalized: dict = {
+            "event": event,
+            "type": hook_type,
+            "scope": scope,
+        }
+
+        if hook_type == "shell" or hook_type == "command":
+            normalized["command"] = entry.get("command", "")
+        elif hook_type == "http":
+            normalized["url"] = entry.get("url", "")
+
+        if matcher:
+            normalized["matcher"] = matcher
+        if entry.get("timeout"):
+            normalized["timeout"] = entry["timeout"]
+
+        return normalized
+
     def get_permissions(self) -> dict:
         """Extract structured permissions from Claude Code settings.
 
@@ -1062,6 +1204,7 @@ class SourceReader:
             "settings": self.get_settings(),
             "permissions": self.get_permissions(),
             "harness_overrides": self.get_harness_override_paths(),
+            "hooks": self.get_hooks(),
         }
 
     def get_source_paths(self) -> dict[str, list[Path]]:

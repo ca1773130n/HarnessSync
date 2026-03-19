@@ -24,6 +24,7 @@ from src.utils.paths import create_symlink_with_fallback, ensure_dir
 from src.utils.toml_writer import (
     format_mcp_servers_toml,
     format_mcp_server_toml,
+    format_toml_value,
     write_toml_atomic,
     escape_toml_string,
     read_toml_safe,
@@ -454,6 +455,206 @@ class CodexAdapter(AdapterBase):
             )
 
         return results
+
+    # ── Hooks Sync ─────────────────────────────────────────────────────────────
+
+    # Codex event mapping (Claude Code event -> Codex event)
+    _CODEX_EVENT_MAP: dict[str, str] = {
+        "SessionStart": "SessionStart",
+        "Stop": "Stop",
+        "PostToolUse": "AfterToolUse",  # Rename
+    }
+    # Events to skip (unsupported by Codex)
+    _CODEX_SKIP_EVENTS: set[str] = {"PreToolUse"}
+
+    def sync_hooks(self, hooks: dict) -> SyncResult:
+        """Sync hooks to Codex config.toml (experimental, gated behind features.hooks).
+
+        Codex hooks are experimental and require ``[features] hooks = true`` in config.
+        If the feature flag is not set, available hooks are documented in AGENTS.md
+        instead of being written to config.toml. NEVER enables the flag automatically.
+
+        Event mapping:
+        - SessionStart -> SessionStart (direct)
+        - Stop -> Stop (direct)
+        - PostToolUse -> AfterToolUse (rename)
+        - PreToolUse -> Skip (unsupported)
+        - HTTP hooks -> Skip (shell-only)
+
+        Args:
+            hooks: Dict with 'hooks' key containing list of normalized hook dicts
+
+        Returns:
+            SyncResult tracking synced/skipped hooks
+        """
+        hook_list = hooks.get("hooks", []) if isinstance(hooks, dict) else []
+        if not hook_list:
+            return SyncResult()
+
+        result = SyncResult()
+
+        # Check if the feature gate is enabled
+        config_path = self.project_dir / ".codex" / CONFIG_TOML
+        feature_enabled = self._codex_hooks_feature_enabled(config_path)
+
+        # Map hooks to Codex events
+        mapped_hooks: list[dict] = []
+        for hook in hook_list:
+            event = hook.get("event", "")
+            hook_type = hook.get("type", "shell")
+
+            # Skip HTTP hooks (Codex is shell-only)
+            if hook_type == "http":
+                result.skipped += 1
+                result.skipped_files.append(f"{event}: HTTP hooks not supported by Codex")
+                continue
+
+            # Skip unsupported events
+            if event in self._CODEX_SKIP_EVENTS:
+                result.skipped += 1
+                result.skipped_files.append(f"{event}: not supported by Codex")
+                continue
+
+            # Map event name
+            codex_event = self._CODEX_EVENT_MAP.get(event)
+            if codex_event is None:
+                result.skipped += 1
+                result.skipped_files.append(f"{event}: no Codex equivalent")
+                continue
+
+            mapped_hooks.append({
+                "event": codex_event,
+                "command": hook.get("command", ""),
+                "matcher": hook.get("matcher", ""),
+            })
+
+        if not mapped_hooks:
+            return result
+
+        if feature_enabled:
+            # Write hooks to config.toml under [[hooks.EVENT]] sections
+            try:
+                self._write_codex_hooks(config_path, mapped_hooks)
+                result.synced = len(mapped_hooks)
+                result.synced_files.append(str(config_path))
+            except Exception as e:
+                result.failed = len(mapped_hooks)
+                result.failed_files.append(f"hooks: {str(e)}")
+        else:
+            # Document available hooks in AGENTS.md (feature gate not set)
+            self._document_hooks_in_agents_md(mapped_hooks)
+            result.skipped = len(mapped_hooks)
+            result.skipped_files.append(
+                "hooks: documented in AGENTS.md (enable [features] hooks = true in Codex config to activate)"
+            )
+
+        return result
+
+    @staticmethod
+    def _codex_hooks_feature_enabled(config_path: Path) -> bool:
+        """Check if Codex has the experimental hooks feature flag enabled.
+
+        Looks for ``[features]`` section with ``hooks = true`` in config.toml.
+
+        Args:
+            config_path: Path to Codex config.toml
+
+        Returns:
+            True if hooks feature is explicitly enabled
+        """
+        existing = read_toml_safe(config_path)
+        features = existing.get("features", {})
+        if isinstance(features, dict):
+            return features.get("hooks") is True
+        return False
+
+    def _write_codex_hooks(self, config_path: Path, mapped_hooks: list[dict]) -> None:
+        """Write mapped hooks to Codex config.toml under [[hooks.EVENT]] sections.
+
+        Merges with existing config.toml, preserving non-hook settings.
+        Replaces existing HarnessSync-managed hook sections.
+
+        Args:
+            config_path: Path to Codex config.toml
+            mapped_hooks: List of mapped hook dicts with event, command, matcher
+        """
+        # Read existing config
+        existing_raw = ""
+        if config_path.exists():
+            try:
+                existing_raw = config_path.read_text(encoding="utf-8")
+            except OSError:
+                pass
+
+        # Remove existing HarnessSync hooks sections
+        import re as _re
+        cleaned = _re.sub(
+            r'# Hooks managed by HarnessSync.*?(?=\n(?:\[(?!hooks\.)|# [A-Z]|$))',
+            '', existing_raw, flags=_re.DOTALL
+        ).rstrip()
+
+        # Build hooks TOML sections
+        hook_lines = [
+            "",
+            "# Hooks managed by HarnessSync",
+            "# Do not edit manually - changes will be overwritten on next sync",
+        ]
+
+        for hook in mapped_hooks:
+            event = hook["event"]
+            command = hook.get("command", "")
+            matcher = hook.get("matcher", "")
+            hook_lines.append("")
+            hook_lines.append(f'[[hooks.{event}]]')
+            hook_lines.append(f'command = {format_toml_value(command)}')
+            if matcher:
+                hook_lines.append(f'matcher = {format_toml_value(matcher)}')
+
+        final = cleaned + "\n" + "\n".join(hook_lines) + "\n"
+        write_toml_atomic(config_path, final)
+
+    def _document_hooks_in_agents_md(self, mapped_hooks: list[dict]) -> None:
+        """Document available hooks in AGENTS.md when feature gate is not set.
+
+        Informs the user about hooks that could be activated by enabling the
+        experimental feature flag, without actually enabling it.
+
+        Args:
+            mapped_hooks: List of mapped hook dicts with event, command, matcher
+        """
+        lines = [
+            "",
+            "## Available Hooks (requires Codex feature flag)",
+            "",
+            "> **Note:** The following hooks from Claude Code are available but require",
+            "> `[features] hooks = true` in your Codex config.toml to activate.",
+            "> HarnessSync will NOT enable experimental features without your consent.",
+            "",
+        ]
+
+        for hook in mapped_hooks:
+            event = hook.get("event", "")
+            command = hook.get("command", "")[:80]
+            matcher = hook.get("matcher", "")
+            desc = f"- **{event}**"
+            if matcher:
+                desc += f" (matcher: `{matcher}`)"
+            if command:
+                desc += f": `{command}`"
+            lines.append(desc)
+
+        lines.append("")
+        hook_section = "\n".join(lines)
+
+        existing = self._read_agents_md()
+        if existing and HARNESSSYNC_MARKER_END in existing:
+            end_idx = existing.find(HARNESSSYNC_MARKER_END)
+            before = existing[:end_idx].rstrip()
+            after = existing[end_idx:]
+            final = f"{before}\n{hook_section}\n{after}"
+            self._write_agents_md(final)
+        elif existing:
+            self._write_agents_md(f"{existing.rstrip()}\n{hook_section}\n")
 
     # Environment variable key substrings that indicate bearer token / auth credentials
     _AUTH_ENV_KEYWORDS = ('TOKEN', 'KEY', 'AUTH', 'BEARER', 'SECRET')

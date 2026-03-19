@@ -673,6 +673,151 @@ class GeminiAdapter(AdapterBase):
         policy_path = policy_dir / "harnesssync-policy.json"
         write_json_atomic(policy_path, policy)
 
+    # ── Hooks Sync ─────────────────────────────────────────────────────────────
+
+    # Gemini event mapping (Claude Code event -> Gemini event)
+    _GEMINI_EVENT_MAP: dict[str, str] = {
+        "PreToolUse": "PreToolUse",
+        "PostToolUse": "PostToolUse",
+        "SessionStart": "SessionStart",
+        "Stop": "Stop",
+        "Notification": "Notification",
+    }
+    # Events to drop (not supported by Gemini)
+    _GEMINI_DROP_EVENTS: set[str] = {"PreCompact", "PostCompact"}
+
+    # Matcher type by event (regex for tool-related events, exact for others)
+    _GEMINI_MATCHER_TYPE: dict[str, str] = {
+        "PreToolUse": "regex",
+        "PostToolUse": "regex",
+        "SessionStart": "exact",
+        "Stop": "exact",
+        "Notification": "exact",
+    }
+
+    def sync_hooks(self, hooks: dict) -> SyncResult:
+        """Sync hooks to Gemini .gemini/settings.json under 'hooks' key.
+
+        Gemini supports 11 hook events. This adapter maps Claude Code events
+        to Gemini equivalents and converts HTTP hooks to curl shell wrappers.
+
+        Event mapping:
+        - PreToolUse -> PreToolUse (regex matcher)
+        - PostToolUse -> PostToolUse (regex matcher)
+        - SessionStart -> SessionStart (exact matcher)
+        - Stop -> Stop (exact matcher)
+        - Notification -> Notification (exact matcher)
+        - PreCompact -> Drop (not supported)
+        - PostCompact -> Drop (not supported)
+        - HTTP hooks -> Converted to curl wrapper command
+
+        Args:
+            hooks: Dict with 'hooks' key containing list of normalized hook dicts
+
+        Returns:
+            SyncResult tracking synced/skipped hooks
+        """
+        hook_list = hooks.get("hooks", []) if isinstance(hooks, dict) else []
+        if not hook_list:
+            return SyncResult()
+
+        result = SyncResult()
+
+        # Group hooks by Gemini event
+        gemini_hooks: dict[str, list[dict]] = {}
+
+        for hook in hook_list:
+            event = hook.get("event", "")
+            hook_type = hook.get("type", "shell")
+
+            # Drop unsupported events
+            if event in self._GEMINI_DROP_EVENTS:
+                result.skipped += 1
+                result.skipped_files.append(f"{event}: not supported by Gemini")
+                continue
+
+            # Map event name
+            gemini_event = self._GEMINI_EVENT_MAP.get(event)
+            if gemini_event is None:
+                result.skipped += 1
+                result.skipped_files.append(f"{event}: no Gemini equivalent")
+                continue
+
+            # Convert HTTP hooks to curl wrapper
+            command = hook.get("command", "")
+            if hook_type == "http":
+                url = hook.get("url", "")
+                if not url:
+                    result.skipped += 1
+                    result.skipped_files.append(f"{event}: HTTP hook with no URL")
+                    continue
+                # Check for auth requirements (skip if auth needed)
+                if any(marker in url for marker in ("${AUTH", "${TOKEN", "${SECRET", "${BEARER")):
+                    result.skipped += 1
+                    result.skipped_files.append(f"{event}: HTTP hook requires auth, skipping")
+                    continue
+                command = self._http_to_curl(url, event, hook.get("timeout"))
+
+            if not command:
+                result.skipped += 1
+                result.skipped_files.append(f"{event}: empty command")
+                continue
+
+            matcher = hook.get("matcher", "")
+            matcher_type = self._GEMINI_MATCHER_TYPE.get(gemini_event, "exact")
+
+            gemini_hook: dict = {
+                "type": "command",
+                "command": command,
+            }
+            if matcher:
+                gemini_hook["matcher"] = {"type": matcher_type, "pattern": matcher}
+
+            gemini_hooks.setdefault(gemini_event, []).append(gemini_hook)
+
+        if not gemini_hooks:
+            return result
+
+        # Write hooks to .gemini/settings.json
+        try:
+            existing_settings = read_json_safe(self.settings_path)
+            existing_settings["hooks"] = gemini_hooks
+
+            ensure_dir(self.settings_path.parent)
+            write_json_atomic(self.settings_path, existing_settings)
+
+            total_written = sum(len(v) for v in gemini_hooks.values())
+            result.synced = total_written
+            result.synced_files.append(str(self.settings_path))
+        except Exception as e:
+            total_hooks = sum(len(v) for v in gemini_hooks.values())
+            result.failed = total_hooks
+            result.failed_files.append(f"hooks: {str(e)}")
+
+        return result
+
+    @staticmethod
+    def _http_to_curl(url: str, event: str, timeout: int | None = None) -> str:
+        """Convert an HTTP hook to a curl shell command wrapper.
+
+        Generates a curl command that POSTs JSON with event and tool context.
+        ``$TOOL_NAME`` is populated by Gemini's hook context at runtime.
+
+        Args:
+            url: HTTP endpoint URL
+            event: Event name for the JSON payload
+            timeout: Timeout in milliseconds (defaults to 10000)
+
+        Returns:
+            Shell command string with curl invocation
+        """
+        timeout_sec = int((timeout or 10000) / 1000)
+        return (
+            f"curl -sS -X POST -H 'Content-Type: application/json' "
+            f"-d '{{\"event\":\"{event}\",\"tool\":\"$TOOL_NAME\"}}' "
+            f"--max-time {timeout_sec} {url}"
+        )
+
     # Helper methods for parsing and formatting
 
     def _parse_frontmatter(self, content: str) -> tuple[dict, str]:

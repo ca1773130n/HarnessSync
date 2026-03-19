@@ -145,6 +145,22 @@ class AdapterBase(ABC):
         """
         pass
 
+    def sync_hooks(self, hooks: dict) -> SyncResult:
+        """Sync hooks to target format.
+
+        Default no-op implementation — returns all hooks as skipped.
+        Only adapters with native hook support (Codex, Gemini) override this.
+
+        Args:
+            hooks: Dict with 'hooks' key containing list of normalized hook dicts.
+                   Each dict has: event, type, command/url, matcher, timeout, scope.
+
+        Returns:
+            SyncResult with all hooks skipped
+        """
+        hook_list = hooks.get("hooks", []) if isinstance(hooks, dict) else []
+        return SyncResult(skipped=len(hook_list))
+
     def get_override_content(self) -> str:
         """Read per-harness override content from .harness-sync/overrides/<target>.md.
 
@@ -274,6 +290,15 @@ class AdapterBase(ABC):
             results['settings'] = SyncResult(
                 failed=1,
                 failed_files=[f'settings: {str(e)}']
+            )
+
+        # Sync hooks
+        try:
+            results['hooks'] = self.sync_hooks(source_data.get('hooks', {}))
+        except Exception as e:
+            results['hooks'] = SyncResult(
+                failed=1,
+                failed_files=[f'hooks: {str(e)}']
             )
 
         return results
