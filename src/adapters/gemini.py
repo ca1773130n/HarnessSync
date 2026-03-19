@@ -473,8 +473,7 @@ class GeminiAdapter(AdapterBase):
                         server_config['args'] = config.get('args', [])
                     if 'env' in config:
                         server_config['env'] = config['env']
-                    if 'timeout' in config:
-                        server_config['timeout'] = config['timeout']
+                    # Note: timeout is intentionally NOT passed through (not supported by Gemini)
 
                 # URL transport (has "url" key)
                 elif 'url' in config:
@@ -494,10 +493,28 @@ class GeminiAdapter(AdapterBase):
                     # Skip servers without command or url
                     continue
 
+                # Map essential -> trust: true (closest semantic match)
+                if config.get('essential') and 'trust' not in config:
+                    server_config['trust'] = True
+
+                # Map cwd (direct)
+                if 'cwd' in config:
+                    server_config['cwd'] = config['cwd']
+
+                # Map url for remote servers (direct)
+                if 'url' in config and 'url' not in server_config and 'httpUrl' not in server_config:
+                    server_config['url'] = config['url']
+
                 # Pass through additional Gemini CLI fields (GMN-11)
-                for field in ('trust', 'includeTools', 'excludeTools', 'cwd'):
+                for field in ('trust', 'includeTools', 'excludeTools'):
                     if field in config:
                         server_config[field] = config[field]
+
+                # Drop fields not supported by Gemini:
+                # - timeout: not supported
+                # - oauth_scopes: not supported
+                # - elicitation: not supported
+                # - enabled_tools / disabled_tools: use includeTools / excludeTools instead
 
                 # Add to mcpServers (override if exists)
                 existing_settings['mcpServers'][server_name] = server_config

@@ -198,6 +198,9 @@ class WindsurfAdapter(AdapterBase):
             url = cfg.get("url")
             if url:
                 entry["serverUrl"] = url
+            # Pass through timeout (direct, ms)
+            if "timeout" in cfg:
+                entry["timeout"] = cfg["timeout"]
             mcp_data[name] = entry
 
         config = {"mcpServers": mcp_data}

@@ -292,6 +292,49 @@ class CodexAdapter(AdapterBase):
 
         return result
 
+    @staticmethod
+    def _translate_mcp_fields(config: dict) -> dict:
+        """Translate Claude Code MCP fields to Codex equivalents.
+
+        Field mapping:
+        - timeout (ms) -> tool_timeout_sec (seconds, divide by 1000)
+        - oauth_scopes -> scopes
+        - elicitation -> elicitation (pass through, Codex supports natively)
+        - enabled_tools -> enabled_tools (direct)
+        - disabled_tools -> disabled_tools (direct)
+        - essential -> dropped (no Codex equivalent)
+
+        Args:
+            config: Source MCP server config dict
+
+        Returns:
+            New dict with Codex-compatible field names
+        """
+        translated = dict(config)
+
+        # timeout (ms) -> tool_timeout_sec (seconds)
+        if 'timeout' in translated:
+            timeout_ms = translated.pop('timeout')
+            if isinstance(timeout_ms, (int, float)) and timeout_ms > 0:
+                translated['tool_timeout_sec'] = int(timeout_ms / 1000)
+
+        # oauth_scopes -> scopes
+        if 'oauth_scopes' in translated:
+            scopes = translated.pop('oauth_scopes')
+            if isinstance(scopes, list):
+                translated['scopes'] = scopes
+
+        # elicitation: pass through (Codex supports natively)
+        # No transformation needed, already in translated dict
+
+        # enabled_tools / disabled_tools: direct passthrough
+        # No transformation needed, already in translated dict
+
+        # essential: drop silently (no Codex equivalent)
+        translated.pop('essential', None)
+
+        return translated
+
     def sync_mcp(self, mcp_servers: dict[str, dict]) -> SyncResult:
         """Translate MCP server configs to Codex config.toml.
 
@@ -308,8 +351,14 @@ class CodexAdapter(AdapterBase):
         if not mcp_servers:
             return SyncResult()
 
+        # Translate Claude Code fields to Codex equivalents
+        translated_servers = {
+            name: self._translate_mcp_fields(cfg)
+            for name, cfg in mcp_servers.items()
+        }
+
         config_path = self.project_dir / ".codex" / CONFIG_TOML
-        return self._write_mcp_to_path(mcp_servers, config_path)
+        return self._write_mcp_to_path(translated_servers, config_path)
 
     def sync_mcp_scoped(self, mcp_servers_scoped: dict[str, dict]) -> SyncResult:
         """Translate MCP server configs with scope routing and env var translation.
@@ -353,6 +402,9 @@ class CodexAdapter(AdapterBase):
             # Env var translation for Codex
             translated_config, warnings = translate_env_vars_for_codex(config)
             result.skipped_files.extend(warnings)
+
+            # Translate Claude Code MCP fields to Codex equivalents
+            translated_config = self._translate_mcp_fields(translated_config)
 
             # Route to correct scope bucket
             if scope == "project":

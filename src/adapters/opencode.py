@@ -333,6 +333,20 @@ class OpenCodeAdapter(AdapterBase):
                     result.skipped_files.append(f"{server_name}: no command or url")
                     continue
 
+                # Pass through timeout (direct map, ms)
+                if 'timeout' in config:
+                    server_config['timeout'] = config['timeout']
+
+                # Pass through env for remote servers too (if not already mapped)
+                if 'env' in config and 'environment' not in server_config:
+                    server_config['env'] = config['env']
+
+                # Drop unsupported fields:
+                # - essential: not supported
+                # - oauth_scopes: not supported
+                # - elicitation: not supported
+                # - enabled_tools / disabled_tools: not supported
+
                 # Add to mcp section (override if exists)
                 existing_config['mcp'][server_name] = server_config
                 result.synced += 1

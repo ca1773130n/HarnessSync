@@ -211,6 +211,9 @@ class ClineAdapter(AdapterBase):
             url = cfg.get("url")
             if url:
                 server_entry["url"] = url
+            # Pass through timeout (direct, ms)
+            if "timeout" in cfg:
+                server_entry["timeout"] = cfg["timeout"]
             mcp_data[name] = server_entry
 
         try:
