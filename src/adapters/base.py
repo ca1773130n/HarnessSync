@@ -3,13 +3,15 @@ from __future__ import annotations
 """Abstract base class for target adapters.
 
 AdapterBase defines the interface all target adapters (Codex, Gemini, OpenCode)
-must implement. It enforces 6 sync methods for different configuration types:
+must implement. It enforces 8 sync methods for different configuration types:
 - sync_rules: CLAUDE.md rules
 - sync_skills: Skills directory
 - sync_agents: Agent .md files
 - sync_commands: Command .md files
 - sync_mcp: MCP server configurations
 - sync_settings: General settings
+- sync_hooks: Hook configurations
+- sync_plugins: Plugin configurations
 
 The abstract base class pattern ensures type safety and prevents incomplete
 adapter implementations.
@@ -29,6 +31,7 @@ Example usage:
 """
 
 import re
+import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
 from .result import SyncResult
@@ -118,7 +121,7 @@ class AdapterBase(ABC):
     def sync_mcp_scoped(self, mcp_servers_scoped: dict[str, dict]) -> SyncResult:
         """Translate MCP server configs with scope metadata to target format.
 
-        Receives Phase 9 scoped format:
+        Receives scoped format:
             {server_name: {"config": {...}, "metadata": {"scope": "user|project|local", "source": "file|plugin", ...}}}
 
         Default implementation falls back to sync_mcp() with flat config for
@@ -144,6 +147,59 @@ class AdapterBase(ABC):
             SyncResult tracking synced/skipped/failed settings
         """
         pass
+
+    def sync_plugins(self, plugins: dict[str, dict]) -> SyncResult:
+        """Sync plugins to target format.
+
+        Default no-op implementation -- returns all plugins as skipped.
+        Adapters with native plugin support override this to implement
+        the two-tier strategy: native equivalent first, decompose as fallback.
+
+        Args:
+            plugins: Dict mapping plugin_name -> plugin metadata dict.
+                     Each dict has: enabled, version, install_path,
+                     has_skills, has_agents, has_commands, has_mcp, has_hooks,
+                     manifest.
+
+        Returns:
+            SyncResult with all plugins skipped
+        """
+        return SyncResult(skipped=len(plugins))
+
+    def _find_native_plugin(self, plugin_name: str, manifest: dict) -> str | None:
+        """Check if a native equivalent exists for a Claude Code plugin.
+
+        Looks up PLUGIN_EQUIVALENTS + user overrides from `.harnesssync` config.
+
+        Args:
+            plugin_name: Claude Code plugin identifier
+            manifest: Plugin manifest dict (currently unused, reserved for future matching)
+
+        Returns:
+            Native plugin identifier string if equivalent found, or None
+        """
+        try:
+            from src.plugin_registry import lookup_native_equivalent, load_user_plugin_map
+            user_overrides = load_user_plugin_map(self.project_dir)
+            return lookup_native_equivalent(plugin_name, self.target_name, user_overrides)
+        except Exception:
+            return None
+
+    def sync_hooks(self, hooks: dict) -> SyncResult:
+        """Sync hooks to target format.
+
+        Default no-op implementation — returns all hooks as skipped.
+        Only adapters with native hook support (Codex, Gemini) override this.
+
+        Args:
+            hooks: Dict with 'hooks' key containing list of normalized hook dicts.
+                   Each dict has: event, type, command/url, matcher, timeout, scope.
+
+        Returns:
+            SyncResult with all hooks skipped
+        """
+        hook_list = hooks.get("hooks", []) if isinstance(hooks, dict) else []
+        return SyncResult(skipped=len(hook_list))
 
     def get_override_content(self) -> str:
         """Read per-harness override content from .harness-sync/overrides/<target>.md.
@@ -198,7 +254,7 @@ class AdapterBase(ABC):
     def sync_all(self, source_data: dict) -> dict[str, SyncResult]:
         """Sync all configuration types.
 
-        Calls all 6 sync methods and returns results by config type.
+        Calls all sync methods and returns results by config type.
         Wraps each call in try/except to report failures without aborting.
 
         Args:
@@ -215,7 +271,6 @@ class AdapterBase(ABC):
         if settings_output:
             dep_warnings = self.check_deprecations(settings_output)
             for w in dep_warnings:
-                import sys
                 print(f"  ⚠  {w}", file=sys.stderr)
 
         # Sync rules
@@ -274,6 +329,24 @@ class AdapterBase(ABC):
             results['settings'] = SyncResult(
                 failed=1,
                 failed_files=[f'settings: {str(e)}']
+            )
+
+        # Sync hooks
+        try:
+            results['hooks'] = self.sync_hooks(source_data.get('hooks', {}))
+        except Exception as e:
+            results['hooks'] = SyncResult(
+                failed=1,
+                failed_files=[f'hooks: {str(e)}']
+            )
+
+        # Sync plugins
+        try:
+            results['plugins'] = self.sync_plugins(source_data.get('plugins', {}))
+        except Exception as e:
+            results['plugins'] = SyncResult(
+                failed=1,
+                failed_files=[f'plugins: {str(e)}']
             )
 
         return results

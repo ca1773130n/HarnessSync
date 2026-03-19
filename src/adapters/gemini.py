@@ -15,6 +15,7 @@ instead of inlining content into GEMINI.md. Only rules remain in GEMINI.md.
 """
 
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from .base import AdapterBase
@@ -22,6 +23,8 @@ from .registry import AdapterRegistry
 from .result import SyncResult
 from src.utils.paths import ensure_dir, read_json_safe, write_json_atomic
 from src.utils.env_translator import check_transport_support
+from src.utils.permissions import extract_permissions, parse_permission_string
+from src.utils.includes import extract_include_refs, INCLUDE_RE
 
 
 # Gemini CLI constants
@@ -54,14 +57,36 @@ class GeminiAdapter(AdapterBase):
         """
         return "gemini"
 
-    def sync_rules(self, rules: list[dict]) -> SyncResult:
+    @staticmethod
+    def convert_includes_to_native(content: str) -> str:
+        """Convert ``@include path/to/file.md`` directives to Gemini ``@file.md`` syntax.
+
+        Gemini CLI supports native ``@path/to/file.md`` imports. This method
+        replaces HarnessSync ``@include`` directives with Gemini's native form
+        so that modularity is preserved in the target config rather than inlining.
+
+        Args:
+            content: Rule content potentially containing ``@include`` directives.
+
+        Returns:
+            Content with ``@include X`` replaced by ``@X``.
+        """
+        return INCLUDE_RE.sub(lambda m: f'@{m.group(1)}', content)
+
+    def sync_rules(self, rules: list[dict], include_refs: list[str] | None = None) -> SyncResult:
         """Sync CLAUDE.md rules to GEMINI.md with managed markers.
 
         Concatenates all rule file contents into a single managed section in GEMINI.md.
         Preserves any user content outside HarnessSync markers.
 
+        When *include_refs* is provided (non-empty), the adapter converts
+        ``@include`` directives to Gemini's native ``@file.md`` import syntax
+        instead of using the pre-resolved (inlined) content.
+
         Args:
             rules: List of rule dicts with 'path' (Path) and 'content' (str) keys
+            include_refs: Optional list of raw @include path strings. When present,
+                         the adapter uses native import conversion instead of inlining.
 
         Returns:
             SyncResult with synced=1 if rules written, skipped=1 if no rules
@@ -75,6 +100,10 @@ class GeminiAdapter(AdapterBase):
         # Concatenate all rule contents
         rule_contents = [rule['content'] for rule in rules]
         concatenated = '\n\n---\n\n'.join(rule_contents)
+
+        # If include_refs are available, convert @include to Gemini native @file.md
+        if include_refs:
+            concatenated = self.convert_includes_to_native(concatenated)
 
         # Build managed section
         timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
@@ -472,8 +501,7 @@ class GeminiAdapter(AdapterBase):
                         server_config['args'] = config.get('args', [])
                     if 'env' in config:
                         server_config['env'] = config['env']
-                    if 'timeout' in config:
-                        server_config['timeout'] = config['timeout']
+                    # Note: timeout is intentionally NOT passed through (not supported by Gemini)
 
                 # URL transport (has "url" key)
                 elif 'url' in config:
@@ -493,10 +521,28 @@ class GeminiAdapter(AdapterBase):
                     # Skip servers without command or url
                     continue
 
+                # Map essential -> trust: true (closest semantic match)
+                if config.get('essential') and 'trust' not in config:
+                    server_config['trust'] = True
+
+                # Map cwd (direct)
+                if 'cwd' in config:
+                    server_config['cwd'] = config['cwd']
+
+                # Map url for remote servers (direct)
+                if 'url' in config and 'url' not in server_config and 'httpUrl' not in server_config:
+                    server_config['url'] = config['url']
+
                 # Pass through additional Gemini CLI fields (GMN-11)
-                for field in ('trust', 'includeTools', 'excludeTools', 'cwd'):
+                for field in ('trust', 'includeTools', 'excludeTools'):
                     if field in config:
                         server_config[field] = config[field]
+
+                # Drop fields not supported by Gemini:
+                # - timeout: not supported
+                # - oauth_scopes: not supported
+                # - elicitation: not supported
+                # - enabled_tools / disabled_tools: dropped (Gemini uses native includeTools/excludeTools if provided directly)
 
                 # Add to mcpServers (override if exists)
                 existing_settings['mcpServers'][server_name] = server_config
@@ -517,9 +563,11 @@ class GeminiAdapter(AdapterBase):
     def sync_settings(self, settings: dict) -> SyncResult:
         """Map Claude Code settings to Gemini configuration.
 
-        Maps Claude Code permission settings to Gemini tools configuration.
-        Uses conservative defaults: deny list -> tools.exclude, allow list -> tools.allowed.
-        NEVER auto-enables yolo mode (security constraint).
+        Maps Claude Code permission settings to Gemini tools configuration
+        and policy engine:
+        - Deny rules -> ``.gemini/policies/harnesssync-policy.json`` + disableAlwaysAllow/disableYoloMode
+        - Allow list -> ``tools.allowed`` in settings.json
+        - NEVER auto-enables yolo mode (security constraint)
 
         Args:
             settings: Settings dict from Claude Code configuration
@@ -537,7 +585,7 @@ class GeminiAdapter(AdapterBase):
             existing_settings = read_json_safe(self.settings_path)
 
             # Extract permissions
-            permissions = settings.get('permissions', {})
+            permissions = extract_permissions(settings)
             allow_list = permissions.get('allow', [])
             deny_list = permissions.get('deny', [])
 
@@ -550,6 +598,20 @@ class GeminiAdapter(AdapterBase):
                 # Add warnings for blocked tools
                 for tool in deny_list:
                     result.skipped_files.append(f"{tool}: blocked (Claude Code deny list)")
+
+                # Create policy file for deny rules
+                self._write_deny_policy(deny_list)
+
+                # Register policy path in settings
+                policy_paths = existing_settings.get('policyPaths', [])
+                policy_rel = ".gemini/policies/harnesssync-policy.json"
+                if policy_rel not in policy_paths:
+                    policy_paths.append(policy_rel)
+                existing_settings['policyPaths'] = policy_paths
+
+                # Disable always-allow and yolo when deny rules are present
+                existing_settings['disableAlwaysAllow'] = True
+                existing_settings['disableYoloMode'] = True
 
             elif allow_list:
                 # Allow list only if no deny list
@@ -566,6 +628,15 @@ class GeminiAdapter(AdapterBase):
                     "yolo mode: not enabled (conservative default, Claude Code had auto-approval)"
                 )
 
+            # Map respectGitignore -> fileFiltering.respectGitignore
+            respect_gitignore = settings.get('respectGitignore')
+            if isinstance(respect_gitignore, bool):
+                file_filtering = existing_settings.get('fileFiltering', {})
+                if not isinstance(file_filtering, dict):
+                    file_filtering = {}
+                file_filtering['respectGitignore'] = respect_gitignore
+                existing_settings['fileFiltering'] = file_filtering
+
             # Write atomically
             write_json_atomic(self.settings_path, existing_settings)
 
@@ -578,6 +649,353 @@ class GeminiAdapter(AdapterBase):
             result.failed_files.append(f"Settings: {str(e)}")
 
         return result
+
+    def _write_deny_policy(self, deny_list: list) -> None:
+        """Create a Gemini policy JSON file from Claude Code deny rules.
+
+        Writes ``.gemini/policies/harnesssync-policy.json`` with deny
+        rules translated to Gemini's policy format. Each denied
+        permission becomes a policy rule entry.
+
+        Args:
+            deny_list: List of permission strings from Claude Code deny list
+        """
+        policy_dir = self.project_dir / ".gemini" / "policies"
+        ensure_dir(policy_dir)
+
+        rules = []
+        for perm in deny_list:
+            tool, args = parse_permission_string(perm)
+            rule = {
+                "action": "deny",
+                "tool": tool.lower() if tool else "unknown",
+                "description": f"Denied by Claude Code: {perm}",
+            }
+            if args:
+                rule["pattern"] = args
+            rules.append(rule)
+
+        policy = {
+            "_comment": "Generated by HarnessSync from Claude Code deny permissions",
+            "rules": rules,
+        }
+
+        policy_path = policy_dir / "harnesssync-policy.json"
+        write_json_atomic(policy_path, policy)
+
+    # ── Hooks Sync ─────────────────────────────────────────────────────────────
+
+    # Gemini event mapping (Claude Code event -> Gemini event)
+    _GEMINI_EVENT_MAP: dict[str, str] = {
+        "PreToolUse": "PreToolUse",
+        "PostToolUse": "PostToolUse",
+        "SessionStart": "SessionStart",
+        "Stop": "Stop",
+        "Notification": "Notification",
+    }
+    # Events to drop (not supported by Gemini)
+    _GEMINI_DROP_EVENTS: set[str] = {"PreCompact", "PostCompact"}
+
+    # Matcher type by event (regex for tool-related events, exact for others)
+    _GEMINI_MATCHER_TYPE: dict[str, str] = {
+        "PreToolUse": "regex",
+        "PostToolUse": "regex",
+        "SessionStart": "exact",
+        "Stop": "exact",
+        "Notification": "exact",
+    }
+
+    def sync_hooks(self, hooks: dict) -> SyncResult:
+        """Sync hooks to Gemini .gemini/settings.json under 'hooks' key.
+
+        Gemini supports 11 hook events. This adapter maps Claude Code events
+        to Gemini equivalents and converts HTTP hooks to curl shell wrappers.
+
+        Event mapping:
+        - PreToolUse -> PreToolUse (regex matcher)
+        - PostToolUse -> PostToolUse (regex matcher)
+        - SessionStart -> SessionStart (exact matcher)
+        - Stop -> Stop (exact matcher)
+        - Notification -> Notification (exact matcher)
+        - PreCompact -> Drop (not supported)
+        - PostCompact -> Drop (not supported)
+        - HTTP hooks -> Converted to curl wrapper command
+
+        Args:
+            hooks: Dict with 'hooks' key containing list of normalized hook dicts
+
+        Returns:
+            SyncResult tracking synced/skipped hooks
+        """
+        hook_list = hooks.get("hooks", []) if isinstance(hooks, dict) else []
+        if not hook_list:
+            return SyncResult()
+
+        result = SyncResult()
+
+        # Group hooks by Gemini event
+        gemini_hooks: dict[str, list[dict]] = {}
+
+        for hook in hook_list:
+            event = hook.get("event", "")
+            hook_type = hook.get("type", "shell")
+
+            # Drop unsupported events
+            if event in self._GEMINI_DROP_EVENTS:
+                result.skipped += 1
+                result.skipped_files.append(f"{event}: not supported by Gemini")
+                continue
+
+            # Map event name
+            gemini_event = self._GEMINI_EVENT_MAP.get(event)
+            if gemini_event is None:
+                result.skipped += 1
+                result.skipped_files.append(f"{event}: no Gemini equivalent")
+                continue
+
+            # Convert HTTP hooks to curl wrapper
+            command = hook.get("command", "")
+            if hook_type == "http":
+                url = hook.get("url", "")
+                if not url:
+                    result.skipped += 1
+                    result.skipped_files.append(f"{event}: HTTP hook with no URL")
+                    continue
+                # Check for auth requirements (skip if auth needed)
+                if any(marker in url for marker in ("${AUTH", "${TOKEN", "${SECRET", "${BEARER")):
+                    result.skipped += 1
+                    result.skipped_files.append(f"{event}: HTTP hook requires auth, skipping")
+                    continue
+                command = self._http_to_curl(url, event, hook.get("timeout"))
+
+            if not command:
+                result.skipped += 1
+                result.skipped_files.append(f"{event}: empty command")
+                continue
+
+            matcher = hook.get("matcher", "")
+            matcher_type = self._GEMINI_MATCHER_TYPE.get(gemini_event, "exact")
+
+            gemini_hook: dict = {
+                "type": "command",
+                "command": command,
+            }
+            if matcher:
+                gemini_hook["matcher"] = {"type": matcher_type, "pattern": matcher}
+
+            gemini_hooks.setdefault(gemini_event, []).append(gemini_hook)
+
+        if not gemini_hooks:
+            return result
+
+        # Write hooks to .gemini/settings.json (merge at event level)
+        try:
+            existing_settings = read_json_safe(self.settings_path)
+            existing_hooks = existing_settings.get("hooks", {})
+            if not isinstance(existing_hooks, dict):
+                existing_hooks = {}
+            # For events HarnessSync manages, replace the array;
+            # for events it doesn't touch, preserve them.
+            merged_hooks = dict(existing_hooks)
+            merged_hooks.update(gemini_hooks)
+            existing_settings["hooks"] = merged_hooks
+
+            ensure_dir(self.settings_path.parent)
+            write_json_atomic(self.settings_path, existing_settings)
+
+            total_written = sum(len(v) for v in gemini_hooks.values())
+            result.synced = total_written
+            result.synced_files.append(str(self.settings_path))
+        except Exception as e:
+            total_hooks = sum(len(v) for v in gemini_hooks.values())
+            result.failed = total_hooks
+            result.failed_files.append(f"hooks: {str(e)}")
+
+        return result
+
+    @staticmethod
+    def _http_to_curl(url: str, event: str, timeout: int | None = None) -> str:
+        """Convert an HTTP hook to a curl shell command wrapper.
+
+        Generates a curl command that POSTs JSON with event and tool context.
+        ``$TOOL_NAME`` is populated by Gemini's hook context at runtime.
+
+        Args:
+            url: HTTP endpoint URL
+            event: Event name for the JSON payload
+            timeout: Timeout in milliseconds (defaults to 10000)
+
+        Returns:
+            Shell command string with curl invocation
+        """
+        timeout_sec = int((timeout or 10000) / 1000)
+        return (
+            f"curl -sS -X POST -H 'Content-Type: application/json' "
+            f"-d '{{\"event\":\"{event}\",\"tool\":\"$TOOL_NAME\"}}' "
+            f"--max-time {timeout_sec} {url}"
+        )
+
+    # ── Plugin Sync ─────────────────────────────────────────────────────────
+
+    def sync_plugins(self, plugins: dict[str, dict]) -> SyncResult:
+        """Sync plugins to Gemini: native extension first, decompose as fallback.
+
+        For each Claude Code plugin:
+        1. Check for native Gemini extension via _find_native_plugin()
+           - If found -> reference in .gemini/settings.json extensions config
+        2. No equivalent -> decompose through existing pipelines
+
+        Args:
+            plugins: Dict mapping plugin_name -> plugin metadata dict
+
+        Returns:
+            SyncResult tracking synced/skipped/decomposed plugins
+        """
+        if not plugins:
+            return SyncResult()
+
+        result = SyncResult()
+        native_extensions: list[dict] = []
+
+        for plugin_name, meta in plugins.items():
+            if not meta.get("enabled", True):
+                result.skipped += 1
+                result.skipped_files.append(f"{plugin_name}: disabled")
+                continue
+
+            native = self._find_native_plugin(plugin_name, meta.get("manifest", {}))
+
+            if native:
+                native_extensions.append({
+                    "name": plugin_name,
+                    "native_id": native,
+                    "version": meta.get("version", "unknown"),
+                })
+                result.synced += 1
+                result.synced_files.append(f"{plugin_name} -> {native} (native)")
+            else:
+                # Decompose: route plugin contents through existing pipelines
+                install_path = meta.get("install_path")
+                if not install_path:
+                    result.skipped += 1
+                    result.skipped_files.append(f"{plugin_name}: no install path")
+                    continue
+
+                install_path = Path(install_path)
+                decomposed = False
+                decompose_failures: list[str] = []
+
+                # Route skills
+                if meta.get("has_skills"):
+                    try:
+                        skills_dir = install_path / "skills"
+                        plugin_skills = {}
+                        for d in skills_dir.iterdir():
+                            if d.is_dir() and (d / "SKILL.md").exists():
+                                plugin_skills[d.name] = d
+                        if plugin_skills:
+                            self.sync_skills(plugin_skills)
+                            decomposed = True
+                    except Exception:
+                        decompose_failures.append("skills")
+
+                # Route agents
+                if meta.get("has_agents"):
+                    try:
+                        agents_dir = install_path / "agents"
+                        plugin_agents = {}
+                        for f in agents_dir.iterdir():
+                            if f.suffix == ".md" and f.is_file():
+                                plugin_agents[f.stem] = f
+                        if plugin_agents:
+                            self.sync_agents(plugin_agents)
+                            decomposed = True
+                    except Exception:
+                        decompose_failures.append("agents")
+
+                # Route commands
+                if meta.get("has_commands"):
+                    try:
+                        commands_dir = install_path / "commands"
+                        plugin_commands = {}
+                        for f in commands_dir.iterdir():
+                            if f.suffix == ".md" and f.is_file():
+                                plugin_commands[f.stem] = f
+                        if plugin_commands:
+                            self.sync_commands(plugin_commands)
+                            decomposed = True
+                    except Exception:
+                        decompose_failures.append("commands")
+
+                # Route MCP servers
+                if meta.get("has_mcp"):
+                    try:
+                        mcp_json = install_path / ".mcp.json"
+                        if mcp_json.exists():
+                            mcp_data = read_json_safe(mcp_json)
+                            servers = mcp_data.get("mcpServers", mcp_data)
+                            if isinstance(servers, dict) and servers:
+                                self.sync_mcp(servers)
+                                decomposed = True
+                    except Exception:
+                        decompose_failures.append("mcp")
+
+                # Route hooks
+                if meta.get("has_hooks"):
+                    try:
+                        hooks_json = install_path / "hooks" / "hooks.json"
+                        if hooks_json.exists():
+                            hooks_data = read_json_safe(hooks_json)
+                            if hooks_data:
+                                self.sync_hooks(hooks_data)
+                                decomposed = True
+                    except Exception:
+                        decompose_failures.append("hooks")
+
+                if decomposed:
+                    result.synced += 1
+                    result.synced_files.append(f"{plugin_name} (decomposed)")
+                    if decompose_failures:
+                        result.failed_files.extend(
+                            f"{plugin_name}: decompose failed for {comp}"
+                            for comp in decompose_failures
+                        )
+                else:
+                    result.skipped += 1
+                    result.skipped_files.append(f"{plugin_name}: nothing to decompose")
+
+        # Write native extensions to settings.json
+        if native_extensions:
+            try:
+                self._write_native_extensions(native_extensions)
+            except Exception:
+                pass  # Best-effort
+
+        return result
+
+    def _write_native_extensions(self, native_extensions: list[dict]) -> None:
+        """Write native extension references to Gemini settings.json.
+
+        Args:
+            native_extensions: List of dicts with name, native_id, version
+        """
+        existing_settings = read_json_safe(self.settings_path)
+
+        extensions = existing_settings.get("extensions", {})
+        if not isinstance(extensions, dict):
+            extensions = {}
+
+        for ext in native_extensions:
+            extensions[ext["native_id"]] = {
+                "enabled": True,
+                "_source": f"harnesssync:{ext['name']}",
+                "_version": ext["version"],
+            }
+
+        existing_settings["extensions"] = extensions
+
+        ensure_dir(self.settings_path.parent)
+        write_json_atomic(self.settings_path, existing_settings)
 
     # Helper methods for parsing and formatting
 
@@ -733,14 +1151,85 @@ class GeminiAdapter(AdapterBase):
         if all three native-format syncs (skills, agents, commands) completed
         without failures, to avoid data loss.
 
+        Also passes ``include_refs`` from source_data to sync_rules so that
+        ``@include`` directives are converted to Gemini native ``@file.md`` syntax.
+
         Args:
             source_data: Dict with keys 'rules', 'skills', 'agents',
-                        'commands', 'mcp', 'settings'
+                        'commands', 'mcp', 'settings', optionally 'include_refs'
 
         Returns:
             Dict mapping config type to SyncResult
         """
-        results = super().sync_all(source_data)
+        # Override rules sync to pass include_refs
+        results = {}
+
+        # Pre-sync: warn about deprecated config fields
+        settings_output = source_data.get('settings', {})
+        if settings_output:
+            dep_warnings = self.check_deprecations(settings_output)
+            for w in dep_warnings:
+                print(f"  \u26a0  {w}", file=sys.stderr)
+
+        # Sync rules with include_refs support
+        try:
+            include_refs = source_data.get('include_refs', [])
+            results['rules'] = self.sync_rules(
+                source_data.get('rules', []),
+                include_refs=include_refs if include_refs else None,
+            )
+        except Exception as e:
+            results['rules'] = SyncResult(
+                failed=1,
+                failed_files=[f'rules: {str(e)}']
+            )
+
+        # Sync remaining types via base class individual methods
+        for config_type, method_name, data_key, default in [
+            ('skills', 'sync_skills', 'skills', {}),
+            ('agents', 'sync_agents', 'agents', {}),
+            ('commands', 'sync_commands', 'commands', {}),
+            ('settings', 'sync_settings', 'settings', {}),
+        ]:
+            try:
+                method = getattr(self, method_name)
+                results[config_type] = method(source_data.get(data_key, default))
+            except Exception as e:
+                results[config_type] = SyncResult(
+                    failed=1,
+                    failed_files=[f'{config_type}: {str(e)}']
+                )
+
+        # Sync MCP servers (use scoped data if available, fall back to flat)
+        try:
+            mcp_scoped = source_data.get('mcp_scoped', {})
+            if mcp_scoped:
+                results['mcp'] = self.sync_mcp_scoped(mcp_scoped)
+            else:
+                results['mcp'] = self.sync_mcp(source_data.get('mcp', {}))
+        except Exception as e:
+            results['mcp'] = SyncResult(
+                failed=1,
+                failed_files=[f'mcp: {str(e)}']
+            )
+
+        # Sync hooks
+        try:
+            results['hooks'] = self.sync_hooks(source_data.get('hooks', {}))
+        except Exception as e:
+            results['hooks'] = SyncResult(
+                failed=1,
+                failed_files=[f'hooks: {str(e)}']
+            )
+
+        # Sync plugins
+        try:
+            results['plugins'] = self.sync_plugins(source_data.get('plugins', {}))
+        except Exception as e:
+            results['plugins'] = SyncResult(
+                failed=1,
+                failed_files=[f'plugins: {str(e)}']
+            )
 
         # Only cleanup if all three native-format syncs succeeded (no failures)
         skills_ok = results.get('skills', SyncResult()).failed == 0

@@ -28,6 +28,7 @@ from src.utils.paths import (
     write_json_atomic,
 )
 from src.utils.env_translator import check_transport_support, translate_env_vars_for_opencode_headers
+from src.utils.permissions import extract_permissions, parse_permission_string
 
 
 # OpenCode CLI constants
@@ -63,10 +64,12 @@ class OpenCodeAdapter(AdapterBase):
         return "opencode"
 
     def sync_rules(self, rules: list[dict]) -> SyncResult:
-        """Sync CLAUDE.md rules to AGENTS.md with managed markers.
+        """Sync CLAUDE.md rules to AGENTS.md or instructions array in opencode.json.
 
-        Concatenates all rule file contents into a single managed section in AGENTS.md.
-        Preserves any user content outside HarnessSync markers. Writes to project root.
+        When multiple rule sources exist, writes individual rule files to
+        ``.opencode/rules/`` and references them as an ``instructions`` array
+        in opencode.json. When only one rule source exists, falls back to the
+        traditional AGENTS.md approach for backward compatibility.
 
         Args:
             rules: List of rule dicts with 'path' (Path) and 'content' (str) keys
@@ -80,7 +83,15 @@ class OpenCodeAdapter(AdapterBase):
                 skipped_files=["AGENTS.md: no rules to sync"]
             )
 
-        # Concatenate all rule contents
+        # Multi-source: write individual rule files + instructions array
+        if len(rules) > 1:
+            return self._sync_rules_multi_source(rules)
+
+        # Single source: backward-compatible AGENTS.md approach
+        return self._sync_rules_single_source(rules)
+
+    def _sync_rules_single_source(self, rules: list[dict]) -> SyncResult:
+        """Write rules to AGENTS.md (single source, backward compatible)."""
         rule_contents = [rule['content'] for rule in rules]
         concatenated = '\n\n---\n\n'.join(rule_contents)
 
@@ -114,6 +125,54 @@ class OpenCodeAdapter(AdapterBase):
             adapted=len(rules),
             synced_files=[str(self.agents_md_path)]
         )
+
+    def _sync_rules_multi_source(self, rules: list[dict]) -> SyncResult:
+        """Write individual rule files to .opencode/rules/ and reference in opencode.json."""
+        result = SyncResult()
+        rules_dir = self.opencode_dir / "rules"
+        ensure_dir(rules_dir)
+
+        instruction_paths: list[str] = []
+
+        for rule in rules:
+            # Determine a filename from the source path
+            source_path = rule.get('path')
+            if source_path:
+                source_path = Path(source_path)
+                # Use scope-based naming: user-rules.md, project-rules.md, etc.
+                scope = rule.get('scope', 'project')
+                name_stem = source_path.stem.lower().replace(' ', '-')
+                filename = f"{scope}-{name_stem}.md"
+            else:
+                filename = f"rules-{len(instruction_paths)}.md"
+
+            rule_file = rules_dir / filename
+            try:
+                rule_file.write_text(rule['content'], encoding='utf-8')
+                # Path relative to project root for opencode.json
+                rel_path = f".opencode/rules/{filename}"
+                instruction_paths.append(rel_path)
+                result.synced += 1
+                result.synced_files.append(str(rule_file))
+            except OSError as e:
+                result.failed += 1
+                result.failed_files.append(f"{filename}: {e}")
+
+        # Write instructions array to opencode.json
+        if instruction_paths:
+            try:
+                existing_config = read_json_safe(self.opencode_json_path)
+                existing_config['instructions'] = instruction_paths
+                if '$schema' not in existing_config:
+                    existing_config['$schema'] = 'https://opencode.ai/config.json'
+                write_json_atomic(self.opencode_json_path, existing_config)
+                result.synced_files.append(str(self.opencode_json_path))
+            except Exception as e:
+                result.failed += 1
+                result.failed_files.append(f"opencode.json instructions: {e}")
+
+        result.adapted = len(rules)
+        return result
 
     def sync_skills(self, skills: dict[str, Path]) -> SyncResult:
         """Sync skills to .opencode/skills/ via symlinks.
@@ -174,10 +233,24 @@ class OpenCodeAdapter(AdapterBase):
         return result
 
     def sync_agents(self, agents: dict[str, Path]) -> SyncResult:
-        """Sync agents to .opencode/agents/ via symlinks.
+        """Sync agents to .opencode/agents/ via symlinks AND write agent config to opencode.json.
 
         Creates symlinks from source agent .md files to .opencode/agents/{name}.md.
         Cleans up stale symlinks after creating all new symlinks.
+
+        Additionally writes the new ``agent`` config shape to opencode.json::
+
+            {
+                "agent": {
+                    "primary": "<first_agent>",
+                    "agents": {
+                        "<name>": {"instructions": "<content>"},
+                        ...
+                    }
+                }
+            }
+
+        This replaces the deprecated ``mode`` key.
 
         Args:
             agents: Dict mapping agent name to agent .md file path
@@ -194,6 +267,9 @@ class OpenCodeAdapter(AdapterBase):
         # Ensure agents directory exists
         ensure_dir(target_dir)
 
+        # Build agent config for opencode.json
+        agent_configs: dict[str, dict] = {}
+
         # Create symlinks for each agent
         for name, agent_path in agents.items():
             target_path = target_dir / f"{name}.md"
@@ -208,6 +284,17 @@ class OpenCodeAdapter(AdapterBase):
                 else:
                     result.synced += 1
                     result.synced_files.append(f"{name} ({method})")
+
+                # Read agent content for opencode.json agent config
+                try:
+                    if agent_path.is_file():
+                        content = agent_path.read_text(encoding='utf-8', errors='replace')
+                        # Extract instructions from agent content (strip frontmatter)
+                        instructions = self._extract_agent_instructions(content)
+                        if instructions:
+                            agent_configs[name] = {"instructions": instructions}
+                except OSError:
+                    pass  # Symlink created, just skip JSON config for this agent
             else:
                 result.failed += 1
                 result.failed_files.append(f"{name}: {method}")
@@ -217,7 +304,45 @@ class OpenCodeAdapter(AdapterBase):
         if cleaned > 0:
             result.skipped_files.append(f"cleaned: {cleaned} stale symlinks")
 
+        # Write agent config to opencode.json (new shape, replacing deprecated "mode")
+        if agent_configs:
+            try:
+                existing_config = read_json_safe(self.opencode_json_path)
+                # Remove deprecated "mode" key
+                existing_config.pop('mode', None)
+                # Determine primary agent (first in sorted order for determinism)
+                primary = sorted(agent_configs.keys())[0]
+                existing_config['agent'] = {
+                    "primary": primary,
+                    "agents": agent_configs,
+                }
+                if '$schema' not in existing_config:
+                    existing_config['$schema'] = 'https://opencode.ai/config.json'
+                write_json_atomic(self.opencode_json_path, existing_config)
+                result.adapted += len(agent_configs)
+            except Exception as e:
+                result.failed_files.append(f"opencode.json agent config: {e}")
+
         return result
+
+    @staticmethod
+    def _extract_agent_instructions(content: str) -> str:
+        """Extract instructions from agent .md content.
+
+        Strips YAML frontmatter (between --- delimiters) and returns the body.
+        Falls back to full content if no frontmatter found.
+
+        Args:
+            content: Raw agent .md file content
+
+        Returns:
+            Instruction text (body after frontmatter)
+        """
+        if content.startswith('---'):
+            match = re.match(r'^---\n.*?\n---\n(.*)$', content, re.DOTALL)
+            if match:
+                return match.group(1).strip()
+        return content.strip()
 
     def sync_commands(self, commands: dict[str, Path]) -> SyncResult:
         """Sync commands to .opencode/commands/ via symlinks.
@@ -332,6 +457,20 @@ class OpenCodeAdapter(AdapterBase):
                     result.skipped_files.append(f"{server_name}: no command or url")
                     continue
 
+                # Pass through timeout (direct map, ms)
+                if 'timeout' in config:
+                    server_config['timeout'] = config['timeout']
+
+                # Pass through env for remote servers too (if not already mapped)
+                if 'env' in config and 'environment' not in server_config:
+                    server_config['env'] = config['env']
+
+                # Drop unsupported fields:
+                # - essential: not supported
+                # - oauth_scopes: not supported
+                # - elicitation: not supported
+                # - enabled_tools / disabled_tools: not supported
+
                 # Add to mcp section (override if exists)
                 existing_config['mcp'][server_name] = server_config
                 result.synced += 1
@@ -406,12 +545,17 @@ class OpenCodeAdapter(AdapterBase):
     def sync_settings(self, settings: dict) -> SyncResult:
         """Map Claude Code settings to opencode.json permission (singular).
 
-        Maps Claude Code permission settings to OpenCode per-tool permission format.
-        Uses allow/ask/deny values per tool identifier:
-        - Deny list tools -> "deny"
-        - Allow list tools -> "allow"
-        - Bash patterns (e.g. Bash(git commit:*)) -> permission.bash dict with wildcards
-        - NEVER sets unrestricted mode
+        Maps Claude Code permission settings to OpenCode per-tool permission format
+        using ``parse_permission_string()`` to group by tool name:
+
+        | Claude Code                      | opencode.json permission               |
+        |----------------------------------|-----------------------------------------|
+        | ``permissions.allow: ["Bash(npm *)"]`` | ``{"permission": {"bash": {"npm *": "allow"}}}`` |
+        | ``permissions.deny: ["Bash(rm -rf *)"]`` | ``{"permission": {"bash": {"rm -rf *": "deny"}}}`` |
+        | ``permissions.ask: ["Bash(git push *)"]`` | ``{"permission": {"bash": {"git push *": "ask"}}}`` |
+
+        Format: group by tool name (lowercased), then glob pattern -> permission level.
+        NEVER sets unrestricted mode.
 
         Args:
             settings: Settings dict from Claude Code configuration
@@ -429,39 +573,58 @@ class OpenCodeAdapter(AdapterBase):
             existing_config = read_json_safe(self.opencode_json_path)
 
             # Extract permissions from Claude Code settings
-            permissions = settings.get('permissions', {})
+            permissions = extract_permissions(settings)
             allow_list = permissions.get('allow', [])
             deny_list = permissions.get('deny', [])
+            ask_list = permissions.get('ask', [])
 
-            # Build per-tool permission config
-            permission_config = {}
+            # Build per-tool permission config using parse_permission_string
+            # Group by tool name (lowercased), then pattern -> level
+            permission_config: dict = {}
 
-            # Process deny list: map each tool to "deny"
-            for tool in deny_list:
-                oc_tool = self.TOOL_MAPPING.get(tool)
-                if oc_tool:
-                    permission_config[oc_tool] = 'deny'
+            # Process all three lists with their respective levels
+            for perm_list, level in [
+                (deny_list, 'deny'),
+                (allow_list, 'allow'),
+                (ask_list, 'ask'),
+            ]:
+                for perm in perm_list:
+                    tool, args = parse_permission_string(perm)
+                    if not tool:
+                        continue
 
-            # Process allow list: handle bash patterns and simple tool mappings
-            for tool in allow_list:
-                if tool.startswith('Bash(') and tool.endswith(')'):
-                    # Extract bash pattern: Bash(git commit:*) -> "git commit *"
-                    pattern = tool[5:-1].replace(':', ' ')
-                    # Initialize bash as dict if needed
-                    if 'bash' not in permission_config or isinstance(permission_config.get('bash'), str):
-                        old_val = permission_config.get('bash')
-                        permission_config['bash'] = {}
-                        if isinstance(old_val, str):
-                            permission_config['bash']['*'] = old_val
-                    permission_config['bash'][pattern] = 'allow'
-                else:
-                    oc_tool = self.TOOL_MAPPING.get(tool)
-                    if oc_tool:
-                        permission_config[oc_tool] = 'allow'
+                    # Translate Claude Code colon-separated patterns to space-separated.
+                    # Claude Code historically uses colons in some permission globs
+                    # (e.g. "Bash(git commit:*)"), but OpenCode expects spaces in
+                    # its permission dict keys (e.g. "git commit *").  This was the
+                    # original behaviour before parse_permission_string was extracted.
+                    if args:
+                        args = args.replace(':', ' ')
 
-            # If bash has specific patterns but no default, add "*": "ask"
-            if isinstance(permission_config.get('bash'), dict) and '*' not in permission_config['bash']:
-                permission_config['bash']['*'] = 'ask'
+                    # Map Claude Code tool name to OpenCode identifier
+                    oc_tool = self.TOOL_MAPPING.get(tool, tool.lower())
+
+                    if args:
+                        # Tool with pattern args -> nested dict
+                        if oc_tool not in permission_config:
+                            permission_config[oc_tool] = {}
+                        elif isinstance(permission_config[oc_tool], str):
+                            # Upgrade from simple string to dict
+                            old_val = permission_config[oc_tool]
+                            permission_config[oc_tool] = {'*': old_val}
+                        permission_config[oc_tool][args] = level
+                    else:
+                        # Bare tool name -> simple string value
+                        if isinstance(permission_config.get(oc_tool), dict):
+                            # Already has patterns; set default wildcard
+                            permission_config[oc_tool]['*'] = level
+                        else:
+                            permission_config[oc_tool] = level
+
+            # If any tool has specific patterns but no default, add "*": "ask"
+            for tool_key, tool_val in permission_config.items():
+                if isinstance(tool_val, dict) and '*' not in tool_val:
+                    permission_config[tool_key]['*'] = 'ask'
 
             # Write permission (singular) key; remove old permissions (plural) if present
             if 'permissions' in existing_config:
@@ -493,6 +656,174 @@ class OpenCodeAdapter(AdapterBase):
             result.failed_files.append(f"Settings: {str(e)}")
 
         return result
+
+    # ── Plugin Sync ─────────────────────────────────────────────────────────
+
+    def sync_plugins(self, plugins: dict[str, dict]) -> SyncResult:
+        """Sync plugins to OpenCode: native npm plugin first, decompose as fallback.
+
+        For each Claude Code plugin:
+        1. Check for native OpenCode npm plugin via _find_native_plugin()
+           - If found -> add to opencode.json plugins array
+        2. No equivalent -> decompose through existing pipelines
+           - Skip TypeScript-specific event hooks (can't translate from shell/prompt hooks)
+
+        Args:
+            plugins: Dict mapping plugin_name -> plugin metadata dict
+
+        Returns:
+            SyncResult tracking synced/skipped/decomposed plugins
+        """
+        if not plugins:
+            return SyncResult()
+
+        result = SyncResult()
+        native_plugins: list[dict] = []
+
+        for plugin_name, meta in plugins.items():
+            if not meta.get("enabled", True):
+                result.skipped += 1
+                result.skipped_files.append(f"{plugin_name}: disabled")
+                continue
+
+            native = self._find_native_plugin(plugin_name, meta.get("manifest", {}))
+
+            if native:
+                native_plugins.append({
+                    "name": plugin_name,
+                    "native_id": native,
+                    "version": meta.get("version", "unknown"),
+                })
+                result.synced += 1
+                result.synced_files.append(f"{plugin_name} -> {native} (native)")
+            else:
+                # Decompose: route plugin contents through existing pipelines
+                install_path = meta.get("install_path")
+                if not install_path:
+                    result.skipped += 1
+                    result.skipped_files.append(f"{plugin_name}: no install path")
+                    continue
+
+                install_path = Path(install_path)
+                decomposed = False
+                decompose_failures: list[str] = []
+
+                # Route skills
+                if meta.get("has_skills"):
+                    try:
+                        skills_dir = install_path / "skills"
+                        plugin_skills = {}
+                        for d in skills_dir.iterdir():
+                            if d.is_dir() and (d / "SKILL.md").exists():
+                                plugin_skills[d.name] = d
+                        if plugin_skills:
+                            self.sync_skills(plugin_skills)
+                            decomposed = True
+                    except Exception:
+                        decompose_failures.append("skills")
+
+                # Route agents
+                if meta.get("has_agents"):
+                    try:
+                        agents_dir = install_path / "agents"
+                        plugin_agents = {}
+                        for f in agents_dir.iterdir():
+                            if f.suffix == ".md" and f.is_file():
+                                plugin_agents[f.stem] = f
+                        if plugin_agents:
+                            self.sync_agents(plugin_agents)
+                            decomposed = True
+                    except Exception:
+                        decompose_failures.append("agents")
+
+                # Route commands
+                if meta.get("has_commands"):
+                    try:
+                        commands_dir = install_path / "commands"
+                        plugin_commands = {}
+                        for f in commands_dir.iterdir():
+                            if f.suffix == ".md" and f.is_file():
+                                plugin_commands[f.stem] = f
+                        if plugin_commands:
+                            self.sync_commands(plugin_commands)
+                            decomposed = True
+                    except Exception:
+                        decompose_failures.append("commands")
+
+                # Route MCP servers
+                if meta.get("has_mcp"):
+                    try:
+                        mcp_json = install_path / ".mcp.json"
+                        if mcp_json.exists():
+                            mcp_data = read_json_safe(mcp_json)
+                            servers = mcp_data.get("mcpServers", mcp_data)
+                            if isinstance(servers, dict) and servers:
+                                self.sync_mcp(servers)
+                                decomposed = True
+                    except Exception:
+                        decompose_failures.append("mcp")
+
+                # Skip hooks for OpenCode: TypeScript-specific event hooks
+                # can't be translated from shell/prompt hooks
+                if meta.get("has_hooks"):
+                    result.skipped_files.append(
+                        f"{plugin_name}: hooks skipped (OpenCode uses TS event hooks)"
+                    )
+
+                if decomposed:
+                    result.synced += 1
+                    result.synced_files.append(f"{plugin_name} (decomposed)")
+                    if decompose_failures:
+                        result.failed_files.extend(
+                            f"{plugin_name}: decompose failed for {comp}"
+                            for comp in decompose_failures
+                        )
+                else:
+                    result.skipped += 1
+                    result.skipped_files.append(f"{plugin_name}: nothing to decompose")
+
+        # Write native plugins to opencode.json
+        if native_plugins:
+            try:
+                self._write_native_plugins_json(native_plugins)
+            except Exception:
+                pass  # Best-effort
+
+        return result
+
+    def _write_native_plugins_json(self, native_plugins: list[dict]) -> None:
+        """Write native plugin references to opencode.json plugins array.
+
+        Args:
+            native_plugins: List of dicts with name, native_id, version
+        """
+        existing_config = read_json_safe(self.opencode_json_path)
+
+        plugins_array = existing_config.get("plugins", [])
+        if not isinstance(plugins_array, list):
+            plugins_array = []
+
+        # Build set of existing plugin IDs for dedup
+        existing_ids = {
+            p.get("id") or p.get("name", "")
+            for p in plugins_array
+            if isinstance(p, dict)
+        }
+
+        for plugin in native_plugins:
+            native_id = plugin["native_id"]
+            if native_id not in existing_ids:
+                plugins_array.append({
+                    "id": native_id,
+                    "_source": f"harnesssync:{plugin['name']}",
+                })
+
+        existing_config["plugins"] = plugins_array
+
+        if '$schema' not in existing_config:
+            existing_config['$schema'] = 'https://opencode.ai/config.json'
+
+        write_json_atomic(self.opencode_json_path, existing_config)
 
     # Helper methods for AGENTS.md management
 

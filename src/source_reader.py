@@ -18,6 +18,8 @@ import json
 import re
 from pathlib import Path
 from src.utils.paths import read_json_safe
+from src.utils.permissions import extract_permissions
+from src.utils.includes import resolve_includes, extract_include_refs
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Inline harness annotation parsing (item 2 — Per-Harness Rule Overrides)
@@ -353,8 +355,13 @@ class SourceReader:
         Returns:
             Combined rules string with section headers, or empty string if none found.
             Multiple sections joined with "\\n\\n---\\n\\n".
+
+        Side-effect:
+            Populates ``self._include_refs`` with raw ``@include`` paths found
+            during resolution, available via :meth:`get_include_refs`.
         """
         rules = []
+        all_include_refs: list[str] = []
 
         if self.scope in ("user", "all"):
             # User-level CLAUDE.md
@@ -362,6 +369,10 @@ class SourceReader:
             if user_claude_md.exists():
                 try:
                     content = user_claude_md.read_text(encoding='utf-8', errors='replace')
+                    # Collect raw include refs before resolution
+                    all_include_refs.extend(extract_include_refs(content))
+                    # Resolve @include directives
+                    content, _included = resolve_includes(content, user_claude_md.parent)
                     rules.append(f"# [User-level rules from ~/.claude/CLAUDE.md]\n\n{content}")
                 except (OSError, UnicodeDecodeError):
                     pass  # Skip on error
@@ -373,6 +384,8 @@ class SourceReader:
                 if p.exists():
                     try:
                         content = p.read_text(encoding='utf-8', errors='replace')
+                        all_include_refs.extend(extract_include_refs(content))
+                        content, _included = resolve_includes(content, p.parent)
                         rules.append(f"# [Project rules from {claude_md_name}]\n\n{content}")
                     except (OSError, UnicodeDecodeError):
                         pass
@@ -382,11 +395,25 @@ class SourceReader:
             if p.exists():
                 try:
                     content = p.read_text(encoding='utf-8', errors='replace')
+                    all_include_refs.extend(extract_include_refs(content))
+                    content, _included = resolve_includes(content, p.parent)
                     rules.append(f"# [Project rules from .claude/CLAUDE.md]\n\n{content}")
                 except (OSError, UnicodeDecodeError):
                     pass
 
+        # Store include refs for discover_all() to expose
+        self._include_refs = all_include_refs
+
         return "\n\n---\n\n".join(rules)
+
+    def get_include_refs(self) -> list[str]:
+        """Return raw ``@include`` path strings found during the last ``get_rules()`` call.
+
+        Returns:
+            List of raw include path strings. Empty if ``get_rules()`` has not been called
+            or no ``@include`` directives were found.
+        """
+        return getattr(self, '_include_refs', [])
 
     def get_rules_for_harness(self, target: str) -> str:
         """Return rules filtered by inline ``<!-- harness:X -->`` annotations.
@@ -857,6 +884,310 @@ class SourceReader:
 
         return settings
 
+    def get_plugins(self) -> dict[str, dict]:
+        """Discover Claude Code plugins with full metadata.
+
+        Combines _get_enabled_plugins() and _get_plugin_install_paths() to
+        return rich metadata for each installed plugin. Inspects each plugin's
+        install directory for skills, agents, commands, MCP servers, and hooks.
+
+        Returns:
+            Dict mapping plugin_name -> {
+                "enabled": bool,
+                "version": str,
+                "install_path": Path,
+                "has_skills": bool,
+                "has_agents": bool,
+                "has_commands": bool,
+                "has_mcp": bool,
+                "has_hooks": bool,
+                "manifest": dict,
+            }
+        """
+        plugins: dict[str, dict] = {}
+
+        if not self.cc_plugins_registry.exists():
+            return plugins
+
+        registry = read_json_safe(self.cc_plugins_registry)
+        plugins_data = registry.get("plugins", {})
+        if not isinstance(plugins_data, dict):
+            return plugins
+
+        # Get set of enabled plugin identifiers
+        enabled_set = self._get_enabled_plugins()
+
+        # Cache settings for enabledPlugins lookup (avoid re-reading inside loop)
+        settings_data = read_json_safe(self.cc_settings) if self.cc_settings.exists() else {}
+        ep = settings_data.get("enabledPlugins", {}) if isinstance(settings_data, dict) else {}
+
+        for plugin_key, installs in plugins_data.items():
+            if not isinstance(installs, list):
+                installs = [installs]
+
+            for install in installs:
+                if not isinstance(install, dict):
+                    continue
+
+                install_path_str = install.get("installPath", "")
+                if not install_path_str:
+                    continue
+
+                try:
+                    install_path = Path(install_path_str)
+                    if not install_path.exists():
+                        continue
+                except (OSError, ValueError):
+                    continue
+
+                # Extract plugin name (strip version suffix like "@1.0.0")
+                plugin_name = plugin_key.split("@")[0]
+                version = install.get("version", "unknown")
+
+                # Determine enabled status: check if explicitly listed in enabledPlugins
+                # _get_enabled_plugins returns only explicitly enabled ones.
+                # A plugin is disabled only if explicitly set to False in settings.
+                # If enabledPlugins doesn't mention this plugin at all, treat as enabled.
+                is_enabled = True
+                if isinstance(ep, dict):
+                    # Check both plugin_name and plugin_key forms
+                    if plugin_name in ep:
+                        is_enabled = bool(ep[plugin_name])
+                    elif plugin_key in ep:
+                        is_enabled = bool(ep[plugin_key])
+
+                # Inspect install directory for capabilities
+                has_skills = (install_path / "skills").is_dir() and any(
+                    (d / "SKILL.md").exists()
+                    for d in (install_path / "skills").iterdir()
+                    if d.is_dir()
+                ) if (install_path / "skills").is_dir() else False
+
+                has_agents = (install_path / "agents").is_dir() and any(
+                    f.suffix == ".md" and f.is_file()
+                    for f in (install_path / "agents").iterdir()
+                ) if (install_path / "agents").is_dir() else False
+
+                has_commands = (install_path / "commands").is_dir() and any(
+                    f.suffix == ".md" and f.is_file()
+                    for f in (install_path / "commands").iterdir()
+                ) if (install_path / "commands").is_dir() else False
+
+                has_mcp = (install_path / ".mcp.json").exists()
+                if not has_mcp:
+                    # Check for inline mcpServers in plugin.json
+                    for pj in [
+                        install_path / ".claude-plugin" / "plugin.json",
+                        install_path / "plugin.json",
+                    ]:
+                        if pj.exists():
+                            pj_data = read_json_safe(pj)
+                            if pj_data.get("mcpServers"):
+                                has_mcp = True
+                            break
+
+                has_hooks = False
+                hooks_json = install_path / "hooks" / "hooks.json"
+                if hooks_json.exists():
+                    has_hooks = True
+                else:
+                    # Check plugin.json for hooks
+                    for pj in [
+                        install_path / ".claude-plugin" / "plugin.json",
+                        install_path / "plugin.json",
+                    ]:
+                        if pj.exists():
+                            pj_data = read_json_safe(pj)
+                            if pj_data.get("hooks"):
+                                has_hooks = True
+                            break
+
+                # Read manifest (plugin.json)
+                manifest: dict = {}
+                for pj in [
+                    install_path / ".claude-plugin" / "plugin.json",
+                    install_path / "plugin.json",
+                ]:
+                    if pj.exists():
+                        manifest = read_json_safe(pj)
+                        break
+
+                plugins[plugin_name] = {
+                    "enabled": is_enabled,
+                    "version": version,
+                    "install_path": install_path,
+                    "has_skills": has_skills,
+                    "has_agents": has_agents,
+                    "has_commands": has_commands,
+                    "has_mcp": has_mcp,
+                    "has_hooks": has_hooks,
+                    "manifest": manifest,
+                }
+
+        return plugins
+
+    def get_hooks(self) -> dict:
+        """Discover hooks from settings.json and project-level hooks/hooks.json.
+
+        Reads from two locations and normalizes to a common shape:
+        1. settings.json -> 'hooks' key (new format: event-keyed arrays)
+        2. Project-level hooks/hooks.json (legacy plugin format)
+
+        User-scope hooks from settings.json come first; project-level hooks
+        are merged after (duplicates by command+event are not deduplicated —
+        both are kept).
+
+        Returns:
+            Dict with 'hooks' key containing a list of normalized hook dicts.
+            Each hook dict has: event, type, command/url, matcher, timeout, scope.
+        """
+        hooks: list[dict] = []
+
+        # Source 1: settings.json 'hooks' key (new format)
+        # Format: {"hooks": {"PreToolUse": [{"type": "command", "command": "...", "matcher": "..."}], ...}}
+        if self.scope in ("user", "all"):
+            if self.cc_settings.exists():
+                settings = read_json_safe(self.cc_settings)
+                hooks_section = settings.get("hooks", {})
+                if isinstance(hooks_section, dict):
+                    for event, entries in hooks_section.items():
+                        if not isinstance(entries, list):
+                            continue
+                        for entry in entries:
+                            if not isinstance(entry, dict):
+                                continue
+                            hooks.append(self._normalize_settings_hook(entry, event, "user"))
+
+        if self.scope in ("project", "all") and self.project_dir:
+            proj_settings = self.project_dir / ".claude" / "settings.json"
+            if proj_settings.exists():
+                settings = read_json_safe(proj_settings)
+                hooks_section = settings.get("hooks", {})
+                if isinstance(hooks_section, dict):
+                    for event, entries in hooks_section.items():
+                        if not isinstance(entries, list):
+                            continue
+                        for entry in entries:
+                            if not isinstance(entry, dict):
+                                continue
+                            hooks.append(self._normalize_settings_hook(entry, event, "project"))
+
+        # Source 2: project-level hooks/hooks.json (legacy plugin format)
+        # Format: {"hooks": {"PostToolUse": [{"matcher": "...", "hooks": [{"type": "command", "command": "..."}]}]}}
+        if self.scope in ("project", "all") and self.project_dir:
+            hooks_json = self.project_dir / "hooks" / "hooks.json"
+            if hooks_json.exists():
+                data = read_json_safe(hooks_json)
+                hooks_section = data.get("hooks", {})
+                if isinstance(hooks_section, dict):
+                    for event, event_entries in hooks_section.items():
+                        if not isinstance(event_entries, list):
+                            continue
+                        for group in event_entries:
+                            if not isinstance(group, dict):
+                                continue
+                            matcher = group.get("matcher", "")
+                            inner_hooks = group.get("hooks", [])
+                            if not isinstance(inner_hooks, list):
+                                continue
+                            for hook_entry in inner_hooks:
+                                if not isinstance(hook_entry, dict):
+                                    continue
+                                hooks.append(self._normalize_legacy_hook(hook_entry, event, matcher, "project"))
+
+        return {"hooks": hooks}
+
+    @staticmethod
+    def _normalize_settings_hook(entry: dict, event: str, scope: str) -> dict:
+        """Normalize a hook entry from settings.json format.
+
+        Args:
+            entry: Raw hook dict from settings.json (has type, command/url, matcher, timeout)
+            event: Event name (e.g. 'PreToolUse')
+            scope: 'user' or 'project'
+
+        Returns:
+            Normalized hook dict
+        """
+        hook_type = entry.get("type", "command")
+        # Normalize type: "command" -> "shell"
+        if hook_type == "command":
+            hook_type = "shell"
+
+        normalized: dict = {
+            "event": event,
+            "type": hook_type,
+            "scope": scope,
+        }
+
+        if hook_type == "shell":
+            normalized["command"] = entry.get("command", "")
+        elif hook_type == "http":
+            normalized["url"] = entry.get("url", "")
+
+        if entry.get("matcher"):
+            normalized["matcher"] = entry["matcher"]
+        if entry.get("timeout"):
+            normalized["timeout"] = entry["timeout"]
+
+        return normalized
+
+    @staticmethod
+    def _normalize_legacy_hook(entry: dict, event: str, matcher: str, scope: str) -> dict:
+        """Normalize a hook entry from legacy hooks/hooks.json format.
+
+        Args:
+            entry: Raw hook dict from hooks.json (has type, command)
+            event: Event name (e.g. 'PostToolUse')
+            matcher: Matcher string from parent group (e.g. 'Edit|Write')
+            scope: 'user' or 'project'
+
+        Returns:
+            Normalized hook dict
+        """
+        hook_type = entry.get("type", "command")
+        # Normalize type: "command" -> "shell"
+        if hook_type == "command":
+            hook_type = "shell"
+
+        normalized: dict = {
+            "event": event,
+            "type": hook_type,
+            "scope": scope,
+        }
+
+        if hook_type == "shell":
+            normalized["command"] = entry.get("command", "")
+        elif hook_type == "http":
+            normalized["url"] = entry.get("url", "")
+
+        if matcher:
+            normalized["matcher"] = matcher
+        if entry.get("timeout"):
+            normalized["timeout"] = entry["timeout"]
+
+        return normalized
+
+    def get_permissions(self) -> dict:
+        """Extract structured permissions from Claude Code settings.
+
+        Convenience method that calls :meth:`get_settings` and then
+        :func:`extract_permissions` to return a pre-extracted permissions
+        dict. This is provided as a dedicated key in :meth:`discover_all`
+        so adapters can consume permissions directly without digging into
+        the nested ``settings["permissions"]`` structure.
+
+        Returns:
+            Dict with keys ``"allow"``, ``"deny"``, ``"ask"``, each
+            mapping to a list of permission strings. Always returns
+            all three keys (empty lists if no permissions configured).
+        """
+        try:
+            settings = self.get_settings()
+            return extract_permissions(settings)
+        except Exception:
+            return {"allow": [], "deny": [], "ask": []}
+
     def get_harness_override(self, target_name: str) -> str:
         """Read per-harness override file (e.g. CLAUDE.codex.md) if present.
 
@@ -994,13 +1325,19 @@ class SourceReader:
         Convenience method to get all config types at once.
 
         Returns:
-            Dictionary with keys: rules, skills, agents, commands,
-            mcp_servers (flat), mcp_servers_scoped (with metadata), settings
+            Dictionary with keys: rules (fully resolved with includes inlined),
+            include_refs (raw @include paths for adapters that prefer native imports),
+            rules_files, skills, agents, commands,
+            mcp_servers (flat), mcp_servers_scoped (with metadata), settings,
+            permissions, hooks, plugins
         """
         scoped = self.get_mcp_servers_with_scope()
         flat = {name: entry["config"] for name, entry in scoped.items()}
+        # get_rules() populates self._include_refs as a side-effect
+        rules = self.get_rules()
         return {
-            "rules": self.get_rules(),
+            "rules": rules,
+            "include_refs": self.get_include_refs(),
             "rules_files": self.get_rules_files(),
             "skills": self.get_skills(),
             "agents": self.get_agents(),
@@ -1008,7 +1345,10 @@ class SourceReader:
             "mcp_servers": flat,
             "mcp_servers_scoped": scoped,
             "settings": self.get_settings(),
+            "permissions": self.get_permissions(),
             "harness_overrides": self.get_harness_override_paths(),
+            "hooks": self.get_hooks(),
+            "plugins": self.get_plugins(),
         }
 
     def get_source_paths(self) -> dict[str, list[Path]]:
@@ -1025,7 +1365,7 @@ class SourceReader:
             - For skills: returns skill directory paths (not SKILL.md files)
             - For agents/commands: returns .md file paths
             - For rules/mcp/settings: returns source file paths
-            - NEW method added in Task 2 for state manager integration
+            - Used for state tracking (hash each source file for drift detection)
         """
         paths = {
             "rules": [],
