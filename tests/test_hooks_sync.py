@@ -603,6 +603,41 @@ class TestGeminiHooksSync:
         # Hooks added
         assert "hooks" in settings
 
+    def test_hooks_merge_preserves_unmanaged_events(self, tmp_path):
+        """Hooks for events HarnessSync doesn't touch are preserved during merge."""
+        adapter = self._make_adapter(tmp_path)
+        gemini_dir = tmp_path / ".gemini"
+        gemini_dir.mkdir()
+        # Pre-populate with a manually-configured hook for an event
+        # that HarnessSync won't be syncing in this call
+        _write_json(gemini_dir / "settings.json", {
+            "hooks": {
+                "Notification": [
+                    {"type": "command", "command": "echo manual-notify"}
+                ],
+                "Stop": [
+                    {"type": "command", "command": "echo manual-stop"}
+                ],
+            }
+        })
+
+        # Sync only a PreToolUse and Stop hook — Stop should be replaced,
+        # Notification should be preserved
+        hooks = {"hooks": [
+            {"event": "PreToolUse", "type": "shell", "command": "echo pre", "matcher": "Edit", "scope": "user"},
+            {"event": "Stop", "type": "shell", "command": "echo synced-stop", "scope": "user"},
+        ]}
+        result = adapter.sync_hooks(hooks)
+        assert result.synced == 2
+
+        settings = json.loads((gemini_dir / "settings.json").read_text())
+        # Unmanaged event preserved
+        assert "Notification" in settings["hooks"]
+        assert settings["hooks"]["Notification"][0]["command"] == "echo manual-notify"
+        # Managed events replaced
+        assert settings["hooks"]["Stop"][0]["command"] == "echo synced-stop"
+        assert "PreToolUse" in settings["hooks"]
+
     def test_empty_hooks_no_write(self, tmp_path):
         adapter = self._make_adapter(tmp_path)
         result = adapter.sync_hooks({"hooks": []})

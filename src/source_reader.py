@@ -1014,7 +1014,7 @@ class SourceReader:
             "scope": scope,
         }
 
-        if hook_type == "shell" or hook_type == "command":
+        if hook_type == "shell":
             normalized["command"] = entry.get("command", "")
         elif hook_type == "http":
             normalized["url"] = entry.get("url", "")

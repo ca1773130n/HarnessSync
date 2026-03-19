@@ -778,10 +778,17 @@ class GeminiAdapter(AdapterBase):
         if not gemini_hooks:
             return result
 
-        # Write hooks to .gemini/settings.json
+        # Write hooks to .gemini/settings.json (merge at event level)
         try:
             existing_settings = read_json_safe(self.settings_path)
-            existing_settings["hooks"] = gemini_hooks
+            existing_hooks = existing_settings.get("hooks", {})
+            if not isinstance(existing_hooks, dict):
+                existing_hooks = {}
+            # For events HarnessSync manages, replace the array;
+            # for events it doesn't touch, preserve them.
+            merged_hooks = dict(existing_hooks)
+            merged_hooks.update(gemini_hooks)
+            existing_settings["hooks"] = merged_hooks
 
             ensure_dir(self.settings_path.parent)
             write_json_atomic(self.settings_path, existing_settings)
