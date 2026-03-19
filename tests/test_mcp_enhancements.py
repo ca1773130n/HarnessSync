@@ -160,6 +160,70 @@ class TestCodexMcpEnhancements:
         assert result["command"] == "node"
         assert result["args"] == ["server.js"]
 
+    def test_bearer_token_env_var_populated_for_remote_with_auth(self, tmp_path):
+        """Remote URL with auth env var should set bearer_token_env_var."""
+        adapter = CodexAdapter(tmp_path)
+        result = adapter._translate_mcp_fields({
+            "url": "https://mcp.example.com/api",
+            "env": {
+                "SENTRY_TOKEN": "secret123",
+                "DEBUG": "true",
+            },
+        })
+        assert result["bearer_token_env_var"] == "SENTRY_TOKEN"
+        assert result["url"] == "https://mcp.example.com/api"
+
+    def test_bearer_token_env_var_key_pattern(self, tmp_path):
+        """Auth env var detection should be case-insensitive on key substrings."""
+        adapter = CodexAdapter(tmp_path)
+        for env_key in ["API_KEY", "auth_header", "Bearer_Value", "my_secret", "GH_TOKEN"]:
+            result = adapter._translate_mcp_fields({
+                "url": "https://example.com/mcp",
+                "env": {env_key: "val"},
+            })
+            assert "bearer_token_env_var" in result, f"Expected bearer_token_env_var for env key '{env_key}'"
+            assert result["bearer_token_env_var"] == env_key
+
+    def test_bearer_token_env_var_not_set_for_remote_without_auth_env(self, tmp_path):
+        """Remote URL without auth env var should NOT set bearer_token_env_var."""
+        adapter = CodexAdapter(tmp_path)
+        result = adapter._translate_mcp_fields({
+            "url": "https://mcp.example.com/api",
+            "env": {
+                "DEBUG": "true",
+                "LOG_LEVEL": "info",
+            },
+        })
+        assert "bearer_token_env_var" not in result
+
+    def test_bearer_token_env_var_not_set_for_remote_no_env(self, tmp_path):
+        """Remote URL with no env dict should NOT set bearer_token_env_var."""
+        adapter = CodexAdapter(tmp_path)
+        result = adapter._translate_mcp_fields({
+            "url": "https://mcp.example.com/api",
+        })
+        assert "bearer_token_env_var" not in result
+
+    def test_bearer_token_env_var_not_set_for_stdio(self, tmp_path):
+        """Stdio server (no url) with auth env var should NOT set bearer_token_env_var."""
+        adapter = CodexAdapter(tmp_path)
+        result = adapter._translate_mcp_fields({
+            "command": "node",
+            "args": ["server.js"],
+            "env": {"API_KEY": "secret"},
+        })
+        assert "bearer_token_env_var" not in result
+
+    def test_bearer_token_env_var_not_overridden_if_explicit(self, tmp_path):
+        """Explicit bearer_token_env_var in source should not be overridden."""
+        adapter = CodexAdapter(tmp_path)
+        result = adapter._translate_mcp_fields({
+            "url": "https://mcp.example.com/api",
+            "bearer_token_env_var": "CUSTOM_VAR",
+            "env": {"API_TOKEN": "secret"},
+        })
+        assert result["bearer_token_env_var"] == "CUSTOM_VAR"
+
     def test_sync_mcp_applies_translation(self, tmp_path):
         """sync_mcp should apply field translation before writing TOML."""
         adapter = CodexAdapter(tmp_path)

@@ -292,6 +292,9 @@ class CodexAdapter(AdapterBase):
 
         return result
 
+    # Environment variable key substrings that indicate bearer token / auth credentials
+    _AUTH_ENV_KEYWORDS = ('TOKEN', 'KEY', 'AUTH', 'BEARER', 'SECRET')
+
     @staticmethod
     def _translate_mcp_fields(config: dict) -> dict:
         """Translate Claude Code MCP fields to Codex equivalents.
@@ -303,6 +306,7 @@ class CodexAdapter(AdapterBase):
         - enabled_tools -> enabled_tools (direct)
         - disabled_tools -> disabled_tools (direct)
         - essential -> dropped (no Codex equivalent)
+        - url (remote) + env with auth var -> url + bearer_token_env_var
 
         Args:
             config: Source MCP server config dict
@@ -332,6 +336,16 @@ class CodexAdapter(AdapterBase):
 
         # essential: drop silently (no Codex equivalent)
         translated.pop('essential', None)
+
+        # Remote URL servers: detect auth env var and set bearer_token_env_var
+        if 'url' in translated and 'bearer_token_env_var' not in translated:
+            env = translated.get('env')
+            if isinstance(env, dict):
+                for env_key in env:
+                    env_key_upper = env_key.upper()
+                    if any(kw in env_key_upper for kw in CodexAdapter._AUTH_ENV_KEYWORDS):
+                        translated['bearer_token_env_var'] = env_key
+                        break
 
         return translated
 
