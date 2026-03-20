@@ -11,18 +11,42 @@ and harness annotations.
 9 steps total. Each step adds real config files and explains what they do.
 """
 
+import argparse
 import json
-import os
 import shutil
 import sys
-import argparse
 import textwrap
 from pathlib import Path
 
-PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PLUGIN_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 sys.path.insert(0, PLUGIN_ROOT)
 
 STATE_FILE = ".tutorial-state.json"
+TOTAL_STEPS = 9
+
+# Step number -> sentinel file that proves the step was completed
+STEP_MARKERS = {
+    1: "taskflow/__init__.py",
+    2: "CLAUDE.md",
+    3: ".claude/rules/python.md",
+    4: ".claude/settings.json",
+    5: ".claude/commands/check.md",
+    6: ".claude/skills/add-feature.md",
+    7: ".mcp.json",
+    8: "hooks.json",
+}
+
+STEP_NAMES = {
+    1: "Project Scaffolding",
+    2: "CLAUDE.md",
+    3: "Scoped Rules",
+    4: "Settings / Permissions",
+    5: "Custom Commands",
+    6: "Skills & Agents",
+    7: "MCP Servers",
+    8: "Hooks & Annotations",
+    9: "Tutorial Complete",
+}
 
 # ============================================================================
 # CLI Parsing
@@ -93,20 +117,8 @@ def reconstruct_state(target_dir: Path | str) -> dict | None:
     if not target_dir.exists():
         return None
 
-    # Map step -> sentinel file that proves the step was completed
-    step_markers = {
-        1: "taskflow/__init__.py",
-        2: "CLAUDE.md",
-        3: ".claude/rules/python.md",
-        4: ".claude/settings.json",
-        5: ".claude/commands/check.md",
-        6: ".claude/skills/add-feature.md",
-        7: ".mcp.json",
-        8: "hooks.json",
-    }
-
     completed = []
-    for step, marker in step_markers.items():
+    for step, marker in STEP_MARKERS.items():
         if (target_dir / marker).exists():
             completed.append(step)
 
@@ -762,22 +774,14 @@ def add_step_files(target_dir: Path | str, step: int) -> None:
         9: (no-op, victory lap)
     """
     target_dir = Path(target_dir)
-
-    if step == 2:
-        _write_step2(target_dir)
-    elif step == 3:
-        _write_step3(target_dir)
-    elif step == 4:
-        _write_step4(target_dir)
-    elif step == 5:
-        _write_step5(target_dir)
-    elif step == 6:
-        _write_step6(target_dir)
-    elif step == 7:
-        _write_step7(target_dir)
-    elif step == 8:
-        _write_step8(target_dir)
-    # Steps 1 and 9 are no-ops here
+    writers = {
+        2: _write_step2, 3: _write_step3, 4: _write_step4,
+        5: _write_step5, 6: _write_step6, 7: _write_step7,
+        8: _write_step8,
+    }
+    writer = writers.get(step)
+    if writer:
+        writer(target_dir)
 
 
 def _write_step2(target_dir: Path) -> None:
@@ -1107,12 +1111,13 @@ def _write_step8(target_dir: Path) -> None:
 # Step Guide Text
 # ============================================================================
 
-def get_step_guide(step: int) -> str:
+def get_step_guide(step: int, target_dir: str = "") -> str:
     """Return the markdown guide for a tutorial step.
 
     Raises ValueError for step numbers outside 1-9.
+    If target_dir is provided, replaces {dir} placeholders.
     """
-    if step < 1 or step > 9:
+    if step < 1 or step > TOTAL_STEPS:
         raise ValueError(f"Invalid step number: {step}. Must be between 1 and 9.")
 
     guides = {
@@ -1420,7 +1425,10 @@ def get_step_guide(step: int) -> str:
         """),
     }
 
-    return guides[step]
+    guide = guides[step]
+    if target_dir:
+        guide = guide.replace("{dir}", target_dir)
+    return guide
 
 
 # ============================================================================
@@ -1432,21 +1440,18 @@ def handle_start(target_dir: Path | str) -> str:
     target_dir = Path(target_dir)
 
     if target_dir.exists() and load_state(target_dir) is not None:
-        # Already started — reset and re-scaffold
-        state_path = target_dir / STATE_FILE
-        if state_path.exists():
-            state_path.unlink()
+        # Already started — clean up config files before re-scaffolding
+        handle_reset(target_dir)
 
     scaffold_project(target_dir)
     save_state(target_dir, current_step=1, completed_steps=[1])
-    guide = get_step_guide(1).replace("{dir}", str(target_dir))
-    return guide
+    return get_step_guide(1, str(target_dir))
 
 
 def handle_next(target_dir: Path | str) -> str:
     """Advance to the next step."""
     target_dir = Path(target_dir)
-    state = load_state(target_dir)
+    state = load_state(target_dir) or reconstruct_state(target_dir)
 
     if state is None:
         return (
@@ -1458,7 +1463,7 @@ def handle_next(target_dir: Path | str) -> str:
     current = state["current_step"]
     completed = state["completed_steps"]
 
-    if current >= 9:
+    if current >= TOTAL_STEPS:
         return (
             "You've already completed all 9 steps! The tutorial is finished.\n\n"
             "Run `/sync-tutorial status` to review your progress, or "
@@ -1469,7 +1474,7 @@ def handle_next(target_dir: Path | str) -> str:
     add_step_files(target_dir, next_step)
     completed.append(next_step)
     save_state(target_dir, current_step=next_step, completed_steps=completed)
-    return get_step_guide(next_step)
+    return get_step_guide(next_step, str(target_dir))
 
 
 def handle_status(target_dir: Path | str) -> str:
@@ -1483,33 +1488,21 @@ def handle_status(target_dir: Path | str) -> str:
     current = state["current_step"]
     completed = sorted(state["completed_steps"])
 
-    step_names = {
-        1: "Project Scaffolding",
-        2: "CLAUDE.md",
-        3: "Scoped Rules",
-        4: "Settings / Permissions",
-        5: "Custom Commands",
-        6: "Skills & Agents",
-        7: "MCP Servers",
-        8: "Hooks & Annotations",
-        9: "Tutorial Complete",
-    }
-
     lines = [
-        f"## Tutorial Progress: Step {current} of 9\n",
+        f"## Tutorial Progress: Step {current} of {TOTAL_STEPS}\n",
         f"**Directory:** `{target_dir}`\n",
     ]
 
-    for step in range(1, 10):
+    for step in range(1, TOTAL_STEPS + 1):
         if step in completed:
             marker = "[x]"
         elif step == current + 1:
             marker = "[ ] <-- next"
         else:
             marker = "[ ]"
-        lines.append(f"  {marker} Step {step}: {step_names[step]}")
+        lines.append(f"  {marker} Step {step}: {STEP_NAMES[step]}")
 
-    if current < 9:
+    if current < TOTAL_STEPS:
         lines.append(f"\nRun `/sync-tutorial next` to proceed to Step {current + 1}.")
     else:
         lines.append("\nAll steps completed!")
@@ -1521,8 +1514,8 @@ def handle_goto(target_dir: Path | str, step_num: int) -> str:
     """Jump to a specific step, ensuring all prerequisite steps have files."""
     target_dir = Path(target_dir)
 
-    if step_num < 1 or step_num > 9:
-        return f"Invalid step number: {step_num}. Must be between 1 and 9."
+    if step_num < 1 or step_num > TOTAL_STEPS:
+        return f"Invalid step number: {step_num}. Must be between 1 and {TOTAL_STEPS}."
 
     state = load_state(target_dir)
     if state is None:
@@ -1541,7 +1534,7 @@ def handle_goto(target_dir: Path | str, step_num: int) -> str:
             completed.append(s)
 
     save_state(target_dir, current_step=step_num, completed_steps=completed)
-    return get_step_guide(step_num)
+    return get_step_guide(step_num, str(target_dir))
 
 
 def handle_reset(target_dir: Path | str) -> str:

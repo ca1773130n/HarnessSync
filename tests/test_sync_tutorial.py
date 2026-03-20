@@ -14,7 +14,6 @@ Covers:
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -67,7 +66,7 @@ class TestStateManagement:
     def test_reconstruct_empty_dir(self, tmp_path):
         """An empty directory has no reconstructable state."""
         state = reconstruct_state(tmp_path)
-        assert state is None or state["current_step"] == 0
+        assert state is None
 
 
 # ---------------------------------------------------------------------------
