@@ -19,11 +19,13 @@ backup best practices.
 import json
 import os
 import shutil
+import sys
 import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from src.exceptions import HarnessSyncError
 from src.utils.logger import Logger
 from src.utils.paths import ensure_dir
 
@@ -79,15 +81,15 @@ class CloudBackupExporter:
             if path.exists() and path.is_file():
                 try:
                     files[rel] = path.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    pass
+                except OSError as e:
+                    print(f"  [CloudBackupExporter] could not read {rel}: {e}", file=sys.stderr)
         # Also include global CLAUDE.md if present in cc_home
         global_claude = self.cc_home / "CLAUDE.md"
         if global_claude.exists():
             try:
                 files["~/.claude/CLAUDE.md"] = global_claude.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                pass
+            except OSError as e:
+                print(f"  [CloudBackupExporter] could not read global CLAUDE.md: {e}", file=sys.stderr)
         return files
 
     def export_to_gist(
@@ -327,7 +329,6 @@ class BackupManager:
             # Always write metadata file (not just when label is provided).
             # Stores change context for /sync-rollback --context (item 23).
             try:
-                import json
                 meta: dict = {
                     "label": label,
                     "timestamp": timestamp,
@@ -341,8 +342,8 @@ class BackupManager:
                 (backup_dir / ".harnesssync-snapshot.json").write_text(
                     json.dumps(meta, indent=2), encoding="utf-8"
                 )
-            except OSError:
-                pass  # Metadata write failure is non-fatal
+            except OSError as e:
+                self.logger.debug(f"Metadata write failed for {backup_dir}: {e}")
 
             self.logger.debug(f"Backed up {target_path} to {backup_dir}")
             return backup_dir
@@ -584,9 +585,12 @@ class BackupManager:
                 else:
                     skipped.append((tname, "Backup directory is empty"))
 
-            except Exception as exc:  # noqa: BLE001
+            except (OSError, shutil.Error, json.JSONDecodeError) as exc:
                 errors.append((tname, str(exc)))
                 self.logger.error(f"restore_by_date failed for {tname}: {exc}")
+            except Exception as exc:
+                errors.append((tname, str(exc)))
+                self.logger.error(f"restore_by_date unexpected failure for {tname}: {exc}")
 
         return {"restored": restored, "skipped": skipped, "errors": errors}
 
@@ -725,10 +729,10 @@ def auto_snapshot_targets(
             try:
                 backup_path = bm.backup_target(fp, target_name, label=label)
                 backup_paths.append(backup_path)
-            except OSError:
+            except OSError as e:
                 # Non-fatal: log and continue
-                bm.logger.warning(
-                    f"auto_snapshot: failed to backup {fp} for {target_name}"
+                bm.logger.warn(
+                    f"auto_snapshot: failed to backup {fp} for {target_name}: {e}"
                 )
 
         if backup_paths:

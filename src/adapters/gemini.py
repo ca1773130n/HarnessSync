@@ -16,11 +16,11 @@ instead of inlining content into GEMINI.md. Only rules remain in GEMINI.md.
 
 import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
-from .base import AdapterBase
+from .base import AdapterBase, HARNESSSYNC_MARKER, HARNESSSYNC_MARKER_END
 from .registry import AdapterRegistry
 from .result import SyncResult
+from src.exceptions import AdapterError
 from src.utils.paths import ensure_dir, read_json_safe, write_json_atomic
 from src.utils.env_translator import check_transport_support
 from src.utils.permissions import extract_permissions, parse_permission_string
@@ -28,8 +28,6 @@ from src.utils.includes import extract_include_refs, INCLUDE_RE
 
 
 # Gemini CLI constants
-HARNESSSYNC_MARKER = "<!-- Managed by HarnessSync -->"
-HARNESSSYNC_MARKER_END = "<!-- End HarnessSync managed content -->"
 GEMINI_MD = "GEMINI.md"
 SETTINGS_JSON = "settings.json"
 
@@ -102,22 +100,16 @@ class GeminiAdapter(AdapterBase):
         concatenated = '\n\n---\n\n'.join(rule_contents)
 
         # If include_refs are available, convert @include to Gemini native @file.md
-        if include_refs:
+        # Also check _pending_include_refs from sync_all override
+        effective_refs = include_refs or getattr(self, '_pending_include_refs', None)
+        if effective_refs:
             concatenated = self.convert_includes_to_native(concatenated)
 
         # Build managed section
-        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-        managed_section = f"""{HARNESSSYNC_MARKER}
-# Rules synced from Claude Code
-
-{concatenated}
-
----
-*Last synced by HarnessSync: {timestamp}*
-{HARNESSSYNC_MARKER_END}"""
+        managed_section = self._build_managed_section(concatenated)
 
         # Read existing GEMINI.md or start fresh
-        existing_content = self._read_gemini_md()
+        existing_content = self._read_managed_md(self.gemini_md_path)
 
         # Replace or append managed section
         final_content = self._replace_managed_section(existing_content, managed_section)
@@ -128,7 +120,7 @@ class GeminiAdapter(AdapterBase):
             final_content = final_content.rstrip() + f"\n\n{override}\n"
 
         # Write GEMINI.md
-        self._write_gemini_md(final_content)
+        self._write_managed_md(self.gemini_md_path, final_content)
 
         return SyncResult(
             synced=1,
@@ -176,8 +168,10 @@ class GeminiAdapter(AdapterBase):
                 try:
                     from src.skill_translator import translate_skill_content
                     content = translate_skill_content(content, self.target_name)
-                except Exception:
-                    pass  # Translation failure should not abort the sync
+                except ImportError:
+                    pass  # Translation module not available
+                except Exception as e:
+                    print(f"  [GeminiAdapter] skill translation failed for {name}: {e}", file=sys.stderr)
 
                 # Write to native discovery path
                 target_dir = self.project_dir / ".gemini" / "skills" / name
@@ -187,7 +181,12 @@ class GeminiAdapter(AdapterBase):
                 result.synced += 1
                 result.synced_files.append(str(target_dir / "SKILL.md"))
 
-            except Exception:
+            except (OSError, UnicodeDecodeError) as e:
+                result.failed += 1
+                result.failed_files.append(f"{name}: {e}")
+                continue
+            except Exception as e:
+                print(f"  [GeminiAdapter] unexpected error syncing skill {name}: {e}", file=sys.stderr)
                 result.failed += 1
                 result.failed_files.append(f"{name}: write failed")
                 continue
@@ -275,29 +274,17 @@ class GeminiAdapter(AdapterBase):
                 result.adapted += 1
                 result.synced_files.append(str(target_path))
 
-            except Exception:
+            except (OSError, UnicodeDecodeError) as e:
+                result.failed += 1
+                result.failed_files.append(f"{agent_name}: {e}")
+                continue
+            except Exception as e:
+                print(f"  [GeminiAdapter] unexpected error syncing agent {agent_name}: {e}", file=sys.stderr)
                 result.failed += 1
                 result.failed_files.append(f"{agent_name}: write failed")
                 continue
 
         return result
-
-    def _quote_yaml_value(self, value: str) -> str:
-        """Quote a YAML value if it contains unsafe characters.
-
-        Args:
-            value: Raw string value for YAML frontmatter
-
-        Returns:
-            Quoted string if needed, original otherwise
-        """
-        if not value:
-            return '""'
-        # Quote if contains YAML-unsafe characters
-        if any(c in value for c in ':"\'{}[]|>&*!%#`@,'):
-            escaped = value.replace('\\', '\\\\').replace('"', '\\"')
-            return f'"{escaped}"'
-        return value
 
     def sync_commands(self, commands: dict[str, Path]) -> SyncResult:
         """Sync commands to native .gemini/commands/<name>.toml files.
@@ -357,7 +344,12 @@ class GeminiAdapter(AdapterBase):
                 result.adapted += 1
                 result.synced_files.append(str(toml_path))
 
-            except Exception:
+            except (OSError, UnicodeDecodeError) as e:
+                result.failed += 1
+                result.failed_files.append(f"{cmd_name}: {e}")
+                continue
+            except Exception as e:
+                print(f"  [GeminiAdapter] unexpected error syncing command {cmd_name}: {e}", file=sys.stderr)
                 result.failed += 1
                 result.failed_files.append(f"{cmd_name}: write failed")
                 continue
@@ -554,7 +546,11 @@ class GeminiAdapter(AdapterBase):
 
             result.synced_files.append(str(settings_path))
 
+        except (OSError, ValueError) as e:
+            result.failed = len(mcp_servers)
+            result.failed_files.append(f"MCP servers: {str(e)}")
         except Exception as e:
+            print(f"  [GeminiAdapter] unexpected error writing MCP to {settings_path}: {e}", file=sys.stderr)
             result.failed = len(mcp_servers)
             result.failed_files.append(f"MCP servers: {str(e)}")
 
@@ -644,7 +640,11 @@ class GeminiAdapter(AdapterBase):
             result.adapted = 1
             result.synced_files.append(str(self.settings_path))
 
+        except (OSError, ValueError) as e:
+            result.failed = 1
+            result.failed_files.append(f"Settings: {str(e)}")
         except Exception as e:
+            print(f"  [GeminiAdapter] unexpected error syncing settings: {e}", file=sys.stderr)
             result.failed = 1
             result.failed_files.append(f"Settings: {str(e)}")
 
@@ -806,7 +806,12 @@ class GeminiAdapter(AdapterBase):
             total_written = sum(len(v) for v in gemini_hooks.values())
             result.synced = total_written
             result.synced_files.append(str(self.settings_path))
+        except (OSError, ValueError) as e:
+            total_hooks = sum(len(v) for v in gemini_hooks.values())
+            result.failed = total_hooks
+            result.failed_files.append(f"hooks: {str(e)}")
         except Exception as e:
+            print(f"  [GeminiAdapter] unexpected error writing hooks: {e}", file=sys.stderr)
             total_hooks = sum(len(v) for v in gemini_hooks.values())
             result.failed = total_hooks
             result.failed_files.append(f"hooks: {str(e)}")
@@ -874,83 +879,12 @@ class GeminiAdapter(AdapterBase):
                 result.synced += 1
                 result.synced_files.append(f"{plugin_name} -> {native} (native)")
             else:
-                # Decompose: route plugin contents through existing pipelines
-                install_path = meta.get("install_path")
-                if not install_path:
+                if not meta.get("install_path"):
                     result.skipped += 1
                     result.skipped_files.append(f"{plugin_name}: no install path")
                     continue
 
-                install_path = Path(install_path)
-                decomposed = False
-                decompose_failures: list[str] = []
-
-                # Route skills
-                if meta.get("has_skills"):
-                    try:
-                        skills_dir = install_path / "skills"
-                        plugin_skills = {}
-                        for d in skills_dir.iterdir():
-                            if d.is_dir() and (d / "SKILL.md").exists():
-                                plugin_skills[d.name] = d
-                        if plugin_skills:
-                            self.sync_skills(plugin_skills)
-                            decomposed = True
-                    except Exception:
-                        decompose_failures.append("skills")
-
-                # Route agents
-                if meta.get("has_agents"):
-                    try:
-                        agents_dir = install_path / "agents"
-                        plugin_agents = {}
-                        for f in agents_dir.iterdir():
-                            if f.suffix == ".md" and f.is_file():
-                                plugin_agents[f.stem] = f
-                        if plugin_agents:
-                            self.sync_agents(plugin_agents)
-                            decomposed = True
-                    except Exception:
-                        decompose_failures.append("agents")
-
-                # Route commands
-                if meta.get("has_commands"):
-                    try:
-                        commands_dir = install_path / "commands"
-                        plugin_commands = {}
-                        for f in commands_dir.iterdir():
-                            if f.suffix == ".md" and f.is_file():
-                                plugin_commands[f.stem] = f
-                        if plugin_commands:
-                            self.sync_commands(plugin_commands)
-                            decomposed = True
-                    except Exception:
-                        decompose_failures.append("commands")
-
-                # Route MCP servers
-                if meta.get("has_mcp"):
-                    try:
-                        mcp_json = install_path / ".mcp.json"
-                        if mcp_json.exists():
-                            mcp_data = read_json_safe(mcp_json)
-                            servers = mcp_data.get("mcpServers", mcp_data)
-                            if isinstance(servers, dict) and servers:
-                                self.sync_mcp(servers)
-                                decomposed = True
-                    except Exception:
-                        decompose_failures.append("mcp")
-
-                # Route hooks
-                if meta.get("has_hooks"):
-                    try:
-                        hooks_json = install_path / "hooks" / "hooks.json"
-                        if hooks_json.exists():
-                            hooks_data = read_json_safe(hooks_json)
-                            if hooks_data:
-                                self.sync_hooks(hooks_data)
-                                decomposed = True
-                    except Exception:
-                        decompose_failures.append("hooks")
+                decomposed, decompose_failures = self._decompose_plugin(plugin_name, meta)
 
                 if decomposed:
                     result.synced += 1
@@ -968,8 +902,10 @@ class GeminiAdapter(AdapterBase):
         if native_extensions:
             try:
                 self._write_native_extensions(native_extensions)
-            except Exception:
-                pass  # Best-effort
+            except OSError as e:
+                print(f"  [GeminiAdapter] failed to write native extensions: {e}", file=sys.stderr)
+            except Exception as e:
+                print(f"  [GeminiAdapter] unexpected error writing native extensions: {e}", file=sys.stderr)
 
         return result
 
@@ -997,152 +933,6 @@ class GeminiAdapter(AdapterBase):
         ensure_dir(self.settings_path.parent)
         write_json_atomic(self.settings_path, existing_settings)
 
-    # Helper methods for parsing and formatting
-
-    def _parse_frontmatter(self, content: str) -> tuple[dict, str]:
-        """Extract YAML frontmatter from markdown content.
-
-        Parses simple key: value frontmatter between --- delimiters.
-        Does not use PyYAML - just simple string splitting for Claude Code format.
-
-        Args:
-            content: Markdown content with optional frontmatter
-
-        Returns:
-            Tuple of (frontmatter_dict, body_after_frontmatter)
-        """
-        # Check for frontmatter at start of file
-        if not content.startswith('---'):
-            return {}, content
-
-        # Find end of frontmatter
-        match = re.match(r'^---\n(.*?)\n---\n(.*)$', content, re.DOTALL)
-        if not match:
-            return {}, content
-
-        frontmatter_text = match.group(1)
-        body = match.group(2)
-
-        # Parse key: value lines with support for multiline block scalars (| and >)
-        frontmatter = {}
-        lines = frontmatter_text.split('\n')
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            if ':' in line and not line.startswith(' ') and not line.startswith('\t'):
-                key, val = line.split(':', 1)
-                key = key.strip()
-                val = val.strip()
-
-                # Handle YAML block scalar indicators (| or >)
-                if val in ('|', '>', '|+', '>+', '|-', '>-'):
-                    # Collect indented continuation lines
-                    block_lines = []
-                    i += 1
-                    while i < len(lines) and (lines[i].startswith(' ') or lines[i].startswith('\t') or lines[i] == ''):
-                        block_lines.append(lines[i].strip())
-                        i += 1
-                    val = '\n'.join(block_lines).strip()
-                    frontmatter[key] = val
-                    continue
-
-                # Remove quotes if present
-                if val.startswith('"') and val.endswith('"'):
-                    val = val[1:-1]
-                elif val.startswith("'") and val.endswith("'"):
-                    val = val[1:-1]
-                frontmatter[key] = val
-            i += 1
-
-        return frontmatter, body
-
-    def _extract_role_section(self, body: str) -> str:
-        """Extract content between <role> tags.
-
-        Args:
-            body: Markdown body content
-
-        Returns:
-            Content from <role> section, or full body if no tags found
-        """
-        match = re.search(r'<role>(.*?)</role>', body, re.DOTALL | re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-        return body.strip()
-
-    # Helper methods for GEMINI.md management
-
-    def _read_gemini_md(self) -> str:
-        """Read existing GEMINI.md or return empty string.
-
-        Returns:
-            GEMINI.md content or empty string if file doesn't exist
-        """
-        if not self.gemini_md_path.exists():
-            return ""
-
-        try:
-            return self.gemini_md_path.read_text(encoding='utf-8')
-        except (OSError, UnicodeDecodeError):
-            # If read fails, treat as empty (will overwrite on write)
-            return ""
-
-    def _write_gemini_md(self, content: str) -> None:
-        """Write GEMINI.md with parent directory creation.
-
-        Args:
-            content: Full GEMINI.md content to write
-        """
-        ensure_dir(self.gemini_md_path.parent)
-        self.gemini_md_path.write_text(content, encoding='utf-8')
-
-    def _replace_managed_section(self, existing: str, managed: str) -> str:
-        """Replace content between HarnessSync markers or append.
-
-        If markers exist in existing content, replaces the section between them.
-        If no markers found, appends managed section to end of file.
-        If existing is empty, returns just the managed section.
-
-        Args:
-            existing: Existing GEMINI.md content
-            managed: New managed section (including markers)
-
-        Returns:
-            Final GEMINI.md content
-        """
-        if not existing:
-            return managed
-
-        # Check if markers exist
-        if HARNESSSYNC_MARKER in existing:
-            # Find start and end markers
-            start_idx = existing.find(HARNESSSYNC_MARKER)
-            end_idx = existing.find(HARNESSSYNC_MARKER_END)
-
-            if end_idx != -1:
-                # Calculate end position (after the end marker)
-                end_pos = end_idx + len(HARNESSSYNC_MARKER_END)
-
-                # Replace: content before marker + new managed + content after marker
-                before = existing[:start_idx].rstrip()
-                after = existing[end_pos:].lstrip()
-
-                if before and after:
-                    return f"{before}\n\n{managed}\n\n{after}"
-                elif before:
-                    return f"{before}\n\n{managed}"
-                elif after:
-                    return f"{managed}\n\n{after}"
-                else:
-                    return managed
-            else:
-                # Start marker exists but no end marker - treat as corrupted
-                # Append to end instead of trying to fix
-                return f"{existing.rstrip()}\n\n{managed}"
-        else:
-            # No markers - append managed section
-            return f"{existing.rstrip()}\n\n{managed}"
-
     def sync_all(self, source_data: dict) -> dict[str, SyncResult]:
         """Sync all configuration types, then clean stale GEMINI.md subsections.
 
@@ -1161,77 +951,14 @@ class GeminiAdapter(AdapterBase):
         Returns:
             Dict mapping config type to SyncResult
         """
-        # Override rules sync to pass include_refs
-        results = {}
-
-        # Pre-sync: warn about deprecated config fields
-        settings_output = source_data.get('settings', {})
-        if settings_output:
-            dep_warnings = self.check_deprecations(settings_output)
-            for w in dep_warnings:
-                print(f"  \u26a0  {w}", file=sys.stderr)
-
-        # Sync rules with include_refs support
+        # Stash include_refs so sync_rules gets it
+        self._pending_include_refs = source_data.get('include_refs', []) or None
         try:
-            include_refs = source_data.get('include_refs', [])
-            results['rules'] = self.sync_rules(
-                source_data.get('rules', []),
-                include_refs=include_refs if include_refs else None,
-            )
-        except Exception as e:
-            results['rules'] = SyncResult(
-                failed=1,
-                failed_files=[f'rules: {str(e)}']
-            )
+            results = super().sync_all(source_data)
+        finally:
+            self._pending_include_refs = None
 
-        # Sync remaining types via base class individual methods
-        for config_type, method_name, data_key, default in [
-            ('skills', 'sync_skills', 'skills', {}),
-            ('agents', 'sync_agents', 'agents', {}),
-            ('commands', 'sync_commands', 'commands', {}),
-            ('settings', 'sync_settings', 'settings', {}),
-        ]:
-            try:
-                method = getattr(self, method_name)
-                results[config_type] = method(source_data.get(data_key, default))
-            except Exception as e:
-                results[config_type] = SyncResult(
-                    failed=1,
-                    failed_files=[f'{config_type}: {str(e)}']
-                )
-
-        # Sync MCP servers (use scoped data if available, fall back to flat)
-        try:
-            mcp_scoped = source_data.get('mcp_scoped', {})
-            if mcp_scoped:
-                results['mcp'] = self.sync_mcp_scoped(mcp_scoped)
-            else:
-                results['mcp'] = self.sync_mcp(source_data.get('mcp', {}))
-        except Exception as e:
-            results['mcp'] = SyncResult(
-                failed=1,
-                failed_files=[f'mcp: {str(e)}']
-            )
-
-        # Sync hooks
-        try:
-            results['hooks'] = self.sync_hooks(source_data.get('hooks', {}))
-        except Exception as e:
-            results['hooks'] = SyncResult(
-                failed=1,
-                failed_files=[f'hooks: {str(e)}']
-            )
-
-        # Sync plugins
-        try:
-            results['plugins'] = self.sync_plugins(source_data.get('plugins', {}))
-        except Exception as e:
-            results['plugins'] = SyncResult(
-                failed=1,
-                failed_files=[f'plugins: {str(e)}']
-            )
-
-        # Only cleanup if all three native-format syncs succeeded (no failures)
+        # Post-sync: clean stale GEMINI.md subsections if all native syncs succeeded
         skills_ok = results.get('skills', SyncResult()).failed == 0
         agents_ok = results.get('agents', SyncResult()).failed == 0
         commands_ok = results.get('commands', SyncResult()).failed == 0
@@ -1263,7 +990,7 @@ class GeminiAdapter(AdapterBase):
         Returns:
             Number of subsections removed (0-3)
         """
-        content = self._read_gemini_md()
+        content = self._read_managed_md(self.gemini_md_path)
         if not content:
             return 0
 
@@ -1286,7 +1013,7 @@ class GeminiAdapter(AdapterBase):
                     removed += 1
 
         if removed > 0:
-            self._write_gemini_md(content.strip())
+            self._write_managed_md(self.gemini_md_path, content.strip())
 
         return removed
 
@@ -1304,7 +1031,7 @@ class GeminiAdapter(AdapterBase):
             subsection_name: Name of subsection (for logging)
             subsection_content: Content including subsection markers
         """
-        existing = self._read_gemini_md()
+        existing = self._read_managed_md(self.gemini_md_path)
 
         # Extract subsection marker from content
         # Format: <!-- HarnessSync:SubsectionName -->
@@ -1363,4 +1090,4 @@ class GeminiAdapter(AdapterBase):
                     final_content = subsection_content
 
         # Write back to GEMINI.md
-        self._write_gemini_md(final_content)
+        self._write_managed_md(self.gemini_md_path, final_content)

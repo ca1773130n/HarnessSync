@@ -16,11 +16,11 @@ and uses symlinks for zero-copy skill sharing.
 
 import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
-from .base import AdapterBase
+from .base import AdapterBase, HARNESSSYNC_MARKER, HARNESSSYNC_MARKER_END
 from .registry import AdapterRegistry
 from .result import SyncResult
+from src.exceptions import AdapterError
 from src.utils.paths import create_symlink_with_fallback, ensure_dir, read_json_safe
 from src.utils.toml_writer import (
     format_mcp_servers_toml,
@@ -32,11 +32,6 @@ from src.utils.toml_writer import (
 )
 from src.utils.env_translator import translate_env_vars_for_codex, check_transport_support
 from src.utils.permissions import extract_permissions, parse_permission_string
-
-
-# Codex CLI constants
-HARNESSSYNC_MARKER = "<!-- Managed by HarnessSync -->"
-HARNESSSYNC_MARKER_END = "<!-- End HarnessSync managed content -->"
 
 # Thresholds for intent-based approval policy mapping (see _map_approval_policy)
 CODEX_DENY_THRESHOLD = 3    # deny_list >= this -> "untrusted"
@@ -99,18 +94,10 @@ class CodexAdapter(AdapterBase):
         concatenated = '\n\n---\n\n'.join(rule_contents)
 
         # Build managed section
-        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-        managed_section = f"""{HARNESSSYNC_MARKER}
-# Rules synced from Claude Code
-
-{concatenated}
-
----
-*Last synced by HarnessSync: {timestamp}*
-{HARNESSSYNC_MARKER_END}"""
+        managed_section = self._build_managed_section(concatenated)
 
         # Read existing AGENTS.md or start fresh
-        existing_content = self._read_agents_md()
+        existing_content = self._read_managed_md(self.agents_md_path)
 
         # Replace or append managed section
         final_content = self._replace_managed_section(existing_content, managed_section)
@@ -121,7 +108,7 @@ class CodexAdapter(AdapterBase):
             final_content = final_content.rstrip() + f"\n\n{override}\n"
 
         # Write AGENTS.md
-        self._write_agents_md(final_content)
+        self._write_managed_md(self.agents_md_path, final_content)
 
         result = SyncResult(
             synced=1,
@@ -130,13 +117,15 @@ class CodexAdapter(AdapterBase):
         )
 
         # Write hierarchical AGENTS.md for subdirectory rules_files
-        if rules_files:
-            sub_result = self._write_subdirectory_agents_md(rules_files, timestamp)
+        # Also check _pending_rules_files from sync_all override
+        effective_rules_files = rules_files or getattr(self, '_pending_rules_files', None)
+        if effective_rules_files:
+            sub_result = self._write_subdirectory_agents_md(effective_rules_files)
             result = result.merge(sub_result)
 
         return result
 
-    def _write_subdirectory_agents_md(self, rules_files: list[dict], timestamp: str) -> SyncResult:
+    def _write_subdirectory_agents_md(self, rules_files: list[dict]) -> SyncResult:
         """Write AGENTS.md files in subdirectories for Codex child_agents_md discovery.
 
         Codex discovers AGENTS.md files in subdirectories automatically. When Claude Code
@@ -145,7 +134,6 @@ class CodexAdapter(AdapterBase):
 
         Args:
             rules_files: List of rules_files dicts with 'path', 'content', 'scope_patterns'
-            timestamp: ISO timestamp string for managed section
 
         Returns:
             SyncResult tracking subdirectory AGENTS.md files written
@@ -171,22 +159,15 @@ class CodexAdapter(AdapterBase):
                     continue
 
                 sub_agents_md = subdir_path / AGENTS_MD
-                managed = f"""{HARNESSSYNC_MARKER}
-# Subdirectory rules synced from Claude Code
-
-{content}
-
----
-*Last synced by HarnessSync: {timestamp}*
-{HARNESSSYNC_MARKER_END}"""
+                managed = self._build_managed_section(
+                    content, header="Subdirectory rules synced from Claude Code"
+                )
 
                 try:
                     # Read existing or create
-                    existing = ""
-                    if sub_agents_md.exists():
-                        existing = sub_agents_md.read_text(encoding='utf-8', errors='replace')
+                    existing = self._read_managed_md(sub_agents_md)
                     final = self._replace_managed_section(existing, managed)
-                    sub_agents_md.write_text(final, encoding='utf-8')
+                    self._write_managed_md(sub_agents_md, final)
                     result.synced += 1
                     result.synced_files.append(str(sub_agents_md))
                 except OSError as e:
@@ -307,8 +288,10 @@ class CodexAdapter(AdapterBase):
                 try:
                     from src.skill_translator import translate_skill_content
                     instructions = translate_skill_content(instructions, self.target_name)
-                except Exception:
+                except ImportError:
                     pass
+                except Exception as e:
+                    print(f"  [CodexAdapter] skill translation failed for {agent_name}: {e}", file=sys.stderr)
 
                 # Format as SKILL.md
                 skill_content = self._format_skill_md(name, description, instructions)
@@ -323,7 +306,11 @@ class CodexAdapter(AdapterBase):
                 result.adapted += 1
                 result.synced_files.append(str(skill_md))
 
+            except (OSError, UnicodeDecodeError) as e:
+                result.failed += 1
+                result.failed_files.append(f"{agent_name}: {str(e)}")
             except Exception as e:
+                print(f"  [CodexAdapter] unexpected error syncing agent {agent_name}: {e}", file=sys.stderr)
                 result.failed += 1
                 result.failed_files.append(f"{agent_name}: {str(e)}")
 
@@ -388,7 +375,11 @@ class CodexAdapter(AdapterBase):
                 result.adapted += 1
                 result.synced_files.append(str(skill_md))
 
+            except (OSError, UnicodeDecodeError) as e:
+                result.failed += 1
+                result.failed_files.append(f"{cmd_name}: {str(e)}")
             except Exception as e:
+                print(f"  [CodexAdapter] unexpected error syncing command {cmd_name}: {e}", file=sys.stderr)
                 result.failed += 1
                 result.failed_files.append(f"{cmd_name}: {str(e)}")
 
@@ -397,6 +388,9 @@ class CodexAdapter(AdapterBase):
     def sync_all(self, source_data: dict) -> dict[str, SyncResult]:
         """Override sync_all to pass rules_files to sync_rules for hierarchical AGENTS.md.
 
+        Delegates to base sync_all for all config types except rules, which
+        receives the additional rules_files kwarg for subdirectory AGENTS.md.
+
         Args:
             source_data: Dict with keys 'rules', 'rules_files', 'skills', 'agents',
                         'commands', 'mcp', 'settings'
@@ -404,75 +398,12 @@ class CodexAdapter(AdapterBase):
         Returns:
             Dict mapping config type to SyncResult
         """
-        results = {}
-
-        # Pre-sync: warn about deprecated config fields
-        settings_output = source_data.get('settings', {})
-        if settings_output:
-            dep_warnings = self.check_deprecations(settings_output)
-            for w in dep_warnings:
-                print(f"  \u26a0  {w}", file=sys.stderr)
-
-        # Sync rules with rules_files for hierarchical AGENTS.md
+        # Stash rules_files so sync_rules gets it via the override
+        self._pending_rules_files = source_data.get('rules_files', None)
         try:
-            results['rules'] = self.sync_rules(
-                source_data.get('rules', []),
-                rules_files=source_data.get('rules_files', None),
-            )
-        except Exception as e:
-            results['rules'] = SyncResult(
-                failed=1,
-                failed_files=[f'rules: {str(e)}']
-            )
-
-        # Sync remaining types via parent class pattern
-        for config_type, method_name, data_key, default in [
-            ('skills', 'sync_skills', 'skills', {}),
-            ('agents', 'sync_agents', 'agents', {}),
-            ('commands', 'sync_commands', 'commands', {}),
-            ('settings', 'sync_settings', 'settings', {}),
-        ]:
-            try:
-                method = getattr(self, method_name)
-                results[config_type] = method(source_data.get(data_key, default))
-            except Exception as e:
-                results[config_type] = SyncResult(
-                    failed=1,
-                    failed_files=[f'{config_type}: {str(e)}']
-                )
-
-        # Sync MCP servers (use scoped data if available, fall back to flat)
-        try:
-            mcp_scoped = source_data.get('mcp_scoped', {})
-            if mcp_scoped:
-                results['mcp'] = self.sync_mcp_scoped(mcp_scoped)
-            else:
-                results['mcp'] = self.sync_mcp(source_data.get('mcp', {}))
-        except Exception as e:
-            results['mcp'] = SyncResult(
-                failed=1,
-                failed_files=[f'mcp: {str(e)}']
-            )
-
-        # Sync hooks
-        try:
-            results['hooks'] = self.sync_hooks(source_data.get('hooks', {}))
-        except Exception as e:
-            results['hooks'] = SyncResult(
-                failed=1,
-                failed_files=[f'hooks: {str(e)}']
-            )
-
-        # Sync plugins
-        try:
-            results['plugins'] = self.sync_plugins(source_data.get('plugins', {}))
-        except Exception as e:
-            results['plugins'] = SyncResult(
-                failed=1,
-                failed_files=[f'plugins: {str(e)}']
-            )
-
-        return results
+            return super().sync_all(source_data)
+        finally:
+            self._pending_rules_files = None
 
     # ── Hooks Sync ─────────────────────────────────────────────────────────────
 
@@ -555,7 +486,11 @@ class CodexAdapter(AdapterBase):
                 self._write_codex_hooks(config_path, mapped_hooks)
                 result.synced = len(mapped_hooks)
                 result.synced_files.append(str(config_path))
+            except OSError as e:
+                result.failed = len(mapped_hooks)
+                result.failed_files.append(f"hooks: {str(e)}")
             except Exception as e:
+                print(f"  [CodexAdapter] unexpected error writing hooks: {e}", file=sys.stderr)
                 result.failed = len(mapped_hooks)
                 result.failed_files.append(f"hooks: {str(e)}")
         else:
@@ -663,15 +598,10 @@ class CodexAdapter(AdapterBase):
         lines.append("")
         hook_section = "\n".join(lines)
 
-        existing = self._read_agents_md()
-        if existing and HARNESSSYNC_MARKER_END in existing:
-            end_idx = existing.find(HARNESSSYNC_MARKER_END)
-            before = existing[:end_idx].rstrip()
-            after = existing[end_idx:]
-            final = f"{before}\n{hook_section}\n{after}"
-            self._write_agents_md(final)
-        elif existing:
-            self._write_agents_md(f"{existing.rstrip()}\n{hook_section}\n")
+        existing = self._read_managed_md(self.agents_md_path)
+        if existing:
+            final = self._insert_before_end_marker(existing, hook_section)
+            self._write_managed_md(self.agents_md_path, final)
 
     # ── Plugin Sync ─────────────────────────────────────────────────────────
 
@@ -720,83 +650,12 @@ class CodexAdapter(AdapterBase):
                 result.synced += 1
                 result.synced_files.append(f"{plugin_name} -> {native} (native)")
             else:
-                # Decompose: route plugin contents through existing pipelines
-                install_path = meta.get("install_path")
-                if not install_path:
+                if not meta.get("install_path"):
                     result.skipped += 1
                     result.skipped_files.append(f"{plugin_name}: no install path")
                     continue
 
-                install_path = Path(install_path)
-                decomposed = False
-                decompose_failures: list[str] = []
-
-                # Route skills
-                if meta.get("has_skills"):
-                    try:
-                        skills_dir = install_path / "skills"
-                        plugin_skills = {}
-                        for d in skills_dir.iterdir():
-                            if d.is_dir() and (d / "SKILL.md").exists():
-                                plugin_skills[d.name] = d
-                        if plugin_skills:
-                            self.sync_skills(plugin_skills)
-                            decomposed = True
-                    except Exception:
-                        decompose_failures.append("skills")
-
-                # Route agents
-                if meta.get("has_agents"):
-                    try:
-                        agents_dir = install_path / "agents"
-                        plugin_agents = {}
-                        for f in agents_dir.iterdir():
-                            if f.suffix == ".md" and f.is_file():
-                                plugin_agents[f.stem] = f
-                        if plugin_agents:
-                            self.sync_agents(plugin_agents)
-                            decomposed = True
-                    except Exception:
-                        decompose_failures.append("agents")
-
-                # Route commands
-                if meta.get("has_commands"):
-                    try:
-                        commands_dir = install_path / "commands"
-                        plugin_commands = {}
-                        for f in commands_dir.iterdir():
-                            if f.suffix == ".md" and f.is_file():
-                                plugin_commands[f.stem] = f
-                        if plugin_commands:
-                            self.sync_commands(plugin_commands)
-                            decomposed = True
-                    except Exception:
-                        decompose_failures.append("commands")
-
-                # Route MCP servers
-                if meta.get("has_mcp"):
-                    try:
-                        mcp_json = install_path / ".mcp.json"
-                        if mcp_json.exists():
-                            mcp_data = read_json_safe(mcp_json)
-                            servers = mcp_data.get("mcpServers", mcp_data)
-                            if isinstance(servers, dict) and servers:
-                                self.sync_mcp(servers)
-                                decomposed = True
-                    except Exception:
-                        decompose_failures.append("mcp")
-
-                # Route hooks
-                if meta.get("has_hooks"):
-                    try:
-                        hooks_json = install_path / "hooks" / "hooks.json"
-                        if hooks_json.exists():
-                            hooks_data = read_json_safe(hooks_json)
-                            if hooks_data:
-                                self.sync_hooks(hooks_data)
-                                decomposed = True
-                    except Exception:
-                        decompose_failures.append("hooks")
+                decomposed, decompose_failures = self._decompose_plugin(plugin_name, meta)
 
                 if decomposed:
                     result.synced += 1
@@ -815,15 +674,19 @@ class CodexAdapter(AdapterBase):
         if native_plugins:
             try:
                 self._write_native_plugins_toml(native_plugins)
-            except Exception:
-                pass  # Best-effort
+            except OSError as e:
+                print(f"  [CodexAdapter] failed to write native plugins TOML: {e}", file=sys.stderr)
+            except Exception as e:
+                print(f"  [CodexAdapter] unexpected error writing native plugins TOML: {e}", file=sys.stderr)
 
         # Document plugin info in AGENTS.md
         if native_plugins or decomposed_names:
             try:
                 self._document_plugins_in_agents_md(native_plugins, decomposed_names)
-            except Exception:
-                pass  # Best-effort
+            except OSError as e:
+                print(f"  [CodexAdapter] failed to document plugins in AGENTS.md: {e}", file=sys.stderr)
+            except Exception as e:
+                print(f"  [CodexAdapter] unexpected error documenting plugins: {e}", file=sys.stderr)
 
         return result
 
@@ -898,15 +761,10 @@ class CodexAdapter(AdapterBase):
 
         plugin_section = "\n".join(lines)
 
-        existing = self._read_agents_md()
-        if existing and HARNESSSYNC_MARKER_END in existing:
-            end_idx = existing.find(HARNESSSYNC_MARKER_END)
-            before = existing[:end_idx].rstrip()
-            after = existing[end_idx:]
-            final = f"{before}\n{plugin_section}\n{after}"
-            self._write_agents_md(final)
-        elif existing:
-            self._write_agents_md(f"{existing.rstrip()}\n{plugin_section}\n")
+        existing = self._read_managed_md(self.agents_md_path)
+        if existing:
+            final = self._insert_before_end_marker(existing, plugin_section)
+            self._write_managed_md(self.agents_md_path, final)
 
     # Environment variable key substrings that indicate bearer token / auth credentials
     _AUTH_ENV_KEYWORDS = ('TOKEN', 'KEY', 'AUTH', 'BEARER', 'SECRET')
@@ -1108,7 +966,11 @@ class CodexAdapter(AdapterBase):
             result.synced = len(mcp_servers)
             result.synced_files.append(str(config_path))
 
+        except (OSError, ValueError) as e:
+            result.failed = len(mcp_servers)
+            result.failed_files.append(f"MCP servers: {str(e)}")
         except Exception as e:
+            print(f"  [CodexAdapter] unexpected error writing MCP to {config_path}: {e}", file=sys.stderr)
             result.failed = len(mcp_servers)
             result.failed_files.append(f"MCP servers: {str(e)}")
 
@@ -1223,7 +1085,11 @@ class CodexAdapter(AdapterBase):
             result.adapted = 1
             result.synced_files.append(str(config_path))
 
+        except (OSError, ValueError) as e:
+            result.failed = 1
+            result.failed_files.append(f"Settings: {str(e)}")
         except Exception as e:
+            print(f"  [CodexAdapter] unexpected error syncing settings: {e}", file=sys.stderr)
             result.failed = 1
             result.failed_files.append(f"Settings: {str(e)}")
 
@@ -1389,91 +1255,11 @@ class CodexAdapter(AdapterBase):
         warning_section = "\n".join(lines)
 
         # Read existing AGENTS.md and append within managed section
-        existing = self._read_agents_md()
-        if existing and HARNESSSYNC_MARKER_END in existing:
-            # Insert before the end marker
-            end_idx = existing.find(HARNESSSYNC_MARKER_END)
-            before = existing[:end_idx].rstrip()
-            after = existing[end_idx:]
-            final = f"{before}\n{warning_section}\n{after}"
-            self._write_agents_md(final)
-        elif existing:
-            # No managed section — append at end
-            self._write_agents_md(f"{existing.rstrip()}\n{warning_section}\n")
+        existing = self._read_managed_md(self.agents_md_path)
+        if existing:
+            final = self._insert_before_end_marker(existing, warning_section)
+            self._write_managed_md(self.agents_md_path, final)
         # If no AGENTS.md exists, skip — sync_rules will create it
-
-    # Helper methods for parsing and formatting
-
-    def _parse_frontmatter(self, content: str) -> tuple[dict, str]:
-        """Extract YAML frontmatter from markdown content.
-
-        Parses simple key: value frontmatter between --- delimiters.
-        Does not use PyYAML - just simple string splitting for Claude Code format.
-
-        Args:
-            content: Markdown content with optional frontmatter
-
-        Returns:
-            Tuple of (frontmatter_dict, body_after_frontmatter)
-        """
-        # Check for frontmatter at start of file
-        if not content.startswith('---'):
-            return {}, content
-
-        # Find end of frontmatter
-        match = re.match(r'^---\n(.*?)\n---\n(.*)$', content, re.DOTALL)
-        if not match:
-            return {}, content
-
-        frontmatter_text = match.group(1)
-        body = match.group(2)
-
-        # Parse key: value lines with support for multiline block scalars (| and >)
-        frontmatter = {}
-        lines = frontmatter_text.split('\n')
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            if ':' in line and not line.startswith(' ') and not line.startswith('\t'):
-                key, val = line.split(':', 1)
-                key = key.strip()
-                val = val.strip()
-
-                # Handle YAML block scalar indicators (| or >)
-                if val in ('|', '>', '|+', '>+', '|-', '>-'):
-                    # Collect indented continuation lines
-                    block_lines = []
-                    i += 1
-                    while i < len(lines) and (lines[i].startswith(' ') or lines[i].startswith('\t') or lines[i] == ''):
-                        block_lines.append(lines[i].strip())
-                        i += 1
-                    val = '\n'.join(block_lines).strip()
-                    frontmatter[key] = val
-                    continue
-
-                # Remove quotes if present
-                if val.startswith('"') and val.endswith('"'):
-                    val = val[1:-1]
-                elif val.startswith("'") and val.endswith("'"):
-                    val = val[1:-1]
-                frontmatter[key] = val
-            i += 1
-
-        return frontmatter, body
-
-    def _extract_role_section(self, body: str) -> str:
-        """Extract content between <role> tags.
-
-        Args:
-            body: Markdown body content
-
-        Returns:
-            Content from <role> section, or full body if no tags found
-        """
-        match = re.search(r'<role>(.*?)</role>', body, re.DOTALL | re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-        return body.strip()
 
     def _format_skill_md(self, name: str, description: str, instructions: str) -> str:
         """Format Codex SKILL.md with frontmatter and sections.
@@ -1495,11 +1281,7 @@ class CodexAdapter(AdapterBase):
         if len(short_desc) > 200:
             short_desc = short_desc[:200].rsplit(' ', 1)[0] + '...'
 
-        # Quote description if it contains YAML-unsafe characters
-        if any(c in short_desc for c in ':"\'{}[]|>&*!%#`@,'):
-            quoted_desc = '"' + short_desc.replace('\\', '\\\\').replace('"', '\\"') + '"'
-        else:
-            quoted_desc = short_desc
+        quoted_desc = self._quote_yaml_value(short_desc)
 
         # Build frontmatter
         frontmatter = f"""---
@@ -1516,79 +1298,6 @@ description: {quoted_desc}
 {description}"""
 
         return frontmatter + body
-
-    # Helper methods for AGENTS.md
-
-    def _read_agents_md(self) -> str:
-        """Read existing AGENTS.md or return empty string.
-
-        Returns:
-            AGENTS.md content or empty string if file doesn't exist
-        """
-        if not self.agents_md_path.exists():
-            return ""
-
-        try:
-            return self.agents_md_path.read_text(encoding='utf-8')
-        except (OSError, UnicodeDecodeError):
-            # If read fails, treat as empty (will overwrite on write)
-            return ""
-
-    def _write_agents_md(self, content: str) -> None:
-        """Write AGENTS.md with parent directory creation.
-
-        Args:
-            content: Full AGENTS.md content to write
-        """
-        ensure_dir(self.agents_md_path.parent)
-        self.agents_md_path.write_text(content, encoding='utf-8')
-
-    def _replace_managed_section(self, existing: str, managed: str) -> str:
-        """Replace content between HarnessSync markers or append.
-
-        If markers exist in existing content, replaces the section between them.
-        If no markers found, appends managed section to end of file.
-        If existing is empty, returns just the managed section.
-
-        Args:
-            existing: Existing AGENTS.md content
-            managed: New managed section (including markers)
-
-        Returns:
-            Final AGENTS.md content
-        """
-        if not existing:
-            return managed
-
-        # Check if markers exist
-        if HARNESSSYNC_MARKER in existing:
-            # Find start and end markers
-            start_idx = existing.find(HARNESSSYNC_MARKER)
-            end_idx = existing.find(HARNESSSYNC_MARKER_END)
-
-            if end_idx != -1:
-                # Calculate end position (after the end marker)
-                end_pos = end_idx + len(HARNESSSYNC_MARKER_END)
-
-                # Replace: content before marker + new managed + content after marker
-                before = existing[:start_idx].rstrip()
-                after = existing[end_pos:].lstrip()
-
-                if before and after:
-                    return f"{before}\n\n{managed}\n\n{after}"
-                elif before:
-                    return f"{before}\n\n{managed}"
-                elif after:
-                    return f"{managed}\n\n{after}"
-                else:
-                    return managed
-            else:
-                # Start marker exists but no end marker - treat as corrupted
-                # Append to end instead of trying to fix
-                return f"{existing.rstrip()}\n\n{managed}"
-        else:
-            # No markers - append managed section
-            return f"{existing.rstrip()}\n\n{managed}"
 
     # Helper methods for config.toml management
 

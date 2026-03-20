@@ -15,11 +15,12 @@ MCP server configs (type: "local" for stdio, type: "remote" for URL).
 """
 
 import re
-from datetime import datetime, timezone
+import sys
 from pathlib import Path
-from .base import AdapterBase
+from .base import AdapterBase, HARNESSSYNC_MARKER, HARNESSSYNC_MARKER_END
 from .registry import AdapterRegistry
 from .result import SyncResult
+from src.exceptions import AdapterError
 from src.utils.paths import (
     create_symlink_with_fallback,
     cleanup_stale_symlinks,
@@ -29,11 +30,6 @@ from src.utils.paths import (
 )
 from src.utils.env_translator import check_transport_support, translate_env_vars_for_opencode_headers
 from src.utils.permissions import extract_permissions, parse_permission_string
-
-
-# OpenCode CLI constants
-HARNESSSYNC_MARKER = "<!-- Managed by HarnessSync -->"
-HARNESSSYNC_MARKER_END = "<!-- End HarnessSync managed content -->"
 AGENTS_MD = "AGENTS.md"
 OPENCODE_DIR = ".opencode"
 OPENCODE_JSON = "opencode.json"
@@ -96,18 +92,10 @@ class OpenCodeAdapter(AdapterBase):
         concatenated = '\n\n---\n\n'.join(rule_contents)
 
         # Build managed section
-        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-        managed_section = f"""{HARNESSSYNC_MARKER}
-# Rules synced from Claude Code
-
-{concatenated}
-
----
-*Last synced by HarnessSync: {timestamp}*
-{HARNESSSYNC_MARKER_END}"""
+        managed_section = self._build_managed_section(concatenated)
 
         # Read existing AGENTS.md or start fresh
-        existing_content = self._read_agents_md()
+        existing_content = self._read_managed_md(self.agents_md_path)
 
         # Replace or append managed section
         final_content = self._replace_managed_section(existing_content, managed_section)
@@ -118,7 +106,7 @@ class OpenCodeAdapter(AdapterBase):
             final_content = final_content.rstrip() + f"\n\n{override}\n"
 
         # Write AGENTS.md
-        self._write_agents_md(final_content)
+        self._write_managed_md(self.agents_md_path, final_content)
 
         return SyncResult(
             synced=1,
@@ -167,7 +155,11 @@ class OpenCodeAdapter(AdapterBase):
                     existing_config['$schema'] = 'https://opencode.ai/config.json'
                 write_json_atomic(self.opencode_json_path, existing_config)
                 result.synced_files.append(str(self.opencode_json_path))
+            except (OSError, ValueError) as e:
+                result.failed += 1
+                result.failed_files.append(f"opencode.json instructions: {e}")
             except Exception as e:
+                print(f"  [OpenCodeAdapter] unexpected error writing instructions: {e}", file=sys.stderr)
                 result.failed += 1
                 result.failed_files.append(f"opencode.json instructions: {e}")
 
@@ -320,7 +312,10 @@ class OpenCodeAdapter(AdapterBase):
                     existing_config['$schema'] = 'https://opencode.ai/config.json'
                 write_json_atomic(self.opencode_json_path, existing_config)
                 result.adapted += len(agent_configs)
+            except (OSError, ValueError) as e:
+                result.failed_files.append(f"opencode.json agent config: {e}")
             except Exception as e:
+                print(f"  [OpenCodeAdapter] unexpected error writing agent config: {e}", file=sys.stderr)
                 result.failed_files.append(f"opencode.json agent config: {e}")
 
         return result
@@ -484,7 +479,11 @@ class OpenCodeAdapter(AdapterBase):
 
             result.synced_files.append(str(self.opencode_json_path))
 
+        except (OSError, ValueError) as e:
+            result.failed = len(mcp_servers)
+            result.failed_files.append(f"MCP servers: {str(e)}")
         except Exception as e:
+            print(f"  [OpenCodeAdapter] unexpected error syncing MCP: {e}", file=sys.stderr)
             result.failed = len(mcp_servers)
             result.failed_files.append(f"MCP servers: {str(e)}")
 
@@ -651,7 +650,11 @@ class OpenCodeAdapter(AdapterBase):
             result.adapted = 1
             result.synced_files.append(str(self.opencode_json_path))
 
+        except (OSError, ValueError) as e:
+            result.failed = 1
+            result.failed_files.append(f"Settings: {str(e)}")
         except Exception as e:
+            print(f"  [OpenCodeAdapter] unexpected error syncing settings: {e}", file=sys.stderr)
             result.failed = 1
             result.failed_files.append(f"Settings: {str(e)}")
 
@@ -697,74 +700,15 @@ class OpenCodeAdapter(AdapterBase):
                 result.synced += 1
                 result.synced_files.append(f"{plugin_name} -> {native} (native)")
             else:
-                # Decompose: route plugin contents through existing pipelines
-                install_path = meta.get("install_path")
-                if not install_path:
+                if not meta.get("install_path"):
                     result.skipped += 1
                     result.skipped_files.append(f"{plugin_name}: no install path")
                     continue
 
-                install_path = Path(install_path)
-                decomposed = False
-                decompose_failures: list[str] = []
+                decomposed, decompose_failures = self._decompose_plugin(plugin_name, meta)
 
-                # Route skills
-                if meta.get("has_skills"):
-                    try:
-                        skills_dir = install_path / "skills"
-                        plugin_skills = {}
-                        for d in skills_dir.iterdir():
-                            if d.is_dir() and (d / "SKILL.md").exists():
-                                plugin_skills[d.name] = d
-                        if plugin_skills:
-                            self.sync_skills(plugin_skills)
-                            decomposed = True
-                    except Exception:
-                        decompose_failures.append("skills")
-
-                # Route agents
-                if meta.get("has_agents"):
-                    try:
-                        agents_dir = install_path / "agents"
-                        plugin_agents = {}
-                        for f in agents_dir.iterdir():
-                            if f.suffix == ".md" and f.is_file():
-                                plugin_agents[f.stem] = f
-                        if plugin_agents:
-                            self.sync_agents(plugin_agents)
-                            decomposed = True
-                    except Exception:
-                        decompose_failures.append("agents")
-
-                # Route commands
-                if meta.get("has_commands"):
-                    try:
-                        commands_dir = install_path / "commands"
-                        plugin_commands = {}
-                        for f in commands_dir.iterdir():
-                            if f.suffix == ".md" and f.is_file():
-                                plugin_commands[f.stem] = f
-                        if plugin_commands:
-                            self.sync_commands(plugin_commands)
-                            decomposed = True
-                    except Exception:
-                        decompose_failures.append("commands")
-
-                # Route MCP servers
-                if meta.get("has_mcp"):
-                    try:
-                        mcp_json = install_path / ".mcp.json"
-                        if mcp_json.exists():
-                            mcp_data = read_json_safe(mcp_json)
-                            servers = mcp_data.get("mcpServers", mcp_data)
-                            if isinstance(servers, dict) and servers:
-                                self.sync_mcp(servers)
-                                decomposed = True
-                    except Exception:
-                        decompose_failures.append("mcp")
-
-                # Skip hooks for OpenCode: TypeScript-specific event hooks
-                # can't be translated from shell/prompt hooks
+                # Note: hooks are routed through sync_hooks (which is a no-op for OpenCode)
+                # but add an informational message if the plugin has hooks
                 if meta.get("has_hooks"):
                     result.skipped_files.append(
                         f"{plugin_name}: hooks skipped (OpenCode uses TS event hooks)"
@@ -786,8 +730,10 @@ class OpenCodeAdapter(AdapterBase):
         if native_plugins:
             try:
                 self._write_native_plugins_json(native_plugins)
-            except Exception:
-                pass  # Best-effort
+            except OSError as e:
+                print(f"  [OpenCodeAdapter] failed to write native plugins JSON: {e}", file=sys.stderr)
+            except Exception as e:
+                print(f"  [OpenCodeAdapter] unexpected error writing native plugins: {e}", file=sys.stderr)
 
         return result
 
@@ -825,75 +771,4 @@ class OpenCodeAdapter(AdapterBase):
 
         write_json_atomic(self.opencode_json_path, existing_config)
 
-    # Helper methods for AGENTS.md management
-
-    def _read_agents_md(self) -> str:
-        """Read existing AGENTS.md or return empty string.
-
-        Returns:
-            AGENTS.md content or empty string if file doesn't exist
-        """
-        if not self.agents_md_path.exists():
-            return ""
-
-        try:
-            return self.agents_md_path.read_text(encoding='utf-8')
-        except (OSError, UnicodeDecodeError):
-            # If read fails, treat as empty (will overwrite on write)
-            return ""
-
-    def _write_agents_md(self, content: str) -> None:
-        """Write AGENTS.md with parent directory creation.
-
-        Args:
-            content: Full AGENTS.md content to write
-        """
-        ensure_dir(self.agents_md_path.parent)
-        self.agents_md_path.write_text(content, encoding='utf-8')
-
-    def _replace_managed_section(self, existing: str, managed: str) -> str:
-        """Replace content between HarnessSync markers or append.
-
-        If markers exist in existing content, replaces the section between them.
-        If no markers found, appends managed section to end of file.
-        If existing is empty, returns just the managed section.
-
-        Args:
-            existing: Existing AGENTS.md content
-            managed: New managed section (including markers)
-
-        Returns:
-            Final AGENTS.md content
-        """
-        if not existing:
-            return managed
-
-        # Check if markers exist
-        if HARNESSSYNC_MARKER in existing:
-            # Find start and end markers
-            start_idx = existing.find(HARNESSSYNC_MARKER)
-            end_idx = existing.find(HARNESSSYNC_MARKER_END)
-
-            if end_idx != -1:
-                # Calculate end position (after the end marker)
-                end_pos = end_idx + len(HARNESSSYNC_MARKER_END)
-
-                # Replace: content before marker + new managed + content after marker
-                before = existing[:start_idx].rstrip()
-                after = existing[end_pos:].lstrip()
-
-                if before and after:
-                    return f"{before}\n\n{managed}\n\n{after}"
-                elif before:
-                    return f"{before}\n\n{managed}"
-                elif after:
-                    return f"{managed}\n\n{after}"
-                else:
-                    return managed
-            else:
-                # Start marker exists but no end marker - treat as corrupted
-                # Append to end instead of trying to fix
-                return f"{existing.rstrip()}\n\n{managed}"
-        else:
-            # No markers - append managed section
-            return f"{existing.rstrip()}\n\n{managed}"
+    # Helper methods for AGENTS.md management (using base class _read_managed_md/_write_managed_md)

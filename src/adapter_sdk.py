@@ -140,7 +140,7 @@ class AdapterManifest:
 
     name: str
     display_name: str = ""
-    version: str = "0.1.0"
+    version: str = "0.1.3"
     author: str = ""
     description: str = ""
     supported_transports: list[str] = field(default_factory=lambda: ["stdio"])
@@ -522,7 +522,7 @@ class {class_name}(AdapterBase):
     MANIFEST = AdapterManifest(
         name="{harness_name}",
         display_name="{display}",
-        version="0.1.0",
+        version="0.1.3",
         author={author!r},
         description="{display} adapter for HarnessSync",
         supported_transports={transports_str},

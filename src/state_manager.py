@@ -18,6 +18,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+from src.exceptions import StateError
 from src.utils.paths import ensure_dir, read_json_safe
 
 
@@ -98,8 +99,8 @@ class StateManager:
             backup_path = self.state_dir / f"state.json.bak.{timestamp}"
             try:
                 self._state_file_path.rename(backup_path)
-            except OSError:
-                pass  # Backup failed, continue with fresh state
+            except OSError as e:
+                print(f"[HarnessSync] Failed to backup corrupted state file: {e}", file=sys.stderr)
 
             return {"version": 2, "targets": {}, "accounts": {}}
 
@@ -179,13 +180,26 @@ class StateManager:
             # Atomic rename (replaces existing file)
             os.replace(str(temp_path), str(self._state_file_path))
 
-        except Exception:
+        except OSError as e:
             # Cleanup temp file on failure
             if temp_fd and not temp_fd.closed:
                 temp_fd.close()
             if temp_path and temp_path.exists():
-                temp_path.unlink()
-            raise
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
+            raise StateError(f"Failed to save state to {self._state_file_path}: {e}") from e
+        except Exception as e:
+            # Cleanup temp file on failure
+            if temp_fd and not temp_fd.closed:
+                temp_fd.close()
+            if temp_path and temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
+            raise StateError(f"Unexpected error saving state: {e}") from e
 
     def record_sync(
         self,
