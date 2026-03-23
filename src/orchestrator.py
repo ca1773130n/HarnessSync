@@ -600,10 +600,16 @@ class SyncOrchestrator:
                 effective_skip = effective_skip | self._per_target_skip[tgt_lower]
             if tgt_lower in self._per_target_only:
                 tgt_only = self._per_target_only[tgt_lower]
+                prev_only = effective_only
                 effective_only = (effective_only & tgt_only) if effective_only else tgt_only
+                if prev_only and tgt_only and not effective_only:
+                    return {}
             if tgt_lower in self._cli_per_target_only:
                 cli_tgt_only = self._cli_per_target_only[tgt_lower]
+                prev_only = effective_only
                 effective_only = (effective_only & cli_tgt_only) if effective_only else cli_tgt_only
+                if prev_only and cli_tgt_only and not effective_only:
+                    return {}
 
         if not effective_only and not effective_skip:
             return data
@@ -720,7 +726,10 @@ class SyncOrchestrator:
 
         canary_sync_results = canary_orchestrator.sync_all()
         canary_result = (canary_sync_results or {}).get(canary_target)
-        canary_ok = getattr(canary_result, "success", canary_result is not None)
+        if isinstance(canary_result, dict):
+            canary_ok = all(r.success for r in canary_result.values() if hasattr(r, "success"))
+        else:
+            canary_ok = getattr(canary_result, "success", canary_result is not None)
 
         results[canary_target] = {
             "success": canary_ok,
@@ -774,7 +783,10 @@ class SyncOrchestrator:
 
         rollout_results = rollout_orchestrator.sync_all()
         for target, result in (rollout_results or {}).items():
-            ok = getattr(result, "success", result is not None)
+            if isinstance(result, dict):
+                ok = all(r.success for r in result.values() if hasattr(r, "success"))
+            else:
+                ok = getattr(result, "success", result is not None)
             results[target] = {
                 "success": ok,
                 "phase": "rollout",

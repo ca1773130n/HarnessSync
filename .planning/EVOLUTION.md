@@ -5750,3 +5750,47 @@ None
 None
 
 ---
+## Iteration 90
+_2026-03-23T17:47:53.143Z_
+
+### Items Attempted
+
+- **Guard TransformEngine.load() None return** — pass
+- **Guard non-dict JSON in get_current_mcp** — pass
+- **Fix drift root-cause heuristic priority** — pass
+- **Validate _pending_rules_files type before use** — pass
+- **Scope-guard am in _show_default_status** — pass
+- **Per-Harness Config Overrides** — pass
+- **Interactive Conflict Resolver** — pass
+- **Named Sync Profiles** — pass
+- **Rule Provenance in Synced Files** — pass
+- **File-Watch Auto-Sync Daemon** — pass
+
+### Decisions Made
+
+- Guard _transform_engine None return with `if _transform_engine and ...` to avoid AttributeError when TransformEngine.load() returns None rather than a new instance
+- Wrap get_current_mcp and get_current_settings JSON parsing with isinstance(data, dict) check so non-dict top-level JSON (arrays, null) silently falls through to the {} default instead of crashing with AttributeError
+- Swapped drift heuristic conditions so version-string detection runs before whitespace detection — version changes always include whitespace shifts, so checking version first avoids misclassifying self-updates as formatting noise
+- Added isinstance(effective_rules_files, list) guard in codex adapter to prevent iteration crash when _pending_rules_files is set to a truthy non-list value (e.g. True or a string)
+- Initialized am = None before the try block in _show_default_status and changed the guard to `am is not None` — this is more idiomatic than using dir() and handles the case where AccountManager() assignment fails partway through
+- OverrideManager uses best-effort try/except in orchestrator so override failures never block the core sync path, consistent with the project's pattern for optional features
+- sync_preset.py save subcommand mirrors the CLI flags of /sync (--scope, --only, --skip, --targets) so users can mechanically translate a working /sync invocation into a saved profile
+- sync_watch.py uses stat-based mtime polling (stdlib only) per the task spec; SIGINT handler sets a stop flag rather than raising so the summary always prints on Ctrl+C
+- RuleAttributionStore in rule_annotator.py uses the existing .harness-sync/rule-attribution.json path that was already tracked as an untracked file in git status
+
+### Patterns Discovered
+
+- Best-effort try/except around optional features is a consistent project-wide pattern — override_manager, transform_engine, offline_queue, and model_routing all follow the same wrapping style
+- The orchestrator uses dict(target_data) before mutating to avoid aliasing — important since target_data may be shared across the loop body
+- Commands use shlex.split + argparse with a try/except SystemExit pattern consistently across all command files; new commands should follow this exact pattern
+- State manager stores conflicts as a list inside targets[target]['conflicts'] — the sync_resolve command clears them by filtering on path equality
+- The codebase has very many command files (80+) — each command is a thin CLI shim that delegates to a library module in src/
+
+### Takeaways
+
+- Several features (profile_manager, sync_preset, conflict_resolver scaffolding) were partially or fully implemented already — evolve iterations should check existing file lists before building from scratch
+- The deepeval incompatibility with Python 3.9 (`X | None` syntax) is a pre-existing issue in test_sync_tutorial.py; it's not introduced by these changes and should be tracked separately
+- The drift_detector heuristic ordering bug could silently produce wrong suggested actions in the common case where a harness update also changes indentation — swapping the order is a correctness fix with zero downside since the version-string check is strictly more specific
+- The override_manager integration point in the orchestrator targets the rules (str) and mcp (dict) keys in target_data; other sections like skills and agents are not yet overrideable at the dict level and may benefit from similar treatment
+
+---

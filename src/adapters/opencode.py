@@ -136,7 +136,11 @@ class OpenCodeAdapter(AdapterBase):
 
             rule_file = rules_dir / filename
             try:
-                rule_file.write_text(rule['content'], encoding='utf-8')
+                content = rule.get('content', '')
+                if not content.strip():
+                    print(f"  [OpenCodeAdapter] skipping rule with empty content: {source_path or filename}", file=sys.stderr)
+                    continue
+                rule_file.write_text(content, encoding='utf-8')
                 # Path relative to project root for opencode.json
                 rel_path = f".opencode/rules/{filename}"
                 instruction_paths.append(rel_path)

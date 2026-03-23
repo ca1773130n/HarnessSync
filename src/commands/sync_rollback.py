@@ -278,7 +278,7 @@ def _resolve_backup(args, backups: list[Path], target: str, project_dir: Path) -
             if not labeled:
                 print(f"No backups found for target '{target}' with label '{args.label}'.")
                 return None
-            return labeled[0]["path"]
+            return Path(labeled[0]["path"])
         except Exception as e:
             print(f"Error finding labeled backup: {e}", file=sys.stderr)
             return None

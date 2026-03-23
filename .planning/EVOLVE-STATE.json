@@ -1,9 +1,75 @@
 {
-  "iteration": 89,
-  "timestamp": "2026-03-18T02:28:47.015Z",
+  "iteration": 90,
+  "timestamp": "2026-03-23T17:47:53.144Z",
   "milestone": "",
   "pick_pct": 50,
   "selected_groups": [
+    {
+      "id": "stability/miscellaneous",
+      "theme": "miscellaneous",
+      "dimension": "stability",
+      "title": "Miscellaneous (stability)",
+      "items": [
+        {
+          "id": "stability/transform-engine-null-check",
+          "dimension": "stability",
+          "slug": "transform-engine-null-check",
+          "title": "Guard TransformEngine.load() None return",
+          "description": "src/orchestrator.py:374 — `_transform_engine.has_rules()` is called immediately after `TransformEngine.load(self.project_dir)` on line 373, but `.load()` can return None. When it does, the AttributeError is swallowed by the outer `except Exception` on line 378 and logged as 'Transform engine load failed' rather than passing silently. Fix: change line 374 from `if _transform_engine.has_rules():` to `if _transform_engine and _transform_engine.has_rules():`",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "stability/sync-preview-mcp-isinstance-guard",
+          "dimension": "stability",
+          "slug": "sync-preview-mcp-isinstance-guard",
+          "title": "Guard non-dict JSON in get_current_mcp",
+          "description": "src/sync_preview.py:165-166 — `get_current_mcp()` calls `data.get('mcpServers', {})` directly after `json.loads()` with no type check. If the file contains a JSON array, string, or null at the top level, this raises AttributeError. Fix: wrap line 166 with `if isinstance(data, dict):` so the function falls through to `return {}` for non-dict JSON. Same issue at line 181 in `get_current_settings()` where `data.items()` is called unconditionally — add the same isinstance guard there.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "stability/drift-heuristic-priority-order",
+          "dimension": "stability",
+          "slug": "drift-heuristic-priority-order",
+          "title": "Fix drift root-cause heuristic priority",
+          "description": "src/drift_detector.py:164-173 — The whitespace-only check (condition 1, line 165: `stored_content.strip() == current_content.strip()`) runs before the version-string check (condition 2, line 170). When a harness self-update changes only indentation or trailing newlines alongside version tokens, the file is misclassified as 'Whitespace normalization' with the wrong suggested action instead of 'Harness self-update'. Fix: swap conditions 1 and 2 so the version-string `elif` (line 170) becomes the first branch, and the whitespace check becomes `elif` after it.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "stability/codex-pending-rules-files-type-check",
+          "dimension": "stability",
+          "slug": "codex-pending-rules-files-type-check",
+          "title": "Validate _pending_rules_files type before use",
+          "description": "src/adapters/codex.py:141-143 — `effective_rules_files = rules_files or getattr(self, '_pending_rules_files', None)` retrieves a dynamically-set attribute without validating its type. `_write_subdirectory_agents_md` at line 148 declares `rules_files: list[dict]` and iterates it internally. If `_pending_rules_files` is set to a non-list truthy value, the downstream iteration crashes. Fix: change line 142 from `if effective_rules_files:` to `if effective_rules_files and isinstance(effective_rules_files, list):`",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "stability/sync-status-am-scope-guard",
+          "dimension": "stability",
+          "slug": "sync-status-am-scope-guard",
+          "title": "Scope-guard am in _show_default_status",
+          "description": "src/commands/sync_status.py:212-223 — `am` is assigned inside a try/except block on line 215, but `am.list_accounts()` is called on line 223 outside that block. If `AccountManager()` raises on line 215, the except swallows it and `has_accounts` stays False — but if `has_accounts` is somehow True from a prior stale state and the assignment failed, line 223 raises NameError. Fix: change line 220 from `if has_accounts:` to `if has_accounts and 'am' in dir():` or more robustly initialise `am = None` before the try-block on line 212 and change line 220 to `if has_accounts and am is not None:`",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        }
+      ],
+      "priority": 14,
+      "effort": "medium",
+      "status": "selected"
+    },
     {
       "id": "product-ideation/miscellaneous",
       "theme": "miscellaneous",
@@ -11,327 +77,63 @@
       "title": "Miscellaneous (product-ideation)",
       "items": [
         {
-          "id": "product-ideation/visual-diff-before-sync",
+          "id": "product-ideation/harness-specific-override-merging",
           "dimension": "product-ideation",
-          "slug": "visual-diff-before-sync",
-          "title": "Pre-Sync Visual Diff",
-          "description": "Before any sync runs, show a color-coded side-by-side diff of what will change in each target file. Right now users sync blindly and only discover problems after the fact. This lets them catch translation mistakes, accidental overwrites, or dropped settings before they happen.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/harness-override-annotations",
-          "dimension": "product-ideation",
-          "slug": "harness-override-annotations",
-          "title": "Harness-Specific Rule Overrides",
-          "description": "Let users annotate rules with harness-specific behavior inline, e.g. `<!-- cursor-only -->` or `<!-- skip:aider -->`. Power users need different rules for different harnesses (e.g. stricter rules for Cursor which has real-time suggestions). Currently they have to maintain separate files.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/sync-profiles",
-          "dimension": "product-ideation",
-          "slug": "sync-profiles",
-          "title": "Named Sync Profiles",
-          "description": "Save and switch between named sync profiles (e.g. 'work-strict', 'personal-experimental', 'client-A'). Each profile specifies which targets, which sections, and any overrides. Solves the pain of developers who consult for multiple clients with different AI policies.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/migration-wizard",
-          "dimension": "product-ideation",
-          "slug": "migration-wizard",
-          "title": "Harness Config Import Wizard",
-          "description": "When a user adds a new harness that already has an existing config (e.g. an existing GEMINI.md), run a migration wizard that diffs the existing config against what HarnessSync would generate and asks the user which sections to keep, merge, or overwrite. Prevents destroying months of manual work.",
-          "effort": "large",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/portability-score",
-          "dimension": "product-ideation",
-          "slug": "portability-score",
-          "title": "Config Portability Score",
-          "description": "After reading source config, show a portability score (0-100) and per-section breakdown: which rules translate cleanly, which are approximate, and which are dropped entirely. Helps users understand what fidelity they're getting and motivates them to write more portable rules.",
+          "slug": "harness-specific-override-merging",
+          "title": "Per-Harness Config Overrides",
+          "description": "Users often need Cursor-specific rules or Gemini-specific MCP servers that shouldn't pollute the Claude Code source. Add override files at `.harness-sync/overrides/<target>.md` (and `<target>.json` for settings) that get merged during sync — common config plus per-harness tweaks. Create `src/override_manager.py` with `load_overrides(target)` and `merge_overrides(base_content, override_content)`. Modify `src/orchestrator.py` to call `merge_overrides` before each adapter writes. Add `--show-overrides` flag to `src/commands/sync_status.py`. Solves the pain of having to maintain divergent configs manually outside the sync system.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "product-ideation/drift-notifications",
+          "id": "product-ideation/sync-conflict-interactive-resolver",
           "dimension": "product-ideation",
-          "slug": "drift-notifications",
-          "title": "Drift Push Notifications",
-          "description": "When a target harness config has been manually edited since the last sync, surface a clear warning with the exact lines changed. Today users silently diverge and don't realize until something breaks. Pairs with a 'claim these changes' workflow to promote manual edits back into the source.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/promote-target-edits",
-          "dimension": "product-ideation",
-          "slug": "promote-target-edits",
-          "title": "Reverse-Promote Target Edits",
-          "description": "When drift is detected, offer a one-command workflow to review and promote changes made in a target harness back into CLAUDE.md. Solves the real-world case where a user fixes something in Cursor's rules directly and wants that fix reflected in the canonical source.",
-          "effort": "large",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/ci-sync-gate",
-          "dimension": "product-ideation",
-          "slug": "ci-sync-gate",
-          "title": "CI Sync Gate",
-          "description": "A GitHub Actions / CI mode that runs sync in dry-run and fails the build if targets would drift. Teams with multiple contributors can enforce 'all harness configs stay in sync with CLAUDE.md' as a merge requirement, preventing config drift from landing in main.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/mcp-server-compatibility-check",
-          "dimension": "product-ideation",
-          "slug": "mcp-server-compatibility-check",
-          "title": "MCP Server Compatibility Checker",
-          "description": "Before syncing MCP server configs, probe each target harness to verify it actually supports the MCP protocol version, transport type, and tool names being synced. Saves users from the confusing silent failure of syncing an MCP config that the target harness ignores.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/rule-usage-analytics",
-          "dimension": "product-ideation",
-          "slug": "rule-usage-analytics",
-          "title": "Rule Usage Analytics",
-          "description": "Track which rules/skills are referenced in conversations across harnesses (via log parsing or hooks) and surface 'dead rules' that haven't been triggered in 30+ days. Helps users prune bloated CLAUDE.md files that slow down every conversation context load.",
-          "effort": "large",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/selective-section-sync",
-          "dimension": "product-ideation",
-          "slug": "selective-section-sync",
-          "title": "Section-Level Sync Targeting",
-          "description": "Let users sync only specific sections to specific harnesses. E.g. 'sync MCP servers to all, but sync security rules only to Cursor and Codex, skip personal workflow rules for Gemini'. Today it's all-or-nothing per target, which forces users to either over-share or under-share.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/template-marketplace",
-          "dimension": "product-ideation",
-          "slug": "template-marketplace",
-          "title": "Rule Template Library",
-          "description": "A curated library of portable CLAUDE.md rule snippets for common use cases (Python strict mode, no-mock testing, commit message format, language-specific conventions). Users can browse, preview harness translations, and inject directly into their source config.",
-          "effort": "large",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/sync-changelog",
-          "dimension": "product-ideation",
-          "slug": "sync-changelog",
-          "title": "Sync Changelog Feed",
-          "description": "Maintain a human-readable changelog of every sync event: what changed, which targets were updated, what was skipped. Right now sync is a black box. A changelog lets users audit history, understand regressions, and answer 'wait, when did that rule change?'",
-          "effort": "small",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/harness-startup-time-benchmark",
-          "dimension": "product-ideation",
-          "slug": "harness-startup-time-benchmark",
-          "title": "Config Size Impact Analyzer",
-          "description": "Measure and report how your CLAUDE.md/rules size affects estimated context usage and startup cost in each target harness. Some harnesses load all rules into every prompt — a 50KB CLAUDE.md is expensive. This helps users right-size their configs and understand real performance tradeoffs.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/auto-changelog-generation",
-          "dimension": "product-ideation",
-          "slug": "auto-changelog-generation",
-          "title": "Auto-Generate Harness Changelogs",
-          "description": "When syncing, auto-append a '## Recent Changes' section to target configs summarizing what changed since last sync (git-powered). Harness users who don't look at the source can see 'added Python type checking rule, updated MCP timeout' without needing to read the diff.",
-          "effort": "small",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/conflict-resolution-ui",
-          "dimension": "product-ideation",
-          "slug": "conflict-resolution-ui",
+          "slug": "sync-conflict-interactive-resolver",
           "title": "Interactive Conflict Resolver",
-          "description": "When both source and target have changed since last sync, launch an interactive 3-way merge interface in the terminal (like git mergetool). Today HarnessSync either overwrites or refuses to sync — neither is right. Users need a way to reconcile conflicts without losing work.",
-          "effort": "large",
+          "description": "When a target file was manually edited since last sync, HarnessSync currently just warns and skips. Add a `/sync-resolve` command in `src/commands/sync_resolve.py` that loads the conflict list from `.harness-sync/state.json`, renders a side-by-side diff of each conflicting file (theirs vs. what sync would write), and prompts the user to choose: keep theirs, overwrite with sync, or open an editor to merge. Register it as `commands/sync-resolve.md`. This unblocks users who are stuck in a warn loop and can't safely re-sync after manually tweaking a target.",
+          "effort": "medium",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "product-ideation/slack-discord-sync-alerts",
+          "id": "product-ideation/sync-profiles-named-presets",
           "dimension": "product-ideation",
-          "slug": "slack-discord-sync-alerts",
-          "title": "Sync Failure Alerts via Webhook",
-          "description": "Post sync failures, drift warnings, and safety blocks to a Slack/Discord webhook. Teams running HarnessSync in CI or on shared machines need to know when syncs break without watching logs. A simple webhook integration surfaces these events where the team already lives.",
+          "slug": "sync-profiles-named-presets",
+          "title": "Named Sync Profiles",
+          "description": "Power users switch between work and personal projects with different targets and scopes. Add `src/profile_manager.py` with `save_profile(name, targets, scope_flags)` and `load_profile(name)` stored in `.harness-sync/profiles.json`. Add `--profile <name>` flag to `src/commands/sync.py` and a `/sync-preset` command rewrite in `src/commands/sync_preset.py` that supports `save`, `load`, `list`, and `delete` subcommands. Example: `sync --profile work` only syncs to cursor+vscode with work MCP servers. Solves the pain of re-specifying `--targets` and `--scope` flags on every sync in different project contexts.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "product-ideation/harness-native-preview",
+          "id": "product-ideation/rule-provenance-annotations",
           "dimension": "product-ideation",
-          "slug": "harness-native-preview",
-          "title": "Native Format Preview",
-          "description": "For any target harness, show exactly what the final translated file will look like before writing it. Not a diff — the full rendered output. Useful when onboarding a new harness or debugging why a rule doesn't seem to work in Cursor but works in Codex.",
+          "slug": "rule-provenance-annotations",
+          "title": "Rule Provenance in Synced Files",
+          "description": "When users open their Gemini or Cursor config they have no idea which rules came from HarnessSync vs. were written natively, making manual edits risky. During sync, wrap injected blocks with `# [harness-sync:start source=CLAUDE.md line=42]` / `# [harness-sync:end]` comment markers in the target files. Create `src/rule_annotator.py` with `annotate(content, source_path, line_range)` and `strip_annotations(content)` for clean re-sync. Use the existing `.harness-sync/rule-attribution.json` to persist the mapping. This makes conflict detection trivially precise and lets users safely add native rules between the markers.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-watch-daemon",
+          "dimension": "product-ideation",
+          "slug": "sync-watch-daemon",
+          "title": "File-Watch Auto-Sync Daemon",
+          "description": "The PostToolUse hook only fires when Claude Code itself makes edits, leaving users who edit CLAUDE.md or skills in their regular editor without auto-sync. Add `src/commands/sync_watch.py` implementing a polling loop (stat-based, stdlib only, 2s interval) that monitors `CLAUDE.md`, `.claude/skills/`, `.claude/commands/`, `.mcp.json`, and `settings.json` for mtime changes, then triggers `Orchestrator.sync_all()`. Register as `/sync-watch` in `commands/sync-watch.md` with `--interval` and `--targets` flags and a clean SIGINT handler that prints a final sync summary on exit. Solves the gap for developers who use vim/VSCode to edit Claude Code config directly.",
           "effort": "small",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/project-scoped-sync",
-          "dimension": "product-ideation",
-          "slug": "project-scoped-sync",
-          "title": "Per-Project Sync Exclusions",
-          "description": "Some projects have sensitive CLAUDE.md rules (client-specific, proprietary tooling) that shouldn't sync to all harnesses. Add per-project .harnesssync-ignore patterns so users can exclude specific rules/sections project-by-project without touching global config.",
-          "effort": "small",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/dependency-impact-analysis",
-          "dimension": "product-ideation",
-          "slug": "dependency-impact-analysis",
-          "title": "Change Impact Analysis",
-          "description": "Before writing a CLAUDE.md change, show which harnesses will be affected, which sections will need re-translation, and which features will be lost/gained. Helps users understand the downstream blast radius of a config change before committing it.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/harness-capability-gaps",
-          "dimension": "product-ideation",
-          "slug": "harness-capability-gaps",
-          "title": "Capability Gap Explainer",
-          "description": "For each harness, maintain a living 'what this harness can't do' page showing exactly which Claude Code features have no equivalent, which are approximated, and which are planned. Users constantly discover gaps by accident — surfacing this upfront sets accurate expectations.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/version-pinning",
-          "dimension": "product-ideation",
-          "slug": "version-pinning",
-          "title": "Target Config Version Pinning",
-          "description": "Let users pin specific harnesses to a specific commit/snapshot of the source config. Useful when a harness is on a client machine or production environment where you want stability while continuing to iterate on the source. Decouples sync from deploy.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/onboarding-setup-wizard",
-          "dimension": "product-ideation",
-          "slug": "onboarding-setup-wizard",
-          "title": "First-Run Setup Wizard",
-          "description": "A guided `/sync-setup` that detects which harnesses are installed, shows what HarnessSync found in the source, previews the initial sync for each target, and asks for confirmation. New users currently have to read docs to understand what will happen — the wizard makes it safe and clear.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/env-var-translator",
-          "dimension": "product-ideation",
-          "slug": "env-var-translator",
-          "title": "Environment Variable Translator",
-          "description": "Automatically translate Claude Code env var settings to the equivalent vars in each target harness (e.g. ANTHROPIC_API_KEY mapping, proxy settings, timeout vars). Today users manually re-set env vars in each harness. Cross-harness env parity is a common setup pain.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/scheduled-health-report",
-          "dimension": "product-ideation",
-          "slug": "scheduled-health-report",
-          "title": "Weekly Sync Health Digest",
-          "description": "A scheduled weekly report (via terminal output or file) summarizing: sync success rate, targets that drifted, rules that failed to translate, and new harness capabilities available. Helps users who set-it-and-forget-it catch creeping config debt before it becomes a problem.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/custom-adapter-scripts",
-          "dimension": "product-ideation",
-          "slug": "custom-adapter-scripts",
-          "title": "User-Defined Adapter Hooks",
-          "description": "Let power users drop a custom Python transform script per harness that runs after the built-in adapter. Handles the 20% of edge cases no generic adapter covers: company-specific naming conventions, proprietary harness forks, or post-processing rules. Extensibility without forking.",
-          "effort": "large",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/sync-dry-run-summary",
-          "dimension": "product-ideation",
-          "slug": "sync-dry-run-summary",
-          "title": "Dry-Run Summary Report",
-          "description": "Improve the dry-run output from a raw list of 'would write X' to a structured summary: N files would change, N files unchanged, N files skipped (why), N warnings, estimated context size impact per harness. Makes dry-run actually useful as a planning tool.",
-          "effort": "small",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/rule-conflict-detector",
-          "dimension": "product-ideation",
-          "slug": "rule-conflict-detector",
-          "title": "Inter-Rule Conflict Detector",
-          "description": "Scan rules for semantic conflicts (e.g. 'always use tabs' and 'always use spaces', or 'never use console.log' and 'log all API calls') and flag them before sync. Conflicting rules confuse harnesses and produce inconsistent behavior — catching them at the source is far better than debugging in a target.",
-          "effort": "large",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/harness-add-wizard",
-          "dimension": "product-ideation",
-          "slug": "harness-add-wizard",
-          "title": "New Harness Onboarding Flow",
-          "description": "A guided `/sync-add-harness` that walks through: detecting the harness install path, showing what will be created, running a trial sync to a temp directory for review, and only writing on explicit confirmation. Adding a new harness today is opaque — this makes it a 60-second safe operation.",
-          "effort": "medium",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         }
       ],
-      "priority": 13,
-      "effort": "large",
+      "priority": 13.6,
+      "effort": "medium",
       "status": "selected"
     }
   ],
@@ -377,6 +179,39 @@
         }
       ],
       "priority": 12.666666666666666,
+      "effort": "small",
+      "status": "pending"
+    },
+    {
+      "id": "quality/miscellaneous",
+      "theme": "miscellaneous",
+      "dimension": "quality",
+      "title": "Miscellaneous (quality)",
+      "items": [
+        {
+          "id": "quality/backup-timestamp-parsing-bug",
+          "dimension": "quality",
+          "slug": "backup-timestamp-parsing-bug",
+          "title": "Fix backup dir timestamp extraction",
+          "description": "src/backup_manager.py:454-455 — Backup directories are created with the naming format `{filename}_{YYYYMMDD}_{HHMMSS}[_{label}]` (see line 313). The list_snapshots method parses the timestamp via `parts = bdir.name.split('_', 2)` followed by `ts = '_'.join(parts[:2])`. This produces `'{filename}_{YYYYMMDD}'` instead of the actual `'YYYYMMDD_HHMMSS'` timestamp. Fix line 455: replace with `ts = f\"{parts[1]}_{parts[2].split('_')[0]}\" if len(parts) >= 3 else bdir.name` to correctly extract the date+time portion.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "quality/orchestrator-dead-tmp-dir-cleanup",
+          "dimension": "quality",
+          "slug": "orchestrator-dead-tmp-dir-cleanup",
+          "title": "Remove permanently-dead _tmp_dir cleanup code",
+          "description": "src/orchestrator.py:395 and 467-470 — `_tmp_dir = None` is set inside the `for target in targets:` loop on line 395 and never assigned any other value. The cleanup block at line 467 (`if _tmp_dir and _tmp_dir.exists(): ... _shutil.rmtree(_tmp_dir)`) is therefore permanently dead code — `_tmp_dir` is always None. This is a refactoring remnant from removed temp-directory logic. Remove line 395 and lines 467-470 to eliminate the dead branch and the confusing `_shutil` lazy-import it references.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        }
+      ],
+      "priority": 9,
       "effort": "small",
       "status": "pending"
     }
@@ -821,6 +656,72 @@
       "priority": 14,
       "effort": "small",
       "status": "completed"
+    },
+    {
+      "id": "stability/miscellaneous",
+      "theme": "miscellaneous",
+      "dimension": "stability",
+      "title": "Miscellaneous (stability)",
+      "items": [
+        {
+          "id": "stability/transform-engine-null-check",
+          "dimension": "stability",
+          "slug": "transform-engine-null-check",
+          "title": "Guard TransformEngine.load() None return",
+          "description": "src/orchestrator.py:374 — `_transform_engine.has_rules()` is called immediately after `TransformEngine.load(self.project_dir)` on line 373, but `.load()` can return None. When it does, the AttributeError is swallowed by the outer `except Exception` on line 378 and logged as 'Transform engine load failed' rather than passing silently. Fix: change line 374 from `if _transform_engine.has_rules():` to `if _transform_engine and _transform_engine.has_rules():`",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "stability/sync-preview-mcp-isinstance-guard",
+          "dimension": "stability",
+          "slug": "sync-preview-mcp-isinstance-guard",
+          "title": "Guard non-dict JSON in get_current_mcp",
+          "description": "src/sync_preview.py:165-166 — `get_current_mcp()` calls `data.get('mcpServers', {})` directly after `json.loads()` with no type check. If the file contains a JSON array, string, or null at the top level, this raises AttributeError. Fix: wrap line 166 with `if isinstance(data, dict):` so the function falls through to `return {}` for non-dict JSON. Same issue at line 181 in `get_current_settings()` where `data.items()` is called unconditionally — add the same isinstance guard there.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "stability/drift-heuristic-priority-order",
+          "dimension": "stability",
+          "slug": "drift-heuristic-priority-order",
+          "title": "Fix drift root-cause heuristic priority",
+          "description": "src/drift_detector.py:164-173 — The whitespace-only check (condition 1, line 165: `stored_content.strip() == current_content.strip()`) runs before the version-string check (condition 2, line 170). When a harness self-update changes only indentation or trailing newlines alongside version tokens, the file is misclassified as 'Whitespace normalization' with the wrong suggested action instead of 'Harness self-update'. Fix: swap conditions 1 and 2 so the version-string `elif` (line 170) becomes the first branch, and the whitespace check becomes `elif` after it.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "stability/codex-pending-rules-files-type-check",
+          "dimension": "stability",
+          "slug": "codex-pending-rules-files-type-check",
+          "title": "Validate _pending_rules_files type before use",
+          "description": "src/adapters/codex.py:141-143 — `effective_rules_files = rules_files or getattr(self, '_pending_rules_files', None)` retrieves a dynamically-set attribute without validating its type. `_write_subdirectory_agents_md` at line 148 declares `rules_files: list[dict]` and iterates it internally. If `_pending_rules_files` is set to a non-list truthy value, the downstream iteration crashes. Fix: change line 142 from `if effective_rules_files:` to `if effective_rules_files and isinstance(effective_rules_files, list):`",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "stability/sync-status-am-scope-guard",
+          "dimension": "stability",
+          "slug": "sync-status-am-scope-guard",
+          "title": "Scope-guard am in _show_default_status",
+          "description": "src/commands/sync_status.py:212-223 — `am` is assigned inside a try/except block on line 215, but `am.list_accounts()` is called on line 223 outside that block. If `AccountManager()` raises on line 215, the except swallows it and `has_accounts` stays False — but if `has_accounts` is somehow True from a prior stale state and the assignment failed, line 223 raises NameError. Fix: change line 220 from `if has_accounts:` to `if has_accounts and 'am' in dir():` or more robustly initialise `am = None` before the try-block on line 212 and change line 220 to `if has_accounts and am is not None:`",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        }
+      ],
+      "priority": 14,
+      "effort": "medium",
+      "status": "completed"
     }
   ],
   "failed_groups": [
@@ -1155,8 +1056,8 @@
       "status": "failed"
     }
   ],
-  "all_items_count": 31,
-  "groups_count": 2,
+  "all_items_count": 12,
+  "groups_count": 4,
   "history": [
     {
       "iteration": 1,
@@ -1780,6 +1681,13 @@
       "selected_count": 1,
       "completed_count": 3,
       "failed_count": 1
+    },
+    {
+      "iteration": 90,
+      "timestamp": "2026-03-23T17:47:53.144Z",
+      "selected_count": 2,
+      "completed_count": 2,
+      "failed_count": 0
     }
   ]
 }

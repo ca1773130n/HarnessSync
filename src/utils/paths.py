@@ -143,16 +143,21 @@ def cleanup_stale_symlinks(directory: Path) -> int:
     return cleaned
 
 
-def read_json_safe(file_path: Path, default=None) -> dict:
+_MISSING = object()
+
+
+def read_json_safe(file_path: Path, default=_MISSING) -> dict:
     """
     Read JSON file with comprehensive error handling.
     Returns default value (or {}) if file missing or corrupted.
+
+    Pass default=None to get None back on error instead of {}, which lets
+    callers distinguish a parse/IO error from a legitimately empty file.
     """
-    if default is None:
-        default = {}
+    _default = {} if default is _MISSING else default
 
     if not file_path.exists():
-        return default
+        return _default
 
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -160,11 +165,11 @@ def read_json_safe(file_path: Path, default=None) -> dict:
     except json.JSONDecodeError as e:
         # Log corruption details (no logger dependency here)
         print(f"Warning: JSON corrupted at line {e.lineno}, col {e.colno}: {e.msg}")
-        return default
+        return _default
     except (OSError, UnicodeDecodeError) as e:
         # File read failed
         print(f"Warning: Failed to read {file_path}: {e}")
-        return default
+        return _default
 
 
 def write_json_safe(file_path: Path, data: dict) -> None:

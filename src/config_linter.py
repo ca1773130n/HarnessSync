@@ -921,3 +921,68 @@ class ConfigLinter:
             "     them from non-CC harnesses, or rewrite in harness-agnostic language."
         )
         return "\n".join(lines)
+
+    # Pre-flight adapter-constraint checks (item: pre-flight mode)
+    # Maps adapter name -> list of (check_fn, warning_message) tuples
+    _PRE_FLIGHT_CHECKS: dict[str, list[tuple]] = {}
+
+    def pre_flight_check(self, source_data: dict) -> list[dict]:
+        """Validate source config against known adapter constraints before sync.
+
+        Returns a list of warning dicts with keys: adapter, message, remediation.
+        """
+        warnings: list[dict] = []
+        mcp_servers = source_data.get("mcp") or {}
+        settings = source_data.get("settings") or {}
+        env_vars = settings.get("env") or {}
+        permissions = settings.get("permissions") or {}
+
+        # Check MCP server transport compatibility
+        for server_name, server_cfg in mcp_servers.items():
+            if not isinstance(server_cfg, dict):
+                continue
+            transport = server_cfg.get("type") or server_cfg.get("transport", "stdio")
+            if transport == "stdio":
+                # Codex requires MCP servers to be reachable; stdio may not work in some envs
+                pass  # stdio is widely supported
+            elif transport in ("sse", "http"):
+                for adapter in ("aider", "neovim"):
+                    warnings.append({
+                        "adapter": adapter,
+                        "message": f"MCP server '{server_name}' uses '{transport}' transport which is not supported by {adapter}.",
+                        "remediation": f"Use stdio transport for '{server_name}' or exclude it from {adapter} with --skip mcp.",
+                    })
+
+        # Check env var names for secret-like patterns
+        _SECRET_PATTERNS = ("KEY", "SECRET", "TOKEN", "PASSWORD", "PASS", "CREDENTIAL", "PRIVATE")
+        for var_name in env_vars:
+            upper = var_name.upper()
+            if any(pat in upper for pat in _SECRET_PATTERNS):
+                warnings.append({
+                    "adapter": "all",
+                    "message": f"Env var '{var_name}' matches a secret-like pattern and may be blocked by secret detection.",
+                    "remediation": f"Remove '{var_name}' from env config or set allow_secrets=true if intentional.",
+                })
+
+        # Check deny permissions are not inadvertently included
+        denied = permissions.get("deny") or []
+        if denied:
+            for adapter in ("codex", "gemini", "cursor"):
+                warnings.append({
+                    "adapter": adapter,
+                    "message": f"{len(denied)} 'deny' permission(s) in source config — verify {adapter} honours Claude Code deny semantics.",
+                    "remediation": "Review deny permissions in settings.json; not all harnesses enforce Claude Code permission syntax.",
+                })
+                break  # one warning per adapter group is enough
+
+        # Check for agents used by harnesses that don't support them
+        agents = source_data.get("agents") or {}
+        if agents:
+            for adapter in ("opencode", "aider", "zed", "neovim", "cline", "continue"):
+                warnings.append({
+                    "adapter": adapter,
+                    "message": f"{len(agents)} agent(s) found but {adapter} does not support agent definitions — they will be dropped.",
+                    "remediation": "Use --skip agents when syncing to these targets, or accept that agents won't transfer.",
+                })
+
+        return warnings

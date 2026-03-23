@@ -77,6 +77,15 @@ def main() -> None:
     )
     parser.add_argument("--project-dir", type=str, default=None)
     parser.add_argument(
+        "--pre-flight",
+        action="store_true",
+        dest="pre_flight",
+        help=(
+            "Validate source config against known adapter constraints before sync. "
+            "Checks MCP transport compatibility, secret-like env vars, and unsupported features."
+        ),
+    )
+    parser.add_argument(
         "--dead",
         action="store_true",
         help=(
@@ -105,6 +114,7 @@ def main() -> None:
     check_skills: bool = getattr(args, "skills", False)
     check_dead: bool = getattr(args, "dead", False)
     dead_days: int = getattr(args, "dead_days", 30)
+    check_pre_flight: bool = getattr(args, "pre_flight", False)
     project_dir = Path(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
 
     if not ci_mode:
@@ -272,11 +282,37 @@ def main() -> None:
             elif dead_report and dead_report.is_clean() and not stale_items:
                 pass  # already printed clean message from dead_report.format()
 
+    # Pre-flight adapter constraint check (--pre-flight flag)
+    pre_flight_warnings: list[dict] = []
+    if check_pre_flight:
+        try:
+            pre_flight_warnings = linter.pre_flight_check(source_data)
+        except Exception as exc:
+            if not ci_mode:
+                print(f"\nPre-flight check error: {exc}", file=sys.stderr)
+
+        if output_json:
+            print(json.dumps({"pre_flight_warnings": pre_flight_warnings}, indent=2))
+        elif pre_flight_warnings:
+            print()
+            print(f"Pre-Flight Warnings ({len(pre_flight_warnings)}):")
+            print("-" * 50)
+            for w in pre_flight_warnings:
+                adapter_label = f"[{w['adapter']}]"
+                print(f"  {adapter_label:<12} {w['message']}")
+                print(f"               Remediation: {w['remediation']}")
+            print()
+        else:
+            if not ci_mode:
+                print("\nPre-flight: No adapter compatibility issues found.")
+
     if has_errors:
         sys.exit(2)
     if has_issues or skill_portability_issues:
         sys.exit(1)
     if dead_report and not dead_report.is_clean():
+        sys.exit(1)
+    if pre_flight_warnings:
         sys.exit(1)
     sys.exit(0)
 

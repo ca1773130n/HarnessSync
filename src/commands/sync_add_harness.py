@@ -103,6 +103,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Add the harness even if it appears to be already configured.",
     )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help=(
+            "After writing config, run a lightweight smoke test: probe the harness binary "
+            "with --version and verify config files are present at the expected paths."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -299,6 +307,23 @@ def run(argv: list[str] | None = None) -> int:
             f"     Warning: Could not verify {target} output. "
             "Check the target directory manually."
         )
+
+    # Smoke test (--validate flag)
+    if args.validate:
+        print(f"\n  [smoke test] Running harness validator for '{target}'...")
+        try:
+            from src.utils.harness_validator import HarnessValidator
+            validator = HarnessValidator()
+            vresult = validator.validate(target, project_dir)
+            if vresult["success"]:
+                ver = f"  (version: {vresult['version']})" if vresult.get("version") else ""
+                print(f"     ✓ {vresult['message']}{ver}")
+            else:
+                print(f"     ✗ {vresult['message']}")
+                for err in vresult.get("errors", []):
+                    print(f"       - {err}")
+        except Exception as exc:
+            print(f"     Warning: smoke test failed unexpectedly: {exc}", file=sys.stderr)
 
     print(f"\n  Done! '{target}' is now configured.\n")
     print(f"  From now on, /sync will automatically keep {target} in sync with Claude Code.")

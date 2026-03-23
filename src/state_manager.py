@@ -89,11 +89,11 @@ class StateManager:
         if not self._state_file_path.exists():
             return {"version": 2, "targets": {}, "accounts": {}}
 
-        # Read with error handling
-        state = read_json_safe(self._state_file_path, default={})
+        # Read with error handling; None means parse/IO error, {} means legitimately empty
+        state = read_json_safe(self._state_file_path, default=None)
 
-        # Check for corrupted state (read_json_safe returns {} on error)
-        if not state:
+        # Check for corrupted state (read_json_safe returns None on error)
+        if state is None:
             # Backup corrupted file
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_path = self.state_dir / f"state.json.bak.{timestamp}"
