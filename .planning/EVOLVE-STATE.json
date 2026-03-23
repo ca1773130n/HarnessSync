@@ -1,6 +1,6 @@
 {
-  "iteration": 90,
-  "timestamp": "2026-03-23T17:47:53.144Z",
+  "iteration": 91,
+  "timestamp": "2026-03-23T19:20:37.768Z",
   "milestone": "",
   "pick_pct": 50,
   "selected_groups": [
@@ -11,55 +11,55 @@
       "title": "Miscellaneous (stability)",
       "items": [
         {
-          "id": "stability/transform-engine-null-check",
+          "id": "stability/canary-success-check-wrong-heuristic",
           "dimension": "stability",
-          "slug": "transform-engine-null-check",
-          "title": "Guard TransformEngine.load() None return",
-          "description": "src/orchestrator.py:374 — `_transform_engine.has_rules()` is called immediately after `TransformEngine.load(self.project_dir)` on line 373, but `.load()` can return None. When it does, the AttributeError is swallowed by the outer `except Exception` on line 378 and logged as 'Transform engine load failed' rather than passing silently. Fix: change line 374 from `if _transform_engine.has_rules():` to `if _transform_engine and _transform_engine.has_rules():`",
+          "slug": "canary-success-check-wrong-heuristic",
+          "title": "Canary sync success check always returns True",
+          "description": "In src/orchestrator.py ~lines 722-723, `getattr(canary_result, 'success', canary_result is not None)` always returns `True` because `canary_result` is a plain dict (e.g. `{'rules': SyncResult(...)}`), so `getattr` always falls through to the default `canary_result is not None`, which is always `True` for any existing key. A failed canary sync never aborts the rollout. Fix: replace with `all(r.success for r in canary_result.values() if hasattr(r, 'success'))` to actually inspect the `SyncResult` objects inside the dict. Same pattern repeats at ~line 777 for rollout results.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "stability/sync-preview-mcp-isinstance-guard",
+          "id": "stability/section-filter-empty-intersection-inverts-logic",
           "dimension": "stability",
-          "slug": "sync-preview-mcp-isinstance-guard",
-          "title": "Guard non-dict JSON in get_current_mcp",
-          "description": "src/sync_preview.py:165-166 — `get_current_mcp()` calls `data.get('mcpServers', {})` directly after `json.loads()` with no type check. If the file contains a JSON array, string, or null at the top level, this raises AttributeError. Fix: wrap line 166 with `if isinstance(data, dict):` so the function falls through to `return {}` for non-dict JSON. Same issue at line 181 in `get_current_settings()` where `data.items()` is called unconditionally — add the same isinstance guard there.",
+          "slug": "section-filter-empty-intersection-inverts-logic",
+          "title": "Empty section-filter intersection enables all sections instead of none",
+          "description": "In src/orchestrator.py `_apply_section_filter` (~lines 602-606), when both a global `only_sections` and a per-target `_per_target_only` are set and their intersection is empty (e.g. global=`{'rules'}`, per-target=`{'mcp'}`), `effective_only` becomes `set()`, which is falsy. The `if effective_only:` guard is then `False`, so all sections are included rather than zero. Fix: after computing `effective_only = global_set & per_target_set`, add `if global_set and per_target_set and not effective_only: return {}` (or equivalent) to correctly block all sections when the intersection is empty.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "stability/drift-heuristic-priority-order",
+          "id": "stability/rollback-labeled-path-str-not-path",
           "dimension": "stability",
-          "slug": "drift-heuristic-priority-order",
-          "title": "Fix drift root-cause heuristic priority",
-          "description": "src/drift_detector.py:164-173 — The whitespace-only check (condition 1, line 165: `stored_content.strip() == current_content.strip()`) runs before the version-string check (condition 2, line 170). When a harness self-update changes only indentation or trailing newlines alongside version tokens, the file is misclassified as 'Whitespace normalization' with the wrong suggested action instead of 'Harness self-update'. Fix: swap conditions 1 and 2 so the version-string `elif` (line 170) becomes the first branch, and the whitespace check becomes `elif` after it.",
+          "slug": "rollback-labeled-path-str-not-path",
+          "title": "Rollback labeled-backup returns str where Path is expected, causing AttributeError",
+          "description": "In src/commands/sync_rollback.py `_resolve_backup` (~line 281), the labeled branch returns `labeled[0]['path']` raw from the snapshot metadata dict, which is a `str`. All other return branches return `Path` objects. The caller `_handle_rollback` (~line 221) immediately calls `.stat().st_mtime` on the return value, which raises `AttributeError: 'str' object has no attribute 'stat'`. Fix: change line 281 to `return Path(labeled[0]['path'])`.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "stability/codex-pending-rules-files-type-check",
+          "id": "stability/opencode-rule-content-keyerror",
           "dimension": "stability",
-          "slug": "codex-pending-rules-files-type-check",
-          "title": "Validate _pending_rules_files type before use",
-          "description": "src/adapters/codex.py:141-143 — `effective_rules_files = rules_files or getattr(self, '_pending_rules_files', None)` retrieves a dynamically-set attribute without validating its type. `_write_subdirectory_agents_md` at line 148 declares `rules_files: list[dict]` and iterates it internally. If `_pending_rules_files` is set to a non-list truthy value, the downstream iteration crashes. Fix: change line 142 from `if effective_rules_files:` to `if effective_rules_files and isinstance(effective_rules_files, list):`",
+          "slug": "opencode-rule-content-keyerror",
+          "title": "Unguarded KeyError on `rule['content']` crashes opencode multi-source sync",
+          "description": "In src/adapters/opencode.py `_sync_rules_multi_source` (~line 139), `rule_file.write_text(rule['content'], ...)` raises an unhandled `KeyError` if any rule dict is missing the `'content'` key (e.g. from a malformed source). The `'path'` key on line 127 is already accessed with `.get()`, but `'content'` is not. Fix: replace with `content = rule.get('content', '')`, and add `if not content.strip(): continue` with a stderr warning naming the skipped rule's path.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "stability/sync-status-am-scope-guard",
+          "id": "stability/state-manager-false-positive-corruption",
           "dimension": "stability",
-          "slug": "sync-status-am-scope-guard",
-          "title": "Scope-guard am in _show_default_status",
-          "description": "src/commands/sync_status.py:212-223 — `am` is assigned inside a try/except block on line 215, but `am.list_accounts()` is called on line 223 outside that block. If `AccountManager()` raises on line 215, the except swallows it and `has_accounts` stays False — but if `has_accounts` is somehow True from a prior stale state and the assignment failed, line 223 raises NameError. Fix: change line 220 from `if has_accounts:` to `if has_accounts and 'am' in dir():` or more robustly initialise `am = None` before the try-block on line 212 and change line 220 to `if has_accounts and am is not None:`",
+          "slug": "state-manager-false-positive-corruption",
+          "title": "StateManager treats legitimately empty state as corrupted on every startup",
+          "description": "In src/state_manager.py `_load` (~lines 95-105), `read_json_safe` returns `{}` both on parse error and when the file legitimately contains `{}` (freshly initialised state). The check `if not state:` triggers the backup-and-reset cycle for a valid empty state, overwriting it on every startup. Fix: change `read_json_safe` to return `None` on parse/IO error (instead of `{}`), then guard with `if state is None: # corrupted` vs `if state == {}: # fresh`.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
@@ -77,67 +77,65 @@
       "title": "Miscellaneous (product-ideation)",
       "items": [
         {
-          "id": "product-ideation/harness-specific-override-merging",
+          "id": "product-ideation/portability-coverage-matrix",
           "dimension": "product-ideation",
-          "slug": "harness-specific-override-merging",
-          "title": "Per-Harness Config Overrides",
-          "description": "Users often need Cursor-specific rules or Gemini-specific MCP servers that shouldn't pollute the Claude Code source. Add override files at `.harness-sync/overrides/<target>.md` (and `<target>.json` for settings) that get merged during sync — common config plus per-harness tweaks. Create `src/override_manager.py` with `load_overrides(target)` and `merge_overrides(base_content, override_content)`. Modify `src/orchestrator.py` to call `merge_overrides` before each adapter writes. Add `--show-overrides` flag to `src/commands/sync_status.py`. Solves the pain of having to maintain divergent configs manually outside the sync system.",
+          "slug": "portability-coverage-matrix",
+          "title": "Portability Coverage Matrix",
+          "description": "Add `/sync-coverage` command implemented in `src/commands/sync_coverage.py` that reads source config via `SourceReader` and checks each element (MCP servers, skills, rules, env vars, permissions) against every adapter's declared capability map in `src/adapters/`. Outputs a per-harness table: which config elements will sync cleanly, which will be approximated, and which will be dropped. Solves the pain of users discovering post-sync that half their MCP servers silently didn't transfer to Codex — they need to know portability before choosing a secondary harness.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/post-sync-drift-changelog",
+          "dimension": "product-ideation",
+          "slug": "post-sync-drift-changelog",
+          "title": "Post-Sync Drift Changelog",
+          "description": "After every sync run, append a structured entry to `.harness-sync/CHANGELOG.md` (created by `src/utils/changelog_writer.py`) recording: timestamp, which targets changed, which config elements were added/removed/modified, and which were skipped with reason. The `/sync-log` command in `src/commands/sync_log.py` already exists but likely reads raw logs — replace with structured changelog reads and add `--since` and `--target` filters. Solves the team use case where a dev wants to audit 'what changed in Gemini config in the last week' without grepping logs.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "product-ideation/sync-conflict-interactive-resolver",
+          "id": "product-ideation/pre-sync-compatibility-linter",
           "dimension": "product-ideation",
-          "slug": "sync-conflict-interactive-resolver",
+          "slug": "pre-sync-compatibility-linter",
+          "title": "Pre-Sync Compatibility Linter",
+          "description": "Extend the existing `/sync-lint` command (`src/commands/sync_lint.py`) to add a `--pre-flight` mode that validates Claude Code source config against known adapter constraints before any sync occurs. Each adapter in `src/adapters/` exposes a `lint_source(config)` method returning warnings (e.g. 'MCP server X uses stdio transport unsupported by Codex', 'env var FOO contains a pattern matching secrets'). Orchestrator calls these in `src/orchestrator.py` before write phase and surfaces warnings with remediation hints. Solves the frustration of discovering incompatibilities only after a destructive sync.",
+          "effort": "medium",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/conflict-resolve-interactive",
+          "dimension": "product-ideation",
+          "slug": "conflict-resolve-interactive",
           "title": "Interactive Conflict Resolver",
-          "description": "When a target file was manually edited since last sync, HarnessSync currently just warns and skips. Add a `/sync-resolve` command in `src/commands/sync_resolve.py` that loads the conflict list from `.harness-sync/state.json`, renders a side-by-side diff of each conflicting file (theirs vs. what sync would write), and prompts the user to choose: keep theirs, overwrite with sync, or open an editor to merge. Register it as `commands/sync-resolve.md`. This unblocks users who are stuck in a warn loop and can't safely re-sync after manually tweaking a target.",
+          "description": "When `/sync-status` detects drift (target was manually edited since last sync), add a `--resolve` flag to the `/sync` command (`src/commands/sync.py`) that presents a per-file 3-way view: (1) what HarnessSync last wrote, (2) what's in the target now, (3) what the new sync would produce. User picks 'overwrite', 'skip', or 'merge' per file. State stored in `src/utils/conflict_state.py`. Solves the current binary choice between 'sync and lose manual edits' vs 'skip and stay out of date' — critical for users who tweak Gemini config locally for harness-specific experiments.",
           "effort": "medium",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "product-ideation/sync-profiles-named-presets",
+          "id": "product-ideation/harness-smoke-test",
           "dimension": "product-ideation",
-          "slug": "sync-profiles-named-presets",
-          "title": "Named Sync Profiles",
-          "description": "Power users switch between work and personal projects with different targets and scopes. Add `src/profile_manager.py` with `save_profile(name, targets, scope_flags)` and `load_profile(name)` stored in `.harness-sync/profiles.json`. Add `--profile <name>` flag to `src/commands/sync.py` and a `/sync-preset` command rewrite in `src/commands/sync_preset.py` that supports `save`, `load`, `list`, and `delete` subcommands. Example: `sync --profile work` only syncs to cursor+vscode with work MCP servers. Solves the pain of re-specifying `--targets` and `--scope` flags on every sync in different project contexts.",
-          "effort": "small",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/rule-provenance-annotations",
-          "dimension": "product-ideation",
-          "slug": "rule-provenance-annotations",
-          "title": "Rule Provenance in Synced Files",
-          "description": "When users open their Gemini or Cursor config they have no idea which rules came from HarnessSync vs. were written natively, making manual edits risky. During sync, wrap injected blocks with `# [harness-sync:start source=CLAUDE.md line=42]` / `# [harness-sync:end]` comment markers in the target files. Create `src/rule_annotator.py` with `annotate(content, source_path, line_range)` and `strip_annotations(content)` for clean re-sync. Use the existing `.harness-sync/rule-attribution.json` to persist the mapping. This makes conflict detection trivially precise and lets users safely add native rules between the markers.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/sync-watch-daemon",
-          "dimension": "product-ideation",
-          "slug": "sync-watch-daemon",
-          "title": "File-Watch Auto-Sync Daemon",
-          "description": "The PostToolUse hook only fires when Claude Code itself makes edits, leaving users who edit CLAUDE.md or skills in their regular editor without auto-sync. Add `src/commands/sync_watch.py` implementing a polling loop (stat-based, stdlib only, 2s interval) that monitors `CLAUDE.md`, `.claude/skills/`, `.claude/commands/`, `.mcp.json`, and `settings.json` for mtime changes, then triggers `Orchestrator.sync_all()`. Register as `/sync-watch` in `commands/sync-watch.md` with `--interval` and `--targets` flags and a clean SIGINT handler that prints a final sync summary on exit. Solves the gap for developers who use vim/VSCode to edit Claude Code config directly.",
+          "slug": "harness-smoke-test",
+          "title": "Harness Smoke Test After Add",
+          "description": "Extend `/sync-add-harness` (`src/commands/sync_add_harness.py`) with a `--validate` step that, after writing the initial config, runs a lightweight smoke test: spawns the target harness binary with `--version` and `--help` flags, parses its output to confirm it loaded the config path, then reports 'harness read config successfully' or specific errors. Add `src/utils/harness_validator.py` with per-harness probe commands. Solves the onboarding drop-off where users add a harness, sync completes with no errors, but the harness silently ignores the config because the path was wrong.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         }
       ],
-      "priority": 13.6,
+      "priority": 13.4,
       "effort": "medium",
       "status": "selected"
-    }
-  ],
-  "remaining_groups": [
+    },
     {
       "id": "product-ideation/mcp-tool-bindings",
       "theme": "mcp-tool-bindings",
@@ -180,6 +178,30 @@
       ],
       "priority": 12.666666666666666,
       "effort": "small",
+      "status": "selected"
+    }
+  ],
+  "remaining_groups": [
+    {
+      "id": "productivity/miscellaneous",
+      "theme": "miscellaneous",
+      "dimension": "productivity",
+      "title": "Miscellaneous (productivity)",
+      "items": [
+        {
+          "id": "productivity/sync-status-double-discover-all",
+          "dimension": "productivity",
+          "slug": "sync-status-double-discover-all",
+          "title": "sync_status calls `discover_all()` twice, doubling file-read work",
+          "description": "In src/commands/sync_status.py `_show_default_status` (~lines 319 and 331), `reader.discover_all()` is called twice in the same function: once assigned to `_source_data` and once to `source_data`. Both calls run the full config-discovery pipeline (reading and hashing all CLAUDE.md, settings, skills, agents, commands). Fix: remove the second call at ~line 331 and use `_source_data` directly, saving one full traversal on every `sync-status` invocation.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        }
+      ],
+      "priority": 11,
+      "effort": "small",
       "status": "pending"
     },
     {
@@ -209,10 +231,32 @@
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
+        },
+        {
+          "id": "quality/diff-preview-flag-triggers-actual-restore",
+          "dimension": "quality",
+          "slug": "diff-preview-flag-triggers-actual-restore",
+          "title": "`--diff-preview` alone triggers actual rollback, not preview",
+          "description": "In src/commands/sync_rollback.py `_handle_rollback` (~lines 231-238), the condition `elif args.diff_preview and not args.dry_run:` prints 'Proceeding with rollback...' and falls through to execute the restore. The `--diff-preview` flag implies a preview-only operation but actually performs the restore unless `--dry-run` is also passed. Fix: change the branch to print the diff and `return` without restoring, requiring the user to re-run without `--diff-preview` to confirm. Update the argparse help text accordingly.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "quality/opencode-agent-encoding-silent-corruption",
+          "dimension": "quality",
+          "slug": "opencode-agent-encoding-silent-corruption",
+          "title": "Agent file read with `errors='replace'` silently corrupts non-UTF-8 content",
+          "description": "In src/adapters/opencode.py `sync_agents` (~line 283), `agent_path.read_text(errors='replace')` silently replaces non-UTF-8 bytes with the Unicode replacement character (U+FFFD) before writing to `opencode.json`. This corrupts agent instructions without any error or warning. Fix: remove `errors='replace'` so `UnicodeDecodeError` propagates, then add `except UnicodeDecodeError as e: result.failed += 1; log_warning(f'Skipping {agent_path}: encoding error: {e}'); continue` in the surrounding loop.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
         }
       ],
       "priority": 9,
-      "effort": "small",
+      "effort": "medium",
       "status": "pending"
     }
   ],
@@ -1056,8 +1100,8 @@
       "status": "failed"
     }
   ],
-  "all_items_count": 12,
-  "groups_count": 4,
+  "all_items_count": 13,
+  "groups_count": 5,
   "history": [
     {
       "iteration": 1,
@@ -1686,6 +1730,13 @@
       "iteration": 90,
       "timestamp": "2026-03-23T17:47:53.144Z",
       "selected_count": 2,
+      "completed_count": 2,
+      "failed_count": 0
+    },
+    {
+      "iteration": 91,
+      "timestamp": "2026-03-23T19:20:37.768Z",
+      "selected_count": 3,
       "completed_count": 2,
       "failed_count": 0
     }

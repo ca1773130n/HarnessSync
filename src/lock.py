@@ -72,6 +72,8 @@ def should_debounce(state_manager, debounce_seconds: float = DEBOUNCE_SECONDS) -
     Returns:
         True if last sync was < debounce_seconds ago (skip this sync)
     """
+    if state_manager is None:
+        return False
     last_sync = state_manager.last_sync
     if not last_sync:
         return False

@@ -244,6 +244,49 @@ def format_matrix(show_notes: bool = False, gaps_only: bool = False) -> str:
     return "\n".join(lines)
 
 
+def _watch_matrix(show_notes: bool, gaps_only: bool, interval: float = 1.0) -> None:
+    """Poll config files and re-render the matrix when they change."""
+    import time
+    from pathlib import Path
+
+    project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
+    watch_paths = [
+        project_dir / "CLAUDE.md",
+        project_dir / "settings.json",
+        project_dir / ".claude" / "settings.json",
+        project_dir / ".mcp.json",
+    ]
+
+    def _mtimes() -> dict:
+        result = {}
+        for p in watch_paths:
+            try:
+                result[str(p)] = os.stat(p).st_mtime
+            except OSError:
+                result[str(p)] = None
+        return result
+
+    last_mtimes = _mtimes()
+
+    def _render() -> None:
+        sys.stdout.write("\033[2J\033[H")  # clear screen, cursor home
+        sys.stdout.flush()
+        print(format_matrix(show_notes=show_notes, gaps_only=gaps_only))
+        print("\n[watch mode] Monitoring config files for changes. Ctrl-C to exit.")
+
+    _render()
+
+    try:
+        while True:
+            time.sleep(interval)
+            current = _mtimes()
+            if current != last_mtimes:
+                last_mtimes = current
+                _render()
+    except KeyboardInterrupt:
+        print("\n[watch mode] Stopped.")
+
+
 def main() -> None:
     """Entry point for /sync-matrix command.
 
@@ -255,10 +298,12 @@ def main() -> None:
                             default config-section matrix
         --mcp-section SEC   Which MCP sub-table to show: transport, capabilities,
                             features, or all (default: all)
+        --watch             Poll config files and re-render matrix on changes
     """
     show_notes = "--notes" in sys.argv or "-n" in sys.argv
     show_mcp_tools = "--mcp-tools" in sys.argv
     gaps_only = "--gaps-only" in sys.argv
+    watch_mode = "--watch" in sys.argv
 
     if show_mcp_tools:
         # Determine which MCP sub-section to show
@@ -268,6 +313,8 @@ def main() -> None:
             if idx + 1 < len(sys.argv):
                 mcp_section = sys.argv[idx + 1]
         print(format_mcp_tool_matrix(section=mcp_section))
+    elif watch_mode:
+        _watch_matrix(show_notes=show_notes, gaps_only=gaps_only)
     else:
         print(format_matrix(show_notes=show_notes, gaps_only=gaps_only))
 

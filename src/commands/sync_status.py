@@ -59,7 +59,7 @@ def main():
     parser.add_argument("--json", action="store_true", dest="json_output",
                         help="Output status as machine-readable JSON (implies CI-style output format).")
     parser.add_argument("--show-overrides", action="store_true", dest="show_overrides",
-                        help="Show per-harness config overrides from .harness-sync/overrides/")
+                        help="Show per-harness config overrides from .claude/overrides/ or .harness-sync/overrides/")
 
     try:
         args = parser.parse_args(tokens)

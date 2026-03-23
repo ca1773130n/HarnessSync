@@ -251,6 +251,10 @@ class CloudBackupExporter:
                 if entry == "harnesssync-manifest.json":
                     continue
                 dest = project_dir / entry.replace("home", "~")
+                try:
+                    dest.resolve().relative_to(project_dir.resolve())
+                except ValueError:
+                    continue
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_bytes(zf.read(entry))
                 restored.append(entry)

@@ -330,7 +330,9 @@ class AdapterBase(ABC):
                 else:
                     return managed
             else:
-                return f"{existing.rstrip()}\n\n{managed}"
+                # End marker missing — strip orphaned start marker to prevent duplication
+                before = existing[:start_idx].rstrip()
+                return f"{before}\n\n{managed}" if before else managed
         else:
             return f"{existing.rstrip()}\n\n{managed}"
 
@@ -541,6 +543,8 @@ class AdapterBase(ABC):
                 mcp_json = install_path / ".mcp.json"
                 if mcp_json.exists():
                     mcp_data = read_json_safe(mcp_json)
+                    if not mcp_data:
+                        return decomposed
                     servers = mcp_data.get("mcpServers", mcp_data)
                     if isinstance(servers, dict) and servers:
                         self.sync_mcp(servers)

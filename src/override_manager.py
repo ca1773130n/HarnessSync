@@ -20,19 +20,35 @@ from pathlib import Path
 
 
 _OVERRIDE_DIR = ".harness-sync/overrides"
+# Secondary lookup: .claude/overrides/<target>.md (Claude Code conventional path)
+_OVERRIDE_DIR_CLAUDE = ".claude/overrides"
 
 
 class OverrideManager:
-    """Loads and applies per-harness config overrides."""
+    """Loads and applies per-harness config overrides.
+
+    Searches two locations in priority order:
+      1. .harness-sync/overrides/<target>.{md,json}  (HarnessSync-native)
+      2. .claude/overrides/<target>.{md,json}          (Claude Code conventional)
+    """
 
     def __init__(self, project_dir: Path):
         self.overrides_dir = project_dir / _OVERRIDE_DIR
+        self._claude_overrides_dir = project_dir / _OVERRIDE_DIR_CLAUDE
+
+    def _locate(self, target: str, suffix: str) -> Path | None:
+        """Return the first existing override file for target+suffix, or None."""
+        for base in (self.overrides_dir, self._claude_overrides_dir):
+            candidate = base / f"{target}{suffix}"
+            if candidate.exists():
+                return candidate
+        return None
 
     def has_overrides(self, target: str) -> bool:
         """Return True if any override file exists for target."""
         return (
-            (self.overrides_dir / f"{target}.md").exists()
-            or (self.overrides_dir / f"{target}.json").exists()
+            self._locate(target, ".md") is not None
+            or self._locate(target, ".json") is not None
         )
 
     def load_overrides(self, target: str) -> dict:
@@ -43,16 +59,16 @@ class OverrideManager:
             'json' -> dict (parsed JSON object)
         """
         result: dict = {}
-        md_path = self.overrides_dir / f"{target}.md"
-        json_path = self.overrides_dir / f"{target}.json"
+        md_path = self._locate(target, ".md")
+        json_path = self._locate(target, ".json")
 
-        if md_path.exists():
+        if md_path is not None:
             try:
                 result["md"] = md_path.read_text(encoding="utf-8")
             except OSError:
                 pass
 
-        if json_path.exists():
+        if json_path is not None:
             try:
                 data = json.loads(json_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
@@ -100,20 +116,25 @@ class OverrideManager:
         return base_content
 
     def list_targets_with_overrides(self) -> list[str]:
-        """Return sorted list of targets that have override files."""
-        if not self.overrides_dir.exists():
-            return []
+        """Return sorted list of targets that have override files in either override directory."""
         targets: set[str] = set()
-        for path in self.overrides_dir.iterdir():
-            if path.suffix in (".md", ".json"):
-                targets.add(path.stem)
+        for base in (self.overrides_dir, self._claude_overrides_dir):
+            if not base.exists():
+                continue
+            for path in base.iterdir():
+                if path.suffix in (".md", ".json"):
+                    targets.add(path.stem)
         return sorted(targets)
 
     def show_overrides_summary(self) -> str:
         """Return a human-readable summary of all configured overrides."""
         targets = self.list_targets_with_overrides()
         if not targets:
-            return "No per-harness overrides configured.\nAdd files to .harness-sync/overrides/<target>.md or .json to get started."
+            return (
+                "No per-harness overrides configured.\n"
+                "Add files to .claude/overrides/<target>.md or "
+                ".harness-sync/overrides/<target>.md to get started."
+            )
 
         lines = ["Per-Harness Overrides", "=" * 40]
         for target in targets:

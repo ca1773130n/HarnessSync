@@ -5794,3 +5794,48 @@ _2026-03-23T17:47:53.143Z_
 - The override_manager integration point in the orchestrator targets the rules (str) and mcp (dict) keys in target_data; other sections like skills and agents are not yet overrideable at the dict level and may benefit from similar treatment
 
 ---
+## Iteration 91
+_2026-03-23T19:20:37.766Z_
+
+### Items Attempted
+
+- **Canary sync success check always returns True** — pass
+- **Empty section-filter intersection enables all sections instead of none** — pass
+- **Rollback labeled-backup returns str where Path is expected, causing AttributeError** — pass
+- **Unguarded KeyError on `rule['content']` crashes opencode multi-source sync** — pass
+- **StateManager treats legitimately empty state as corrupted on every startup** — pass
+- **Portability Coverage Matrix** — pass
+- **Post-Sync Drift Changelog** — pass
+- **Pre-Sync Compatibility Linter** — pass
+- **Interactive Conflict Resolver** — pass
+- **Harness Smoke Test After Add** — pass
+- **MCP Tool Stub Generation for Non-MCP Harnesses** — skip
+- **MCP Tool Shim Generator** — skip
+- **MCP Tool Allowlist Bridge** — skip
+
+### Decisions Made
+
+- Used isinstance(result, dict) guard for canary/rollout checks rather than replacing getattr entirely — preserves backward compatibility if sync_all() return shape changes to SyncResult objects in future
+- Tracked prev_only before each intersection to detect empty result caused by two non-empty sets — this is more precise than a post-loop check and handles both _per_target_only and _cli_per_target_only independently
+- Used a sentinel object (_MISSING) in read_json_safe instead of None to allow callers to pass default=None and get None back on error, while keeping the existing {} default for all other callers
+- Added pre_flight_check as a method on ConfigLinter (not a separate class) to keep the linting concern unified and avoid creating an unnecessary abstraction
+- sync_coverage.py uses a static _CAPABILITIES dict per harness rather than introspecting adapters at runtime — faster, predictable, and adapters don't currently expose a capability map interface
+- HarnessValidator.validate() returns a structured dict rather than raising exceptions so the caller (sync_add_harness.py) can display partial results even on partial failures
+
+### Patterns Discovered
+
+- getattr(obj, 'attr', fallback) is misused in several places as a duck-typing guard that always falls through to the default — should be replaced with isinstance checks when the type is known
+- read_json_safe returning {} on both 'file empty' and 'parse error' is a recurring footgun — the sentinel pattern fixes it at the source without breaking existing callers
+- The section-filter logic uses a falsy-empty-set to mean 'no filter', which clashes with 'filter that matches nothing' — a deliberate None vs set() distinction would be cleaner long-term
+- sync_add_harness.py already had a 5-step wizard structure with numbered steps, making it easy to insert the --validate step without restructuring the function
+- Several adapters write config but never verify it was read — the HarnessValidator pattern could be generalised into a post-sync health check for all targets
+
+### Takeaways
+
+- The orchestrator's sync_all() returns dict[target -> dict[section -> SyncResult]], not dict[target -> SyncResult] — this is non-obvious and caused the canary check bug; a typed return alias would prevent this class of error
+- ConfigLinter is the right place to centralise adapter constraint knowledge; it already has skill portability checks and the pre_flight pattern fits the same mental model
+- The deepeval test suite has a hard Python 3.9 incompatibility (uses | union syntax) and can't be collected without -p no:deepeval; this is a pre-existing issue unrelated to these changes
+- Adding --validate to sync_add_harness.py required no changes to the main sync path — the step is fully opt-in and the harness_validator is isolated in src/utils/
+- sync_coverage.py fills a real gap: users currently have no way to know before syncing which config elements will be dropped for a given harness
+
+---

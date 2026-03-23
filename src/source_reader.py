@@ -25,8 +25,12 @@ from src.config_discovery import SourceReader
 from src.harness_annotation import filter_rules_for_harness
 from src.config_vars import substitute_config_vars
 
+# Per-harness override reader (checks .claude/overrides/ and .harness-sync/overrides/)
+from src.override_manager import OverrideManager as OverrideReader
+
 __all__ = [
     "SourceReader",
+    "OverrideReader",
     "filter_rules_for_harness",
     "substitute_config_vars",
 ]

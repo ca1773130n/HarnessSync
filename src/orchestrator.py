@@ -245,7 +245,10 @@ class SyncOrchestrator:
         # Create SourceReader with account-specific cc_home if provided
         reader = SourceReader(scope=self.scope, project_dir=self.project_dir,
                               cc_home=self.cc_home)
-        source_data = reader.discover_all()
+        try:
+            source_data = reader.discover_all()
+        except Exception as e:
+            raise SyncError(f"Source discovery failed: {e}") from e
 
         # Create pre-sync pipeline
         pre = PreSyncPipeline(
