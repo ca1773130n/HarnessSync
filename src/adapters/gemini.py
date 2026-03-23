@@ -7,8 +7,8 @@ Implements adapter for Gemini CLI, syncing Claude Code configuration to Gemini f
 - Skills → Native .gemini/skills/<name>/SKILL.md files
 - Agents → Native .gemini/agents/<name>.md files
 - Commands → Native .gemini/commands/<name>.toml files
-- MCP servers → settings.json mcpServers format (with trust/includeTools/excludeTools/cwd)
-- Settings → settings.json tools.exclude/tools.allowed (never auto-enable yolo)
+- MCP servers → settings.json mcpServers format (with type/trust/timeout/description/includeTools/excludeTools/cwd)
+- Settings → settings.json security.disableYoloMode/disableAlwaysAllow, context.fileFiltering.respectGitIgnore (never auto-enable yolo)
 
 The adapter writes native Gemini CLI discovery files for skills, agents, and commands
 instead of inlining content into GEMINI.md. Only rules remain in GEMINI.md.
@@ -447,9 +447,9 @@ class GeminiAdapter(AdapterBase):
             else:
                 user_servers[server_name] = config
 
-        # Write user-scope servers
+        # Write user-scope servers to home directory
         if user_servers:
-            user_path = self.project_dir / ".gemini" / SETTINGS_JSON
+            user_path = Path.home() / ".gemini" / SETTINGS_JSON
             user_result = self._write_mcp_to_settings(user_servers, user_path)
             result = result.merge(user_result)
 
@@ -488,30 +488,46 @@ class GeminiAdapter(AdapterBase):
 
                 # Stdio transport (has "command" key)
                 if 'command' in config:
+                    server_config['type'] = config.get('type', 'stdio')
                     server_config['command'] = config['command']
                     if 'args' in config:
                         server_config['args'] = config.get('args', [])
                     if 'env' in config:
                         server_config['env'] = config['env']
-                    # Note: timeout is intentionally NOT passed through (not supported by Gemini)
+                    if 'timeout' in config:
+                        server_config['timeout'] = config['timeout']
 
                 # URL transport (has "url" key)
                 elif 'url' in config:
                     url = config['url']
-                    # Detect SSE vs HTTP based on URL
-                    if url.endswith('/sse') or 'sse' in url.lower():
+                    # Determine transport type from explicit config or URL heuristic
+                    explicit_type = config.get('type', '')
+                    if explicit_type in ('sse', 'http'):
+                        server_config['type'] = explicit_type
+                    elif url.endswith('/sse') or 'sse' in url.lower():
+                        server_config['type'] = 'sse'
+                    else:
+                        server_config['type'] = 'http'
+
+                    # Use url for SSE, httpUrl for HTTP
+                    if server_config['type'] == 'sse':
                         server_config['url'] = url
                     else:
-                        # Use httpUrl for plain HTTP/HTTPS
                         server_config['httpUrl'] = url
 
                     # Include headers if present
                     if 'headers' in config:
                         server_config['headers'] = config['headers']
+                    if 'timeout' in config:
+                        server_config['timeout'] = config['timeout']
 
                 else:
                     # Skip servers without command or url
                     continue
+
+                # Pass through description if present
+                if 'description' in config:
+                    server_config['description'] = config['description']
 
                 # Map essential -> trust: true (closest semantic match)
                 if config.get('essential') and 'trust' not in config:
@@ -531,7 +547,6 @@ class GeminiAdapter(AdapterBase):
                         server_config[field] = config[field]
 
                 # Drop fields not supported by Gemini:
-                # - timeout: not supported
                 # - oauth_scopes: not supported
                 # - elicitation: not supported
                 # - enabled_tools / disabled_tools: dropped (Gemini uses native includeTools/excludeTools if provided directly)
@@ -606,14 +621,14 @@ class GeminiAdapter(AdapterBase):
                 existing_settings['policyPaths'] = policy_paths
 
                 # Disable always-allow and yolo when deny rules are present
-                existing_settings['disableAlwaysAllow'] = True
-                existing_settings['disableYoloMode'] = True
+                security = existing_settings.get('security', {})
+                if not isinstance(security, dict):
+                    security = {}
+                security['disableAlwaysAllow'] = True
+                security['disableYoloMode'] = True
+                existing_settings['security'] = security
 
-            elif allow_list:
-                # Allow list only if no deny list
-                tools_config['allowed'] = allow_list
-
-            # Add tools config to settings if any rules defined
+            # Add tools config to settings if any rules defined (exclude only)
             if tools_config:
                 existing_settings['tools'] = tools_config
 
@@ -624,14 +639,18 @@ class GeminiAdapter(AdapterBase):
                     "yolo mode: not enabled (conservative default, Claude Code had auto-approval)"
                 )
 
-            # Map respectGitignore -> fileFiltering.respectGitignore
+            # Map respectGitignore -> context.fileFiltering.respectGitIgnore
             respect_gitignore = settings.get('respectGitignore')
             if isinstance(respect_gitignore, bool):
-                file_filtering = existing_settings.get('fileFiltering', {})
+                context = existing_settings.get('context', {})
+                if not isinstance(context, dict):
+                    context = {}
+                file_filtering = context.get('fileFiltering', {})
                 if not isinstance(file_filtering, dict):
                     file_filtering = {}
-                file_filtering['respectGitignore'] = respect_gitignore
-                existing_settings['fileFiltering'] = file_filtering
+                file_filtering['respectGitIgnore'] = respect_gitignore
+                context['fileFiltering'] = file_filtering
+                existing_settings['context'] = context
 
             # Write atomically
             write_json_atomic(self.settings_path, existing_settings)

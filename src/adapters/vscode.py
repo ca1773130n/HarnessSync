@@ -7,8 +7,8 @@ Syncs Claude Code configuration to VS Code AI extension formats:
                     → .codeium/instructions.md (Codeium/Windsurf extension)
 - Skills → Appended to copilot-instructions.md as reference sections
 - Agents → Appended to copilot-instructions.md as assistant personas
-- Commands → Not supported (no slash command model in Copilot)
-- MCP servers → Not supported (no MCP in VS Code AI extensions)
+- Commands → .github/prompts/<name>.prompt.md (Copilot reusable prompts)
+- MCP servers → .vscode/mcp.json (GitHub Copilot MCP support)
 - Settings → .github/copilot-instructions.md preference section
 
 Targets VS Code users who rely on GitHub Copilot or Codeium extensions
@@ -18,14 +18,16 @@ Copilot instructions reference:
   https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot
 """
 
+import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .base import AdapterBase
 from .registry import AdapterRegistry
 from .result import SyncResult
-from src.utils.paths import ensure_dir
+from src.utils.paths import ensure_dir, write_json_atomic
 
 
 HARNESSSYNC_MARKER = "<!-- Managed by HarnessSync -->"
@@ -36,6 +38,12 @@ COPILOT_INSTRUCTIONS = ".github/copilot-instructions.md"
 
 # Codeium instructions file
 CODEIUM_INSTRUCTIONS = ".codeium/instructions.md"
+
+# Copilot reusable prompt templates directory
+PROMPTS_DIR = ".github/prompts"
+
+# VS Code MCP configuration
+VSCODE_MCP_JSON = ".vscode/mcp.json"
 
 
 def _build_managed_block(content: str, timestamp: str) -> str:
@@ -218,35 +226,93 @@ class VSCodeAdapter(AdapterBase):
             return SyncResult(failed=1, failed_files=[f"agents section: {e}"])
 
     def sync_commands(self, commands: dict[str, Path]) -> SyncResult:
-        """Commands not supported in VS Code AI extensions.
+        """Sync commands to .github/prompts/<name>.prompt.md files.
 
-        GitHub Copilot and Codeium don't have a slash command model
-        that accepts arbitrary user-defined commands. Skip silently.
+        GitHub Copilot supports reusable prompt templates that are
+        invokable via `/` slash commands. Each command is written as
+        a `.prompt.md` file in the `.github/prompts/` directory.
+
+        Args:
+            commands: Dict mapping command name to command .md file path.
 
         Returns:
-            SyncResult with skipped count equal to command count.
+            SyncResult with synced/failed counts.
         """
-        count = len(commands)
-        return SyncResult(
-            skipped=count if count > 0 else 1,
-            skipped_files=[f"{name}: no command model in VS Code extensions" for name in commands]
-            or ["commands: no command model in VS Code extensions"],
-        )
+        if not commands:
+            return SyncResult(skipped=1, skipped_files=["commands: none to sync"])
+
+        prompts_dir = self.project_dir / PROMPTS_DIR
+        ensure_dir(prompts_dir)
+
+        synced = 0
+        failed = 0
+        failed_files: list[str] = []
+        synced_files: list[str] = []
+
+        for name, cmd_path in commands.items():
+            cmd_md = cmd_path if cmd_path.is_file() else cmd_path / f"{name}.md"
+            if not cmd_md.is_file():
+                failed += 1
+                failed_files.append(f"{name}: command file not found at {cmd_md}")
+                continue
+
+            try:
+                content = cmd_md.read_text(encoding="utf-8")
+                adapted = self.adapt_command_content(content)
+                out_path = prompts_dir / f"{name}.prompt.md"
+                out_path.write_text(adapted, encoding="utf-8")
+                synced += 1
+                synced_files.append(f"{PROMPTS_DIR}/{name}.prompt.md")
+            except OSError as e:
+                failed += 1
+                failed_files.append(f"{name}: {e}")
+
+        if synced == 0 and failed == 0:
+            return SyncResult(skipped=1, skipped_files=["commands: no content to sync"])
+
+        return SyncResult(synced=synced, failed=failed, failed_files=failed_files,
+                          synced_files=synced_files)
 
     def sync_mcp(self, mcp_servers: dict[str, dict]) -> SyncResult:
-        """MCP not supported in VS Code AI extensions.
+        """Sync MCP servers to .vscode/mcp.json.
 
-        GitHub Copilot and Codeium extensions don't support MCP server
-        configuration at the project level. Skip.
+        GitHub Copilot now supports MCP server configuration at the
+        project level via .vscode/mcp.json.
+
+        Args:
+            mcp_servers: Dict mapping server name to server config.
 
         Returns:
-            SyncResult with skipped count.
+            SyncResult with synced/failed counts.
         """
-        count = len(mcp_servers)
-        return SyncResult(
-            skipped=count if count > 0 else 1,
-            skipped_files=["mcp: not supported in VS Code AI extensions"],
-        )
+        if not mcp_servers:
+            return SyncResult(skipped=1, skipped_files=[VSCODE_MCP_JSON + ": no MCP servers"])
+
+        vscode_dir = self.project_dir / ".vscode"
+        mcp_path = self.project_dir / VSCODE_MCP_JSON
+        ensure_dir(vscode_dir)
+
+        servers: dict[str, dict] = {}
+        for name, cfg in mcp_servers.items():
+            entry: dict = {}
+            cmd = cfg.get("command") or cfg.get("cmd")
+            if cmd:
+                entry["command"] = cmd
+            args = cfg.get("args", [])
+            if args:
+                entry["args"] = args
+            env = cfg.get("env", {})
+            if env:
+                entry["env"] = env
+            servers[name] = entry
+
+        mcp_data = {"servers": servers}
+
+        try:
+            write_json_atomic(mcp_path, mcp_data)
+            return SyncResult(synced=len(servers), synced_files=[VSCODE_MCP_JSON])
+        except OSError as e:
+            return SyncResult(failed=1, failed_files=[f"{VSCODE_MCP_JSON}: {e}"])
 
     def sync_settings(self, settings: dict) -> SyncResult:
         """Translate relevant settings to copilot-instructions hints.

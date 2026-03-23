@@ -127,8 +127,8 @@ def _check_already_configured(harness: str, project_dir: Path) -> bool:
         "windsurf": [".windsurfrules"],
         "cline":    [".clinerules"],
         "continue": [".continue/rules/"],
-        "zed":      [".zed/system-prompt.md"],
-        "neovim":   [".avante/system-prompt.md"],
+        "zed":      [".rules"],
+        "neovim":   [".avante/rules/system-prompt.avanterules"],
     }
     for rel in _INDICATOR_FILES.get(harness, []):
         candidate = project_dir / rel

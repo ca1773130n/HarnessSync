@@ -375,8 +375,8 @@ def _get_rules_files(target: str, project_dir: Path) -> list[Path]:
         "windsurf": [".windsurfrules"],
         "cline":    [".clinerules", ".roo/rules/harnesssync.md"],
         "continue": [".continue/rules/harnesssync.md"],
-        "zed":      [".zed/system-prompt.md"],
-        "neovim":   [".avante/system-prompt.md", ".codecompanion/system-prompt.md"],
+        "zed":      [".rules"],
+        "neovim":   [".avante/rules/system-prompt.avanterules", ".codecompanion/system-prompt.md"],
     }
 
     results: list[Path] = []

@@ -111,8 +111,8 @@ class SyncPreviewGenerator:
             "windsurf": ".windsurfrules",
             "cline": ".clinerules",
             "continue": ".continue/rules/harnesssync.md",
-            "zed": ".zed/system-prompt.md",
-            "neovim": ".avante/system-prompt.md",
+            "zed": ".rules",
+            "neovim": ".avante/rules/system-prompt.avanterules",
         }
         fname = rules_filenames.get(target)
         if fname:
@@ -163,7 +163,8 @@ class SyncPreviewGenerator:
             if p.exists() and p.suffix == ".json":
                 try:
                     data = json.loads(p.read_text(encoding="utf-8"))
-                    return data.get("mcpServers", {})
+                    if isinstance(data, dict):
+                        return data.get("mcpServers", {})
                 except (OSError, json.JSONDecodeError):
                     pass
         return {}
@@ -178,7 +179,8 @@ class SyncPreviewGenerator:
             if p.exists():
                 try:
                     data = json.loads(p.read_text(encoding="utf-8"))
-                    return {k: v for k, v in data.items() if k != "mcpServers"}
+                    if isinstance(data, dict):
+                        return {k: v for k, v in data.items() if k != "mcpServers"}
                 except (OSError, json.JSONDecodeError):
                     pass
         return {}

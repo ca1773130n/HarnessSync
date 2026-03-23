@@ -43,8 +43,8 @@ _FEATURE_SUPPORT: dict[str, dict[str, str]] = {
         "windsurf": "full",
         "cline":    "full",     # Via .clinerules
         "continue": "full",     # Via .continue/rules/
-        "zed":      "full",     # Via .zed/system-prompt.md
-        "neovim":   "partial",  # Via .avante/system-prompt.md or .codecompanion/
+        "zed":      "full",     # Via .rules
+        "neovim":   "partial",  # Via .avante/rules/*.avanterules or .codecompanion/
     },
     "skills": {
         "codex":    "none",     # No native skill concept; translates to AGENTS.md prompt
@@ -317,7 +317,7 @@ class HarnessConfigComparison:
             ("settings", "aider"):  "settings translated to .aider.conf.yml key-value pairs",
             ("settings", "windsurf"): "limited settings via .windsurfrules",
             ("settings", "zed"):    "assistant model/context settings only; permissions not supported",
-            ("rules", "neovim"):    "rules synced to .avante/system-prompt.md; plugin must be avante.nvim",
+            ("rules", "neovim"):    "rules synced to .avante/rules/*.avanterules; plugin must be avante.nvim",
         }
         return notes.get((feature, target), f"{feature} approximated for {target}")
 
@@ -525,8 +525,8 @@ def run_behavioral_equivalence_test(
         "windsurf": [".windsurfrules"],
         "cline":    [".clinerules", ".roo/rules/harnesssync.md"],
         "continue": [".continue/rules/harnesssync.md"],
-        "zed":      [".zed/system-prompt.md"],
-        "neovim":   [".avante/system-prompt.md"],
+        "zed":      [".rules"],
+        "neovim":   [".avante/rules/system-prompt.avanterules"],
     }
 
     results: dict[str, dict] = {}

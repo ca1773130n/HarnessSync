@@ -58,6 +58,8 @@ def main():
                               "Output is machine-readable JSON."))
     parser.add_argument("--json", action="store_true", dest="json_output",
                         help="Output status as machine-readable JSON (implies CI-style output format).")
+    parser.add_argument("--show-overrides", action="store_true", dest="show_overrides",
+                        help="Show per-harness config overrides from .harness-sync/overrides/")
 
     try:
         args = parser.parse_args(tokens)
@@ -65,7 +67,10 @@ def main():
         return
 
     try:
-        if args.list_accounts:
+        if getattr(args, "show_overrides", False):
+            _show_overrides_status()
+            return
+        elif args.list_accounts:
             _show_account_list()
         elif getattr(args, "ci", False) or getattr(args, "json_output", False):
             _show_ci_status(args)
@@ -207,9 +212,20 @@ def _show_account_status(account_name: str):
             print(line)
 
 
+def _show_overrides_status():
+    """Display per-harness config overrides from .harness-sync/overrides/."""
+    try:
+        from src.override_manager import OverrideManager
+        om = OverrideManager(Path.cwd())
+        print(om.show_overrides_summary())
+    except Exception as e:
+        print(f"Error reading overrides: {e}", file=sys.stderr)
+
+
 def _show_default_status():
     """Show default status view (all accounts if configured, else v1)."""
     has_accounts = False
+    am = None
     try:
         from src.account_manager import AccountManager
         am = AccountManager()
@@ -217,7 +233,7 @@ def _show_default_status():
     except Exception:
         pass
 
-    if has_accounts:
+    if has_accounts and am is not None:
         print("HarnessSync Status (Multi-Account)")
         print("=" * 60)
         for account_name in am.list_accounts():

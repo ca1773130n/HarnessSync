@@ -17,7 +17,7 @@ Target harness memory equivalents:
   aider:     read into .aider.conf.yml read_files list (reference only)
   cline:     .roo/memory/<name>.md (one file per memory)
   continue:  .continue/rules/memory.md (bundled)
-  zed:       .zed/system-prompt.md (appended section)
+  zed:       .rules (appended section)
   neovim:    .avante/memory.md (appended section)
 
 Memory file discovery:
@@ -415,7 +415,7 @@ class CrossHarnessMemorySync:
                 return MemorySyncResult("continue", 0, len(memories), str(path), error=str(e), dry_run=dry)
 
         def _zed(memories: list[MemoryFile]) -> MemorySyncResult:
-            path = pd / ".zed" / "system-prompt.md"
+            path = pd / ".rules"
             try:
                 _write_appended_section(path, memories, "Shared Memory", dry)
                 return MemorySyncResult("zed", len(memories), 0, str(path), dry_run=dry)

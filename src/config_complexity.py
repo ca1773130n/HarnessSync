@@ -195,8 +195,8 @@ class ConfigComplexityScorer:
             "windsurf": ".windsurfrules",
             "cline": ".clinerules",
             "continue": ".continue/rules/harnesssync.md",
-            "zed": ".zed/system-prompt.md",
-            "neovim": ".avante/system-prompt.md",
+            "zed": ".rules",
+            "neovim": ".avante/rules/system-prompt.avanterules",
         }
         for target, rel in rules_files.items():
             if (self.project_dir / rel).is_file():
@@ -249,8 +249,8 @@ class ConfigComplexityScorer:
             "windsurf": [".windsurfrules"],
             "cline": [".clinerules"],
             "continue": [".continue/rules/harnesssync.md"],
-            "zed": [".zed/system-prompt.md"],
-            "neovim": [".avante/system-prompt.md"],
+            "zed": [".rules"],
+            "neovim": [".avante/rules/system-prompt.avanterules"],
         }
         skills_dirs = {
             "codex": ".agents/skills",

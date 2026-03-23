@@ -235,8 +235,8 @@ _RULES_FILES: dict[str, list[str]] = {
     "windsurf": [".windsurfrules"],
     "cline":    [".clinerules"],
     "continue": [".continue/rules/harnesssync.md"],
-    "zed":      [".zed/system-prompt.md"],
-    "neovim":   [".avante/system-prompt.md"],
+    "zed":      [".rules"],
+    "neovim":   [".avante/rules/system-prompt.avanterules"],
 }
 
 _SKILLS_DIRS: dict[str, str] = {

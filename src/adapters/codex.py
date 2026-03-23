@@ -37,6 +37,8 @@ from src.utils.permissions import extract_permissions, parse_permission_string
 CODEX_DENY_THRESHOLD = 3    # deny_list >= this -> "untrusted"
 CODEX_ALLOW_THRESHOLD = 5   # allow_list >= this (with no denies) -> "never"
 AGENTS_MD = "AGENTS.md"
+AGENTS_OVERRIDE_MD = "AGENTS.override.md"
+CODEX_SIZE_LIMIT = 32768  # 32KB size limit for AGENTS.md
 SKILLS_DIR = ".agents/skills"
 CONFIG_TOML = "config.toml"
 
@@ -89,6 +91,15 @@ class CodexAdapter(AdapterBase):
                 skipped_files=["AGENTS.md: no rules to sync"]
             )
 
+        # Warn if AGENTS.override.md exists (takes precedence over synced AGENTS.md)
+        override_path = self.project_dir / AGENTS_OVERRIDE_MD
+        if override_path.exists():
+            print(
+                f"  [CodexAdapter] warning: {AGENTS_OVERRIDE_MD} exists in project root. "
+                f"It will take precedence over the synced {AGENTS_MD}.",
+                file=sys.stderr,
+            )
+
         # Concatenate all rule contents
         rule_contents = [rule['content'] for rule in rules]
         concatenated = '\n\n---\n\n'.join(rule_contents)
@@ -107,7 +118,16 @@ class CodexAdapter(AdapterBase):
         if override:
             final_content = final_content.rstrip() + f"\n\n{override}\n"
 
-        # Write AGENTS.md
+        # Warn before write if content exceeds Codex's 32KB size limit
+        content_size = len(final_content.encode("utf-8"))
+        if content_size > CODEX_SIZE_LIMIT:
+            print(
+                f"  [CodexAdapter] warning: {AGENTS_MD} is {content_size} bytes "
+                f"({content_size // 1024}KB), exceeding Codex's 32KB limit. "
+                f"Content may be truncated by Codex.",
+                file=sys.stderr,
+            )
+
         self._write_managed_md(self.agents_md_path, final_content)
 
         result = SyncResult(
@@ -119,7 +139,7 @@ class CodexAdapter(AdapterBase):
         # Write hierarchical AGENTS.md for subdirectory rules_files
         # Also check _pending_rules_files from sync_all override
         effective_rules_files = rules_files or getattr(self, '_pending_rules_files', None)
-        if effective_rules_files:
+        if effective_rules_files and isinstance(effective_rules_files, list):
             sub_result = self._write_subdirectory_agents_md(effective_rules_files)
             result = result.merge(sub_result)
 

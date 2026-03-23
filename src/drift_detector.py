@@ -161,17 +161,17 @@ def analyze_drift_root_cause(
     # ------------------------------------------------------------------ #
     all_changed_text = " ".join(t for _, t in added + removed).lower()
 
-    # 1. Only whitespace changed
-    if stored_content.strip() == current_content.strip() and stored_content != current_content:
-        likely_cause = "Whitespace normalization (trailing spaces, newlines)"
-        suggested_action = "Run /sync to restore canonical formatting"
-
-    # 2. Version strings changed (self-update)
-    elif any(pat.lower() in all_changed_text for pat in _VERSION_PATTERNS) and (
+    # 1. Version strings changed (self-update)
+    if any(pat.lower() in all_changed_text for pat in _VERSION_PATTERNS) and (
         added and removed
     ):
         likely_cause = "Harness self-update modified config file"
         suggested_action = "Run /sync-check to verify harness update compatibility"
+
+    # 2. Only whitespace changed
+    elif stored_content.strip() == current_content.strip() and stored_content != current_content:
+        likely_cause = "Whitespace normalization (trailing spaces, newlines)"
+        suggested_action = "Run /sync to restore canonical formatting"
 
     # 3. Environment variable / secret values changed
     elif any(pat.lower() in all_changed_text for pat in _ENV_VAR_PATTERNS) and (

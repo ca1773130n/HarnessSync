@@ -371,7 +371,7 @@ class SyncOrchestrator:
         try:
             from src.transform_engine import TransformEngine
             _transform_engine = TransformEngine.load(self.project_dir)
-            if _transform_engine.has_rules():
+            if _transform_engine and _transform_engine.has_rules():
                 self.logger.info(f"Transform engine: {len(_transform_engine.rules)} rule(s) loaded")
         except ImportError:
             pass  # Transform engine module not available
@@ -447,6 +447,24 @@ class SyncOrchestrator:
 
                 # Apply --only / --skip section filtering (global + per-target)
                 target_data = self._apply_section_filter(target_data, target=target)
+
+                # Apply per-harness overrides from .harness-sync/overrides/
+                try:
+                    from src.override_manager import OverrideManager
+                    _om = OverrideManager(self.project_dir)
+                    if _om.has_overrides(target):
+                        if "rules" in target_data and isinstance(target_data.get("rules"), str):
+                            target_data = dict(target_data)
+                            target_data["rules"] = _om.merge_overrides(
+                                target, target_data["rules"], "md"
+                            )
+                        if "mcp" in target_data and isinstance(target_data.get("mcp"), dict):
+                            target_data = dict(target_data)
+                            target_data["mcp"] = _om.merge_overrides(
+                                target, target_data["mcp"], "json"
+                            )
+                except Exception:
+                    pass  # overrides are best-effort; never block core sync
 
                 # Sync with backup/rollback protection
                 try:

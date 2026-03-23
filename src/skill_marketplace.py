@@ -505,7 +505,7 @@ _CURATED_ADAPTERS: list[dict] = [
     {
         "name": "zed-adapter",
         "full_name": "harnesssync-community/adapter-zed",
-        "description": "HarnessSync adapter for Zed editor AI — syncs rules to .zed/system-prompt.md",
+        "description": "HarnessSync adapter for Zed editor AI — syncs rules to .rules",
         "harness": "zed",
         "stars": 0,
         "topics": [_ADAPTER_TOPIC, "zed-editor"],

@@ -102,8 +102,8 @@ _FEATURE_MATRIX: dict[str, dict[str, SupportLevel]] = {
         "windsurf": "native",     # → .windsurfrules, fully inlined
         "cline":    "native",     # → .clinerules, fully inlined
         "continue": "native",     # → .continue/rules/harnesssync.md
-        "zed":      "native",     # → .zed/system-prompt.md
-        "neovim":   "native",     # → .avante/system-prompt.md
+        "zed":      "native",     # → .rules
+        "neovim":   "native",     # → .avante/rules/system-prompt.avanterules
     },
 
     "skills": {
@@ -132,8 +132,8 @@ _FEATURE_MATRIX: dict[str, dict[str, SupportLevel]] = {
         "windsurf": "adapter",    # → flattened into .windsurfrules
         "cline":    "partial",    # → .clinerules agent section
         "continue": "adapter",    # → .continue/rules/ prompt blocks
-        "zed":      "adapter",    # → .zed/system-prompt.md prose block
-        "neovim":   "adapter",    # → .avante/system-prompt.md prose block
+        "zed":      "adapter",    # → .rules prose block
+        "neovim":   "adapter",    # → .avante/rules/ .avanterules files
     },
 
     "commands": {
@@ -762,8 +762,8 @@ class HarnessFeatureMatrix:
 
         # Workaround suggestions keyed by (feature, harness)
         _WORKAROUNDS: dict[tuple[str, str], str] = {
-            ("skills", "zed"):      "Inline skill content in system-prompt.md manually.",
-            ("skills", "neovim"):   "Add skill content to .avante/system-prompt.md.",
+            ("skills", "zed"):      "Inline skill content in .rules manually.",
+            ("skills", "neovim"):   "Add skill content to .avante/rules/ as .avanterules files.",
             ("commands", "gemini"): "Document commands as GEMINI.md workflow steps instead.",
             ("commands", "aider"):  "Use aider /ask prefix or shell aliases as command proxies.",
             ("commands", "zed"):    "Zed has no command forwarding — document as prose notes.",

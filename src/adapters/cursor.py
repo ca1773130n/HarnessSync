@@ -14,6 +14,7 @@ Cursor uses .mdc (Markdown with Config) files for rules.
 Each file can have YAML frontmatter for matching/scope config.
 """
 
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,6 +29,7 @@ HARNESSSYNC_MARKER_END = "<!-- End HarnessSync managed content -->"
 CURSOR_DIR = ".cursor"
 RULES_DIR = ".cursor/rules"
 MCP_JSON = ".cursor/mcp.json"
+LEGACY_CURSORRULES = ".cursorrules"
 
 
 @AdapterRegistry.register("cursor")
@@ -48,10 +50,23 @@ class CursorAdapter(AdapterBase):
         """Sync rules to .cursor/rules/ as .mdc files.
 
         Each rule file becomes a .mdc file. CLAUDE.md becomes
-        .cursor/rules/claude-code-rules.mdc.
+        .cursor/rules/claude-code-rules.mdc. If the source rule provides
+        glob/file pattern information, a ``globs`` field is added to the
+        YAML frontmatter for Cursor's auto-attach matching.
+
+        Also warns if a legacy .cursorrules file is detected in the project root.
         """
         if not rules:
             return SyncResult(skipped=1, skipped_files=[".cursor/rules/: no rules to sync"])
+
+        # Warn about legacy .cursorrules file
+        legacy_path = self.project_dir / LEGACY_CURSORRULES
+        if legacy_path.exists():
+            print(
+                f"  [CursorAdapter] warning: legacy {LEGACY_CURSORRULES} found in project root. "
+                f"Consider migrating to .cursor/rules/ for better organization.",
+                file=sys.stderr,
+            )
 
         ensure_dir(self.rules_dir)
         synced = 0
@@ -83,6 +98,15 @@ class CursorAdapter(AdapterBase):
                 _always_apply_supported = True
 
             _frontmatter_extra = "alwaysApply: true\n" if _always_apply_supported else ""
+
+            # Add globs field if source rule provides glob/file patterns
+            globs = rule.get("globs") or rule.get("glob") or rule.get("scope_patterns")
+            if globs:
+                if isinstance(globs, list):
+                    globs_value = ", ".join(globs)
+                else:
+                    globs_value = str(globs)
+                _frontmatter_extra += f"globs: {globs_value}\n"
 
             mdc_content = (
                 f"---\n"

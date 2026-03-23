@@ -50,6 +50,7 @@ def test_sync_mcp_stdio():
         assert "test-server" in settings["mcpServers"], "test-server not found"
 
         server = settings["mcpServers"]["test-server"]
+        assert server["type"] == "stdio", "Type should be 'stdio'"
         assert server["command"] == "npx", "Command mismatch"
         assert server["args"] == ["-y", "test-package"], "Args mismatch"
         assert server["env"]["API_KEY"] == "${MY_API_KEY}", "Env var not preserved"
@@ -87,13 +88,15 @@ def test_sync_mcp_url():
         with open(settings_path, 'r') as f:
             settings = json.load(f)
 
-        # SSE server should use "url" field
+        # SSE server should use "url" field with type "sse"
         sse = settings["mcpServers"]["sse-server"]
+        assert sse["type"] == "sse", "SSE server should have type 'sse'"
         assert "url" in sse, "SSE server should have 'url' field"
         assert sse["url"] == "https://api.example.com/sse", "SSE URL mismatch"
 
-        # HTTP server should use "httpUrl" field
+        # HTTP server should use "httpUrl" field with type "http"
         http = settings["mcpServers"]["http-server"]
+        assert http["type"] == "http", "HTTP server should have type 'http'"
         assert "httpUrl" in http, "HTTP server should have 'httpUrl' field"
         assert http["httpUrl"] == "https://api.example.com/mcp", "HTTP URL mismatch"
 
@@ -258,6 +261,11 @@ def test_sync_settings_deny_list():
         assert "exclude" in settings_json["tools"], "exclude not found"
         assert settings_json["tools"]["exclude"] == ["Bash", "Edit"], "exclude mismatch"
 
+        # Verify security nesting
+        assert "security" in settings_json, "security key not found"
+        assert settings_json["security"]["disableAlwaysAllow"] is True, "disableAlwaysAllow not nested under security"
+        assert settings_json["security"]["disableYoloMode"] is True, "disableYoloMode not nested under security"
+
         # Verify warnings for blocked tools
         assert any("Bash: blocked" in f for f in result.skipped_files), "Bash warning not found"
         assert any("Edit: blocked" in f for f in result.skipped_files), "Edit warning not found"
@@ -283,16 +291,16 @@ def test_sync_settings_allow_list():
         # Sync settings
         result = adapter.sync_settings(settings)
 
-        # Verify allowed in settings.json
+        # Verify tools.allowed is NOT written (removed from official schema)
         settings_path = project_dir / ".gemini" / "settings.json"
         with open(settings_path, 'r') as f:
             settings_json = json.load(f)
 
-        assert "tools" in settings_json, "tools config not found"
-        assert "allowed" in settings_json["tools"], "allowed not found"
-        assert settings_json["tools"]["allowed"] == ["Read", "Write"], "allowed mismatch"
+        # tools.allowed is not in official Gemini schema, so should not be present
+        tools = settings_json.get("tools", {})
+        assert "allowed" not in tools, "tools.allowed should not be written (not in official schema)"
 
-    print("  ✓ sync_settings with allow list works correctly")
+    print("  ✓ sync_settings with allow list correctly omits tools.allowed")
 
 
 def test_sync_settings_auto_approval_warning():

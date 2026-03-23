@@ -177,8 +177,8 @@ def semantic_drift_summary(
         "windsurf": ".windsurfrules",
         "cline": ".clinerules",
         "continue": ".continue/rules/harnesssync.md",
-        "zed": ".zed/system-prompt.md",
-        "neovim": ".avante/system-prompt.md",
+        "zed": ".rules",
+        "neovim": ".avante/rules/system-prompt.avanterules",
     }
 
     state = sm.load_state()

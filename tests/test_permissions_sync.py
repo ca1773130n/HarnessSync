@@ -390,8 +390,8 @@ class TestGeminiPermissionMapping:
 
         settings_path = tmp_path / ".gemini" / "settings.json"
         settings_data = json.loads(settings_path.read_text())
-        assert settings_data.get("disableAlwaysAllow") is True
-        assert settings_data.get("disableYoloMode") is True
+        assert settings_data.get("security", {}).get("disableAlwaysAllow") is True
+        assert settings_data.get("security", {}).get("disableYoloMode") is True
         assert ".gemini/policies/harnesssync-policy.json" in settings_data.get("policyPaths", [])
 
     def test_allow_only_no_policy_file(self, tmp_path):
@@ -412,13 +412,12 @@ class TestGeminiPermissionMapping:
         policy_path = tmp_path / ".gemini" / "policies" / "harnesssync-policy.json"
         assert not policy_path.exists()
 
-        # Settings should have tools.allowed
+        # Settings should have tools.exclude (not tools.allowed which was removed)
         settings_path = tmp_path / ".gemini" / "settings.json"
         settings_data = json.loads(settings_path.read_text())
-        assert settings_data.get("tools", {}).get("allowed") == ["Read", "Write"]
-        # Should NOT have disableAlwaysAllow/disableYoloMode
-        assert "disableAlwaysAllow" not in settings_data
-        assert "disableYoloMode" not in settings_data
+        # Should NOT have security flags when no deny rules
+        assert "disableAlwaysAllow" not in settings_data.get("security", {})
+        assert "disableYoloMode" not in settings_data.get("security", {})
 
     def test_empty_settings(self, tmp_path):
         from src.adapters.gemini import GeminiAdapter

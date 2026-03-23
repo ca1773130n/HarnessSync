@@ -381,7 +381,7 @@ class TestGeminiRespectGitignoreMapping:
         settings_path = tmp_path / ".gemini" / "settings.json"
         data = json.loads(settings_path.read_text())
 
-        assert data.get('fileFiltering', {}).get('respectGitignore') is True
+        assert data.get('context', {}).get('fileFiltering', {}).get('respectGitIgnore') is True
 
     def test_respect_gitignore_false(self, tmp_path):
         from src.adapters.gemini import GeminiAdapter
@@ -395,7 +395,7 @@ class TestGeminiRespectGitignoreMapping:
         settings_path = tmp_path / ".gemini" / "settings.json"
         data = json.loads(settings_path.read_text())
 
-        assert data.get('fileFiltering', {}).get('respectGitignore') is False
+        assert data.get('context', {}).get('fileFiltering', {}).get('respectGitIgnore') is False
 
     def test_respect_gitignore_not_present(self, tmp_path):
         """When respectGitignore is not in settings, fileFiltering should not appear."""
@@ -446,20 +446,20 @@ class TestGeminiRespectGitignoreMapping:
         adapter.sync_settings(settings)
 
         data = json.loads(settings_path.read_text())
-        assert data.get('fileFiltering', {}).get('respectGitignore') is True
+        assert data.get('context', {}).get('fileFiltering', {}).get('respectGitIgnore') is True
         # Existing settings should be preserved
         assert data.get('theme') == 'dark'
         assert 'mcpServers' in data
 
     def test_respect_gitignore_preserves_existing_file_filtering(self, tmp_path):
-        """respectGitignore should merge into existing fileFiltering, not replace it."""
+        """respectGitignore should merge into existing context.fileFiltering, not replace it."""
         from src.adapters.gemini import GeminiAdapter
 
         gemini_dir = tmp_path / ".gemini"
         gemini_dir.mkdir(parents=True)
         settings_path = gemini_dir / "settings.json"
         settings_path.write_text(json.dumps({
-            "fileFiltering": {"maxFileSize": 1048576},
+            "context": {"fileFiltering": {"maxFileSize": 1048576}},
         }))
 
         adapter = GeminiAdapter(project_dir=tmp_path)
@@ -468,8 +468,8 @@ class TestGeminiRespectGitignoreMapping:
         adapter.sync_settings(settings)
 
         data = json.loads(settings_path.read_text())
-        file_filtering = data.get('fileFiltering', {})
-        assert file_filtering.get('respectGitignore') is True
+        file_filtering = data.get('context', {}).get('fileFiltering', {})
+        assert file_filtering.get('respectGitIgnore') is True
         assert file_filtering.get('maxFileSize') == 1048576
 
     def test_respect_gitignore_with_permissions(self, tmp_path):
@@ -492,8 +492,9 @@ class TestGeminiRespectGitignoreMapping:
         settings_path = tmp_path / ".gemini" / "settings.json"
         data = json.loads(settings_path.read_text())
 
-        assert data.get('fileFiltering', {}).get('respectGitignore') is True
-        assert data.get('tools', {}).get('allowed') == ['Read']
+        assert data.get('context', {}).get('fileFiltering', {}).get('respectGitIgnore') is True
+        # tools.allowed was removed (not in Gemini schema); permissions map to tools.exclude
+        assert 'fileFiltering' not in data  # should be nested under context now
 
 
 # ---------------------------------------------------------------------------

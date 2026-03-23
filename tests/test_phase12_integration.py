@@ -75,8 +75,8 @@ def test_gemini_deny_list_uses_exclude(tmp_path):
     assert "blockedTools" not in data, "deprecated blockedTools key still present"
 
 
-def test_gemini_allow_list_uses_allowed(tmp_path):
-    """Gemini settings uses tools.allowed, not allowedTools."""
+def test_gemini_allow_list_no_tools_allowed(tmp_path):
+    """Gemini no longer uses tools.allowed (removed from schema)."""
     gemini_dir = tmp_path / ".gemini"
     gemini_dir.mkdir()
 
@@ -85,7 +85,8 @@ def test_gemini_allow_list_uses_allowed(tmp_path):
 
     settings_path = gemini_dir / "settings.json"
     data = json.loads(settings_path.read_text())
-    assert "allowed" in data.get("tools", {}), "tools.allowed key missing"
+    # tools.allowed was removed from the Gemini schema
+    assert "allowed" not in data.get("tools", {}), "tools.allowed should not be written"
     assert "allowedTools" not in data, "deprecated allowedTools key still present"
 
 

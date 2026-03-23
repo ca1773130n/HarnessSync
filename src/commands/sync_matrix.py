@@ -39,8 +39,8 @@ CAPABILITY_MATRIX: list[dict] = [
         "windsurf":  (NATIVE,  ".windsurfrules managed section"),
         "cline":     (NATIVE,  ".clinerules + .roo/rules/harnesssync.md"),
         "continue":  (NATIVE,  ".continue/rules/harnesssync.md"),
-        "zed":       (NATIVE,  ".zed/system-prompt.md"),
-        "neovim":    (NATIVE,  ".avante/system-prompt.md + .codecompanion/system-prompt.md"),
+        "zed":       (NATIVE,  ".rules"),
+        "neovim":    (NATIVE,  ".avante/rules/system-prompt.avanterules + .codecompanion/system-prompt.md"),
     },
     {
         "section": "skills",
@@ -137,7 +137,7 @@ CAPABILITY_MATRIX: list[dict] = [
         "windsurf": (DROPPED, "Override file not applied to .windsurfrules"),
         "cline":    (DROPPED, "Override file not applied to .clinerules"),
         "continue": (DROPPED, "Override file not applied to .continue/rules"),
-        "zed":      (DROPPED, "Override file not applied to system-prompt.md"),
+        "zed":      (DROPPED, "Override file not applied to .rules"),
         "neovim":   (DROPPED, "Override file not applied to avante config"),
     },
 ]

@@ -3,16 +3,17 @@ from __future__ import annotations
 """Neovim AI adapter for HarnessSync (avante.nvim / codecompanion.nvim).
 
 Syncs Claude Code configuration to Neovim AI plugin formats:
-- Rules (CLAUDE.md) → .avante/system-prompt.md (avante.nvim system prompt)
+- Rules (CLAUDE.md) → .avante/rules/system-prompt.avanterules (avante.nvim rules)
 - Rules (CLAUDE.md) → .codecompanion/system-prompt.md (codecompanion.nvim)
-- Skills → .avante/rules/<name>.md (avante custom rules)
-- Agents → .avante/rules/agents/<name>.md
+- Skills → .avante/rules/<name>.avanterules (avante custom rules)
+- Agents → .avante/rules/agents/<name>.avanterules
 - Commands → .codecompanion/slash-commands/<name>.md
 - MCP servers → .avante/mcp.json (avante MCP config)
 - Settings → no-op (managed by Neovim config)
 
 Supported plugins:
-  - avante.nvim: Uses .avante/ directory for per-project rules and system prompt
+  - avante.nvim: Uses .avante/rules/ directory with .avanterules extension
+    for per-project Jinja-template rule files
   - codecompanion.nvim: Uses .codecompanion/ for system prompts and slash commands
 
 Both directories are written for maximum compatibility.
@@ -30,7 +31,7 @@ from src.utils.paths import ensure_dir
 
 AVANTE_DIR = ".avante"
 AVANTE_RULES_DIR = ".avante/rules"
-AVANTE_SYSTEM_PROMPT = ".avante/system-prompt.md"
+AVANTE_SYSTEM_PROMPT_RULES = ".avante/rules/system-prompt.avanterules"
 AVANTE_MCP_JSON = ".avante/mcp.json"
 
 CODECOMPANION_DIR = ".codecompanion"
@@ -49,7 +50,7 @@ class NeovimAdapter(AdapterBase):
         super().__init__(project_dir)
         self.avante_dir = project_dir / AVANTE_DIR
         self.avante_rules_dir = project_dir / AVANTE_RULES_DIR
-        self.avante_system_prompt_path = project_dir / AVANTE_SYSTEM_PROMPT
+        self.avante_system_prompt_rules_path = project_dir / AVANTE_SYSTEM_PROMPT_RULES
         self.avante_mcp_path = project_dir / AVANTE_MCP_JSON
         self.codecompanion_dir = project_dir / CODECOMPANION_DIR
         self.codecompanion_system_prompt_path = project_dir / CODECOMPANION_SYSTEM_PROMPT
@@ -70,10 +71,11 @@ class NeovimAdapter(AdapterBase):
         return new_section + "\n"
 
     def sync_rules(self, rules: list[dict]) -> SyncResult:
-        """Sync rules to avante.nvim and codecompanion.nvim system prompt files.
+        """Sync rules to avante.nvim (.avanterules) and codecompanion.nvim.
 
-        Both .avante/system-prompt.md and .codecompanion/system-prompt.md are
-        written so users get coverage regardless of which plugin they use.
+        Writes .avante/rules/system-prompt.avanterules for avante.nvim (which
+        uses .avanterules extension for Jinja-template rule files) and
+        .codecompanion/system-prompt.md for codecompanion.nvim.
         """
         if not rules:
             return SyncResult(skipped=1, skipped_files=["neovim: no rules to sync"])
@@ -98,18 +100,18 @@ class NeovimAdapter(AdapterBase):
         failed = 0
         failed_files: list[str] = []
 
-        # Write .avante/system-prompt.md
+        # Write .avante/rules/system-prompt.avanterules
         try:
-            ensure_dir(self.avante_dir)
+            ensure_dir(self.avante_rules_dir)
             existing = ""
-            if self.avante_system_prompt_path.is_file():
-                existing = self.avante_system_prompt_path.read_text(encoding="utf-8")
+            if self.avante_system_prompt_rules_path.is_file():
+                existing = self.avante_system_prompt_rules_path.read_text(encoding="utf-8")
             new_content = self._replace_managed_section(existing, managed_section)
-            self.avante_system_prompt_path.write_text(new_content, encoding="utf-8")
+            self.avante_system_prompt_rules_path.write_text(new_content, encoding="utf-8")
             synced += 1
         except OSError as e:
             failed += 1
-            failed_files.append(f"{AVANTE_SYSTEM_PROMPT}: {e}")
+            failed_files.append(f"{AVANTE_SYSTEM_PROMPT_RULES}: {e}")
 
         # Write .codecompanion/system-prompt.md
         try:
@@ -127,7 +129,7 @@ class NeovimAdapter(AdapterBase):
         return SyncResult(synced=synced, failed=failed, failed_files=failed_files)
 
     def sync_skills(self, skills: dict[str, Path]) -> SyncResult:
-        """Sync skills to .avante/rules/ as markdown files."""
+        """Sync skills to .avante/rules/ as .avanterules files."""
         if not skills:
             return SyncResult(skipped=1, skipped_files=[f"{AVANTE_RULES_DIR}/: no skills"])
 
@@ -145,7 +147,7 @@ class NeovimAdapter(AdapterBase):
                 continue
             try:
                 content = skill_md.read_text(encoding="utf-8")
-                out_path = skills_dir / f"{name}.md"
+                out_path = skills_dir / f"{name}.avanterules"
                 out_path.write_text(f"# Skill: {name}\n\n{content}\n", encoding="utf-8")
                 synced += 1
             except OSError as e:
@@ -155,7 +157,7 @@ class NeovimAdapter(AdapterBase):
         return SyncResult(synced=synced, failed=failed, failed_files=failed_files)
 
     def sync_agents(self, agents: dict[str, Path]) -> SyncResult:
-        """Sync agents to .avante/rules/agents/ as markdown rule files."""
+        """Sync agents to .avante/rules/agents/ as .avanterules files."""
         if not agents:
             return SyncResult(skipped=1, skipped_files=[f"{AVANTE_RULES_DIR}/agents/: no agents"])
 
@@ -173,7 +175,7 @@ class NeovimAdapter(AdapterBase):
                 continue
             try:
                 content = agent_md.read_text(encoding="utf-8")
-                out_path = agents_dir / f"{name}.md"
+                out_path = agents_dir / f"{name}.avanterules"
                 out_path.write_text(content, encoding="utf-8")
                 synced += 1
             except OSError as e:

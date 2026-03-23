@@ -3,18 +3,22 @@ from __future__ import annotations
 """Windsurf (Codeium) IDE adapter for HarnessSync.
 
 Syncs Claude Code configuration to Windsurf format:
-- Rules (CLAUDE.md) → .windsurfrules (project-level rules file)
-- Skills → .windsurf/memories/<name>.md (Windsurf global memories)
+- Rules (CLAUDE.md) → .windsurf/rules/<name>.md (individual rule files with
+  YAML frontmatter) + .windsurfrules (combined fallback for older versions)
+- Skills → .windsurf/skills/<name>.md (Windsurf skills)
 - Agents → .windsurf/workflows/<name>.md (Windsurf workflows)
 - Commands → .windsurf/workflows/<name>.md (best-effort mapping)
 - MCP servers → .codeium/windsurf/mcp_config.json
 - Settings → no-op (managed by IDE)
 
-Windsurf uses .windsurfrules at project root (similar to Cursor's .cursorrules).
+Windsurf now uses .windsurf/rules/ directory for individual rule files with
+YAML frontmatter (trigger: always_on). The legacy .windsurfrules at project
+root is still written as a combined fallback for backward compatibility.
 """
 
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 
 from .base import AdapterBase
 from .registry import AdapterRegistry
@@ -26,6 +30,12 @@ HARNESSSYNC_MARKER = "<!-- Managed by HarnessSync -->"
 HARNESSSYNC_MARKER_END = "<!-- End HarnessSync managed content -->"
 WINDSURFRULES = ".windsurfrules"
 WINDSURF_DIR = ".windsurf"
+WINDSURF_RULES_DIR = ".windsurf/rules"
+WINDSURF_SKILLS_DIR = ".windsurf/skills"
+# NOTE: The global MCP config path is ~/.codeium/windsurf/mcp_config.json.
+# We write project-level config at .codeium/windsurf/mcp_config.json within
+# the project directory. For global installs, users should symlink or copy
+# to the home-directory path.
 MCP_CONFIG_JSON = ".codeium/windsurf/mcp_config.json"
 
 
@@ -37,6 +47,8 @@ class WindsurfAdapter(AdapterBase):
         super().__init__(project_dir)
         self.rules_path = project_dir / WINDSURFRULES
         self.windsurf_dir = project_dir / WINDSURF_DIR
+        self.rules_dir = project_dir / WINDSURF_RULES_DIR
+        self.skills_dir = project_dir / WINDSURF_SKILLS_DIR
         self.mcp_config_path = project_dir / MCP_CONFIG_JSON
 
     @property
@@ -44,19 +56,49 @@ class WindsurfAdapter(AdapterBase):
         return "windsurf"
 
     def sync_rules(self, rules: list[dict]) -> SyncResult:
-        """Sync rules to .windsurfrules with HarnessSync markers.
+        """Sync rules to .windsurf/rules/ as individual .md files with YAML frontmatter.
 
-        Windsurf reads .windsurfrules from the project root as persistent
-        instructions for the AI assistant.
+        Each rule is written as a separate .md file in .windsurf/rules/ with
+        YAML frontmatter containing trigger and description fields. A combined
+        .windsurfrules file is also written as a fallback for older Windsurf
+        versions.
         """
         if not rules:
-            return SyncResult(skipped=1, skipped_files=[f"{WINDSURFRULES}: no rules to sync"])
+            return SyncResult(skipped=1, skipped_files=[f"{WINDSURF_RULES_DIR}: no rules to sync"])
 
-        rule_contents = [r.get("content", "") for r in rules if r.get("content", "").strip()]
+        rule_contents = [(r, r.get("content", "")) for r in rules if r.get("content", "").strip()]
         if not rule_contents:
-            return SyncResult(skipped=1, skipped_files=[f"{WINDSURFRULES}: empty rules"])
+            return SyncResult(skipped=1, skipped_files=[f"{WINDSURF_RULES_DIR}: empty rules"])
 
-        concatenated = "\n\n---\n\n".join(rule_contents)
+        ensure_dir(self.rules_dir)
+
+        synced = 0
+        failed = 0
+        failed_files: list[str] = []
+        synced_files: list[str] = []
+
+        # Write individual rule files to .windsurf/rules/
+        for rule, content in rule_contents:
+            rule_name = self._rule_name(rule)
+            description = self._rule_description(rule, content)
+            frontmatter = (
+                "---\n"
+                "trigger: always_on\n"
+                f"description: {self._quote_yaml_value(description)}\n"
+                "---\n"
+            )
+            rule_file = self.rules_dir / f"{rule_name}.md"
+            try:
+                rule_file.write_text(frontmatter + content, encoding="utf-8")
+                synced += 1
+                synced_files.append(str(rule_file))
+            except OSError as e:
+                failed += 1
+                failed_files.append(f"{rule_name}: {e}")
+
+        # Write combined .windsurfrules as backward-compatible fallback
+        all_contents = [c for _, c in rule_contents]
+        concatenated = "\n\n---\n\n".join(all_contents)
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
         managed_section = (
@@ -76,21 +118,24 @@ class WindsurfAdapter(AdapterBase):
 
         try:
             self.rules_path.write_text(new_content, encoding="utf-8")
-            return SyncResult(synced=1, synced_files=[str(self.rules_path)])
+            synced_files.append(str(self.rules_path))
         except OSError as e:
-            return SyncResult(failed=1, failed_files=[f"{WINDSURFRULES}: {e}"])
+            failed += 1
+            failed_files.append(f"{WINDSURFRULES}: {e}")
+
+        return SyncResult(synced=synced, failed=failed,
+                          synced_files=synced_files, failed_files=failed_files)
 
     def sync_skills(self, skills: dict[str, Path]) -> SyncResult:
-        """Sync skills to .windsurf/memories/ as Markdown files.
+        """Sync skills to .windsurf/skills/ as Markdown files.
 
-        Windsurf supports global memories that persist across sessions.
-        Skills are mapped to memory files for best-effort compatibility.
+        Windsurf supports skills that provide specialized capabilities.
+        Skills are mapped to .windsurf/skills/<name>.md files.
         """
         if not skills:
-            return SyncResult(skipped=1, skipped_files=[".windsurf/memories/: no skills"])
+            return SyncResult(skipped=1, skipped_files=[f"{WINDSURF_SKILLS_DIR}: no skills"])
 
-        memories_dir = self.windsurf_dir / "memories"
-        ensure_dir(memories_dir)
+        ensure_dir(self.skills_dir)
         synced = 0
         failed = 0
         failed_files: list[str] = []
@@ -104,7 +149,7 @@ class WindsurfAdapter(AdapterBase):
 
             try:
                 content = skill_md.read_text(encoding="utf-8")
-                out_path = memories_dir / f"{name}.md"
+                out_path = self.skills_dir / f"{name}.md"
                 out_path.write_text(content, encoding="utf-8")
                 synced += 1
             except OSError as e:
@@ -227,3 +272,34 @@ class WindsurfAdapter(AdapterBase):
             return existing[:start] + new_section + existing[end:]
         separator = "\n\n" if existing.strip() else ""
         return existing + separator + new_section + "\n"
+
+    @staticmethod
+    def _rule_name(rule: dict) -> str:
+        """Derive a filesystem-safe rule name from a rule dict.
+
+        Uses the rule's 'path' stem if available, otherwise falls back
+        to a sanitized version of the first line of content.
+        """
+        path = rule.get("path")
+        if path:
+            stem = Path(str(path)).stem
+            # Sanitize: lowercase, replace non-alphanum with hyphens
+            return re.sub(r'[^a-z0-9]+', '-', stem.lower()).strip('-') or "rule"
+        content = rule.get("content", "")
+        first_line = content.split("\n", 1)[0].strip()[:60]
+        sanitized = re.sub(r'[^a-z0-9]+', '-', first_line.lower()).strip('-')
+        return sanitized or "rule"
+
+    @staticmethod
+    def _rule_description(rule: dict, content: str) -> str:
+        """Extract a short description for a rule's YAML frontmatter.
+
+        Uses the rule's 'path' name or the first non-empty line of content.
+        """
+        path = rule.get("path")
+        if path:
+            return f"Rules from {Path(str(path)).name}"
+        first_line = content.strip().split("\n", 1)[0].strip()
+        # Strip leading markdown heading markers
+        first_line = re.sub(r'^#+\s*', '', first_line)
+        return first_line[:80] if first_line else "Synced rules"

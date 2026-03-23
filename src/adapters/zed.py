@@ -3,8 +3,8 @@ from __future__ import annotations
 """Zed Editor AI adapter for HarnessSync.
 
 Syncs Claude Code configuration to Zed's AI assistant format:
-- Rules (CLAUDE.md) → .zed/system-prompt.md (Zed AI assistant system prompt)
-- Skills → appended to .zed/system-prompt.md as context sections
+- Rules (CLAUDE.md) → .rules (Zed's canonical project rules file at project root)
+- Skills → appended to .rules as context sections
 - Agents → .zed/prompts/<name>.md (Zed prompt library)
 - Commands → .zed/prompts/<name>.md (best-effort mapping)
 - MCP servers → .zed/settings.json (context_servers section)
@@ -12,7 +12,7 @@ Syncs Claude Code configuration to Zed's AI assistant format:
 
 Zed Editor uses:
   - ~/.config/zed/settings.json or .zed/settings.json for project settings
-  - .zed/system-prompt.md for AI assistant system prompt (per-project)
+  - .rules file at the project root for AI assistant rules (per-project)
   - context_servers in settings.json for MCP-compatible context servers
 """
 
@@ -27,7 +27,7 @@ from src.utils.paths import ensure_dir
 
 
 ZED_DIR = ".zed"
-SYSTEM_PROMPT_MD = ".zed/system-prompt.md"
+RULES_FILE = ".rules"
 ZED_SETTINGS_JSON = ".zed/settings.json"
 ZED_PROMPTS_DIR = ".zed/prompts"
 
@@ -42,7 +42,7 @@ class ZedAdapter(AdapterBase):
     def __init__(self, project_dir: Path):
         super().__init__(project_dir)
         self.zed_dir = project_dir / ZED_DIR
-        self.system_prompt_path = project_dir / SYSTEM_PROMPT_MD
+        self.rules_path = project_dir / RULES_FILE
         self.settings_path = project_dir / ZED_SETTINGS_JSON
         self.prompts_dir = project_dir / ZED_PROMPTS_DIR
 
@@ -61,25 +61,24 @@ class ZedAdapter(AdapterBase):
         return new_section + "\n"
 
     def sync_rules(self, rules: list[dict]) -> SyncResult:
-        """Sync rules to .zed/system-prompt.md.
+        """Sync rules to .rules file at the project root.
 
-        Zed reads .zed/system-prompt.md as the AI assistant's system prompt
-        for the project, prepended to every conversation.
+        Zed reads .rules as the canonical project rules file, applied to
+        every AI assistant conversation in the project.
         """
         if not rules:
-            return SyncResult(skipped=1, skipped_files=[f"{SYSTEM_PROMPT_MD}: no rules to sync"])
+            return SyncResult(skipped=1, skipped_files=[f"{RULES_FILE}: no rules to sync"])
 
         rule_contents = [r.get("content", "") for r in rules if r.get("content", "").strip()]
         if not rule_contents:
-            return SyncResult(skipped=1, skipped_files=[f"{SYSTEM_PROMPT_MD}: empty rules"])
+            return SyncResult(skipped=1, skipped_files=[f"{RULES_FILE}: empty rules"])
 
-        ensure_dir(self.zed_dir)
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         concatenated = "\n\n---\n\n".join(rule_contents)
 
         managed_section = (
             f"{HARNESSSYNC_MARKER}\n"
-            f"# System Instructions (synced from Claude Code)\n\n"
+            f"# Project Rules (synced from Claude Code)\n\n"
             f"{concatenated}\n\n"
             f"---\n"
             f"*Last synced by HarnessSync: {timestamp}*\n"
@@ -87,16 +86,16 @@ class ZedAdapter(AdapterBase):
         )
 
         existing = ""
-        if self.system_prompt_path.is_file():
-            existing = self.system_prompt_path.read_text(encoding="utf-8")
+        if self.rules_path.is_file():
+            existing = self.rules_path.read_text(encoding="utf-8")
 
         new_content = self._replace_managed_section(existing, managed_section)
 
         try:
-            self.system_prompt_path.write_text(new_content, encoding="utf-8")
-            return SyncResult(synced=1, synced_files=[str(self.system_prompt_path)])
+            self.rules_path.write_text(new_content, encoding="utf-8")
+            return SyncResult(synced=1, synced_files=[str(self.rules_path)])
         except OSError as e:
-            return SyncResult(failed=1, failed_files=[f"{SYSTEM_PROMPT_MD}: {e}"])
+            return SyncResult(failed=1, failed_files=[f"{RULES_FILE}: {e}"])
 
     def sync_skills(self, skills: dict[str, Path]) -> SyncResult:
         """Sync skills to .zed/prompts/skills/ as prompt markdown files."""

@@ -1,0 +1,268 @@
+{
+  "fb5048c36e36": {
+    "content_preview": "Syncs Claude Code config (CLAUDE.md, skills, agents, commands, MCP servers, sett",
+    "source_file": "CLAUDE.md",
+    "line_number": 3,
+    "section": "HarnessSync",
+    "fingerprint": "fb5048c36e36"
+  },
+  "c4fc812cbd4a": {
+    "content_preview": "python3 -m pytest tests/ # run all tests",
+    "source_file": "CLAUDE.md",
+    "line_number": 8,
+    "section": "Commands",
+    "fingerprint": "c4fc812cbd4a"
+  },
+  "44341931a17f": {
+    "content_preview": "python3 src/commands/sync.py # manual sync (all targets)",
+    "source_file": "CLAUDE.md",
+    "line_number": 9,
+    "section": "Commands",
+    "fingerprint": "44341931a17f"
+  },
+  "c2285cf80508": {
+    "content_preview": "python3 src/commands/sync_status.py # show sync status + drift",
+    "source_file": "CLAUDE.md",
+    "line_number": 10,
+    "section": "Commands",
+    "fingerprint": "c2285cf80508"
+  },
+  "f2cc681f3fc2": {
+    "content_preview": "python3 src/commands/sync.py --dry-run # preview without writing",
+    "source_file": "CLAUDE.md",
+    "line_number": 11,
+    "section": "Commands",
+    "fingerprint": "f2cc681f3fc2"
+  },
+  "df880d6e2a29": {
+    "content_preview": "- `src/orchestrator.py` \u2014 central sync coordinator; reads source, runs adapters,",
+    "source_file": "CLAUDE.md",
+    "line_number": 16,
+    "section": "Architecture",
+    "fingerprint": "df880d6e2a29"
+  },
+  "f19e6ef4c1c4": {
+    "content_preview": "- `src/source_reader.py` \u2014 discovers and reads Claude Code config (CLAUDE.md, .m",
+    "source_file": "CLAUDE.md",
+    "line_number": 17,
+    "section": "Architecture",
+    "fingerprint": "f19e6ef4c1c4"
+  },
+  "d7aef6fed382": {
+    "content_preview": "- `src/adapters/` \u2014 one adapter per target harness, all extend `src/adapters/bas",
+    "source_file": "CLAUDE.md",
+    "line_number": 18,
+    "section": "Architecture",
+    "fingerprint": "d7aef6fed382"
+  },
+  "f59ac4ecc1c3": {
+    "content_preview": "- Targets: aider, cline, codex, continue, cursor, gemini, neovim, opencode, vsco",
+    "source_file": "CLAUDE.md",
+    "line_number": 19,
+    "section": "Architecture",
+    "fingerprint": "f59ac4ecc1c3"
+  },
+  "f9db3a65ce4b": {
+    "content_preview": "- `src/commands/` \u2014 slash command implementations (28 commands: sync, sync-statu",
+    "source_file": "CLAUDE.md",
+    "line_number": 20,
+    "section": "Architecture",
+    "fingerprint": "f9db3a65ce4b"
+  },
+  "2c14abe5b48e": {
+    "content_preview": "- `commands/` \u2014 slash command markdown definitions that Claude Code discovers",
+    "source_file": "CLAUDE.md",
+    "line_number": 21,
+    "section": "Architecture",
+    "fingerprint": "2c14abe5b48e"
+  },
+  "3c9d2b4f94b6": {
+    "content_preview": "- `hooks/hooks.json` \u2014 PostToolUse hook triggers sync on Edit/Write/MultiEdit; S",
+    "source_file": "CLAUDE.md",
+    "line_number": 22,
+    "section": "Architecture",
+    "fingerprint": "3c9d2b4f94b6"
+  },
+  "d9f8bcde1b12": {
+    "content_preview": "- `src/mcp/` \u2014 MCP server (JSON-RPC over stdio) exposing sync_all, sync_target, ",
+    "source_file": "CLAUDE.md",
+    "line_number": 23,
+    "section": "Architecture",
+    "fingerprint": "d9f8bcde1b12"
+  },
+  "8a421389b1f9": {
+    "content_preview": "- `src/utils/` \u2014 shared helpers (logging, hashing, paths)",
+    "source_file": "CLAUDE.md",
+    "line_number": 24,
+    "section": "Architecture",
+    "fingerprint": "8a421389b1f9"
+  },
+  "d58028af4d05": {
+    "content_preview": "- `.planning/` \u2014 project roadmap, milestones, and evolve state (not runtime code",
+    "source_file": "CLAUDE.md",
+    "line_number": 25,
+    "section": "Architecture",
+    "fingerprint": "d58028af4d05"
+  },
+  "d28c3247dd15": {
+    "content_preview": "- Pure Python 3.10+, stdlib only, no external dependencies",
+    "source_file": "CLAUDE.md",
+    "line_number": 29,
+    "section": "Key Patterns",
+    "fingerprint": "d28c3247dd15"
+  },
+  "dbc0e745f227": {
+    "content_preview": "- Adapters follow a registry pattern: `src/adapters/registry.py` maps harness na",
+    "source_file": "CLAUDE.md",
+    "line_number": 30,
+    "section": "Key Patterns",
+    "fingerprint": "dbc0e745f227"
+  },
+  "9935a6b9de2e": {
+    "content_preview": "- Commands parse args with argparse in `src/commands/*.py` and delegate to libra",
+    "source_file": "CLAUDE.md",
+    "line_number": 31,
+    "section": "Key Patterns",
+    "fingerprint": "9935a6b9de2e"
+  },
+  "8a4b1b7e44e9": {
+    "content_preview": "- Module-level functions for stateless transforms; classes for stateful managers",
+    "source_file": "CLAUDE.md",
+    "line_number": 32,
+    "section": "Key Patterns",
+    "fingerprint": "8a4b1b7e44e9"
+  },
+  "4a9a6cab6be8": {
+    "content_preview": "- SourceReader is the canonical read path \u2014 never read config files directly in ",
+    "source_file": "CLAUDE.md",
+    "line_number": 33,
+    "section": "Key Patterns",
+    "fingerprint": "4a9a6cab6be8"
+  },
+  "3d5bb8a53037": {
+    "content_preview": "- Best-effort try/except around optional features in orchestrator so they never ",
+    "source_file": "CLAUDE.md",
+    "line_number": 34,
+    "section": "Key Patterns",
+    "fingerprint": "3d5bb8a53037"
+  },
+  "a775e45eec33": {
+    "content_preview": "- Return types are dataclasses or simple primitives, never raw JSON strings from",
+    "source_file": "CLAUDE.md",
+    "line_number": 35,
+    "section": "Key Patterns",
+    "fingerprint": "a775e45eec33"
+  },
+  "9e0fb6162b5c": {
+    "content_preview": "Prefer these over Bash for file reads and large output operations:",
+    "source_file": "CLAUDE.md",
+    "line_number": 39,
+    "section": "MCP Tools (context-mode)",
+    "fingerprint": "9e0fb6162b5c"
+  },
+  "86787c02a515": {
+    "content_preview": "| Tool | Purpose |",
+    "source_file": "CLAUDE.md",
+    "line_number": 41,
+    "section": "MCP Tools (context-mode)",
+    "fingerprint": "86787c02a515"
+  },
+  "8ae464a29687": {
+    "content_preview": "|------|---------|",
+    "source_file": "CLAUDE.md",
+    "line_number": 42,
+    "section": "MCP Tools (context-mode)",
+    "fingerprint": "8ae464a29687"
+  },
+  "dfa2e888658e": {
+    "content_preview": "| `ctx_execute` | Run shell commands with output captured server-side |",
+    "source_file": "CLAUDE.md",
+    "line_number": 43,
+    "section": "MCP Tools (context-mode)",
+    "fingerprint": "dfa2e888658e"
+  },
+  "b94a00e7c644": {
+    "content_preview": "| `ctx_execute_file` | Read and analyze files without loading into context |",
+    "source_file": "CLAUDE.md",
+    "line_number": 44,
+    "section": "MCP Tools (context-mode)",
+    "fingerprint": "b94a00e7c644"
+  },
+  "c253e29d7eeb": {
+    "content_preview": "| `ctx_batch_execute` | Run multiple commands in one call |",
+    "source_file": "CLAUDE.md",
+    "line_number": 45,
+    "section": "MCP Tools (context-mode)",
+    "fingerprint": "c253e29d7eeb"
+  },
+  "561fec899393": {
+    "content_preview": "| `ctx_index` | Index file content for BM25 search |",
+    "source_file": "CLAUDE.md",
+    "line_number": 46,
+    "section": "MCP Tools (context-mode)",
+    "fingerprint": "561fec899393"
+  },
+  "cf8559d9846a": {
+    "content_preview": "| `ctx_search` | Search indexed content with BM25 ranking |",
+    "source_file": "CLAUDE.md",
+    "line_number": 47,
+    "section": "MCP Tools (context-mode)",
+    "fingerprint": "cf8559d9846a"
+  },
+  "f3705051c27d": {
+    "content_preview": "| `ctx_fetch_and_index` | Fetch URL and index for search |",
+    "source_file": "CLAUDE.md",
+    "line_number": 48,
+    "section": "MCP Tools (context-mode)",
+    "fingerprint": "f3705051c27d"
+  },
+  "715f0dfa9038": {
+    "content_preview": "| `ctx_doctor` | Diagnose context-mode setup |",
+    "source_file": "CLAUDE.md",
+    "line_number": 49,
+    "section": "MCP Tools (context-mode)",
+    "fingerprint": "715f0dfa9038"
+  },
+  "1ba566c17355": {
+    "content_preview": "| `ctx_stats` | Show context-mode usage stats |",
+    "source_file": "CLAUDE.md",
+    "line_number": 50,
+    "section": "MCP Tools (context-mode)",
+    "fingerprint": "1ba566c17355"
+  },
+  "d1b7c5667bc9": {
+    "content_preview": "| `ctx_upgrade` | Upgrade context-mode |",
+    "source_file": "CLAUDE.md",
+    "line_number": 51,
+    "section": "MCP Tools (context-mode)",
+    "fingerprint": "d1b7c5667bc9"
+  },
+  "b73461bbf715": {
+    "content_preview": "- Secret detection blocks sync when API keys/tokens found in env vars",
+    "source_file": "CLAUDE.md",
+    "line_number": 55,
+    "section": "Safety",
+    "fingerprint": "b73461bbf715"
+  },
+  "98e9e9ba6094": {
+    "content_preview": "- Conflict detection warns when target files were manually edited since last syn",
+    "source_file": "CLAUDE.md",
+    "line_number": 56,
+    "section": "Safety",
+    "fingerprint": "98e9e9ba6094"
+  },
+  "76a7f89cadaa": {
+    "content_preview": "- Backup manager snapshots target files before overwriting; automatic rollback o",
+    "source_file": "CLAUDE.md",
+    "line_number": 57,
+    "section": "Safety",
+    "fingerprint": "76a7f89cadaa"
+  },
+  "cc4c16c8d352": {
+    "content_preview": "- Claude Code `\"deny\"` permissions are never downgraded in targets",
+    "source_file": "CLAUDE.md",
+    "line_number": 58,
+    "section": "Safety",
+    "fingerprint": "cc4c16c8d352"
+  }
+}

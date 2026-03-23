@@ -25,8 +25,6 @@ Exit codes:
     1 — recipe not found or operation failed
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import re

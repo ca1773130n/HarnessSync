@@ -34,8 +34,8 @@ _TARGET_PROJECT_FILES: dict[str, list[str]] = {
     "windsurf": [".windsurfrules"],
     "cline": [".clinerules", ".roo/mcp.json"],
     "continue": [".continue/rules/harnesssync.md", ".continue/config.json"],
-    "zed": [".zed/system-prompt.md", ".zed/settings.json"],
-    "neovim": [".avante/system-prompt.md", ".codecompanion/system-prompt.md", ".avante/mcp.json"],
+    "zed": [".rules", ".zed/settings.json"],
+    "neovim": [".avante/rules/system-prompt.avanterules", ".codecompanion/system-prompt.md", ".avante/mcp.json"],
 }
 
 # Files that are user-global (in $HOME, not project-specific)

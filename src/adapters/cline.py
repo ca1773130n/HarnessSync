@@ -3,17 +3,18 @@ from __future__ import annotations
 """Cline / Roo-Code adapter for HarnessSync.
 
 Syncs Claude Code configuration to Cline and Roo-Code (VS Code AI agent plugins):
-- Rules (CLAUDE.md) → .clinerules (Cline project rules file)
-- Rules (CLAUDE.md) → .roo/rules/harnesssync.md (Roo-Code rules directory)
-- Skills → .clinerules (appended as skill context)
+- Rules (CLAUDE.md) → .clinerules/ directory as individual .md files (primary)
+                     → .clinerules flat file (backward compat fallback)
+                     → .roo/rules/harnesssync.md (Roo-Code rules directory)
+- Skills → .cline/skills/<name>/SKILL.md with YAML frontmatter (Cline native skills)
 - Agents → .roo/rules/agents/<name>.md (Roo-Code agent rules)
-- Commands → .clinerules (best-effort mapping)
+- Commands → .clinerules/workflows/<name>.md (Cline workflow files)
 - MCP servers → .roo/mcp.json (Roo-Code MCP config)
 - Settings → no-op (managed by VS Code extension)
 
-Cline reads .clinerules at project root as persistent system instructions.
+Cline reads .clinerules/ directory for project rules (individual .md files).
+The flat .clinerules file is still written as a backward-compatibility fallback.
 Roo-Code stores rules in .roo/rules/ and MCP config in .roo/mcp.json.
-Both formats are written to maximize compatibility with both tools.
 """
 
 from datetime import datetime, timezone
@@ -29,6 +30,8 @@ HARNESSSYNC_MARKER = "<!-- Managed by HarnessSync -->"
 HARNESSSYNC_MARKER_END = "<!-- End HarnessSync managed content -->"
 
 CLINERULES = ".clinerules"
+CLINE_SKILLS_DIR = ".cline/skills"
+CLINERULES_WORKFLOWS_DIR = ".clinerules/workflows"
 ROO_DIR = ".roo"
 ROO_RULES_DIR = ".roo/rules"
 ROO_MCP_JSON = ".roo/mcp.json"
@@ -40,7 +43,9 @@ class ClineAdapter(AdapterBase):
 
     def __init__(self, project_dir: Path):
         super().__init__(project_dir)
-        self.clinerules_path = project_dir / CLINERULES
+        self.clinerules_path = project_dir / CLINERULES  # file or directory
+        self.cline_skills_dir = project_dir / CLINE_SKILLS_DIR
+        self.workflows_dir = project_dir / CLINERULES_WORKFLOWS_DIR
         self.roo_dir = project_dir / ROO_DIR
         self.roo_rules_dir = project_dir / ROO_RULES_DIR
         self.roo_mcp_path = project_dir / ROO_MCP_JSON
@@ -60,19 +65,20 @@ class ClineAdapter(AdapterBase):
         return new_section + "\n"
 
     def sync_rules(self, rules: list[dict]) -> SyncResult:
-        """Sync rules to .clinerules and .roo/rules/harnesssync.md.
+        """Sync rules to .clinerules/ directory, flat .clinerules, and .roo/rules/.
 
-        Cline reads .clinerules from project root as system instructions.
-        Roo-Code reads rules from .roo/rules/ directory.
-        Both files are written to support both tools simultaneously.
+        Primary: individual .md files in .clinerules/ directory (Cline's current format).
+        Fallback: flat .clinerules file for backward compatibility.
+        Roo-Code: .roo/rules/harnesssync.md for Roo-Code compatibility.
         """
         if not rules:
             return SyncResult(skipped=1, skipped_files=[f"{CLINERULES}: no rules to sync"])
 
-        rule_contents = [r.get("content", "") for r in rules if r.get("content", "").strip()]
-        if not rule_contents:
+        rules_with_content = [r for r in rules if r.get("content", "").strip()]
+        if not rules_with_content:
             return SyncResult(skipped=1, skipped_files=[f"{CLINERULES}: empty rules"])
 
+        rule_contents = [r.get("content", "") for r in rules_with_content]
         concatenated = "\n\n---\n\n".join(rule_contents)
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
@@ -89,17 +95,45 @@ class ClineAdapter(AdapterBase):
         failed = 0
         failed_files: list[str] = []
 
-        # Write .clinerules for Cline
-        existing = ""
-        if self.clinerules_path.is_file():
+        # Determine whether .clinerules is already a flat file (legacy) or
+        # can be used as a directory (new format). We never delete a user's
+        # existing flat file — instead we update it in-place as a fallback.
+        clinerules_is_flat_file = self.clinerules_path.is_file()
+
+        if clinerules_is_flat_file:
+            # Legacy mode: update the existing flat .clinerules file
             existing = self.clinerules_path.read_text(encoding="utf-8")
-        new_content = self._replace_managed_section(existing, managed_section)
-        try:
-            self.clinerules_path.write_text(new_content, encoding="utf-8")
-            synced += 1
-        except OSError as e:
-            failed += 1
-            failed_files.append(f"{CLINERULES}: {e}")
+            new_content = self._replace_managed_section(existing, managed_section)
+            try:
+                self.clinerules_path.write_text(new_content, encoding="utf-8")
+                synced += 1
+            except OSError as e:
+                failed += 1
+                failed_files.append(f"{CLINERULES}: {e}")
+        else:
+            # New format: write individual .md files to .clinerules/ directory
+            try:
+                ensure_dir(self.clinerules_path)
+                for i, rule in enumerate(rules_with_content):
+                    rule_path = rule.get("path")
+                    if rule_path:
+                        # Derive filename from source path stem
+                        name = Path(rule_path).stem.lower().replace(" ", "-")
+                    else:
+                        name = f"rule-{i}"
+                    out_path = self.clinerules_path / f"{name}.md"
+                    out_path.write_text(
+                        f"{HARNESSSYNC_MARKER}\n"
+                        f"{rule.get('content', '')}\n\n"
+                        f"---\n"
+                        f"*Last synced by HarnessSync: {timestamp}*\n"
+                        f"{HARNESSSYNC_MARKER_END}\n",
+                        encoding="utf-8",
+                    )
+                    synced += 1
+            except OSError as e:
+                failed += 1
+                failed_files.append(f"{CLINERULES_DIR}/: {e}")
 
         # Write .roo/rules/harnesssync.md for Roo-Code
         try:
@@ -118,12 +152,16 @@ class ClineAdapter(AdapterBase):
         return SyncResult(synced=synced, failed=failed, failed_files=failed_files)
 
     def sync_skills(self, skills: dict[str, Path]) -> SyncResult:
-        """Sync skills to .roo/rules/skills/ as markdown files."""
-        if not skills:
-            return SyncResult(skipped=1, skipped_files=[".roo/rules/skills/: no skills"])
+        """Sync skills to .cline/skills/<name>/SKILL.md with YAML frontmatter.
 
-        skills_dir = self.roo_rules_dir / "skills"
-        ensure_dir(skills_dir)
+        Uses Cline's native skills format: each skill gets its own directory
+        under .cline/skills/ with a SKILL.md file containing YAML frontmatter
+        (name, description) followed by the skill content.
+        """
+        if not skills:
+            return SyncResult(skipped=1, skipped_files=[f"{CLINE_SKILLS_DIR}/: no skills"])
+
+        ensure_dir(self.cline_skills_dir)  # create parent once before loop
         synced = 0
         failed = 0
         failed_files: list[str] = []
@@ -136,9 +174,28 @@ class ClineAdapter(AdapterBase):
                 continue
             try:
                 content = skill_md.read_text(encoding="utf-8")
-                out_path = skills_dir / f"{name}.md"
+
+                # Extract description from first non-empty, non-heading line
+                description = f"Skill: {name}"
+                for line in content.splitlines():
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith("#"):
+                        description = stripped[:120]
+                        break
+
+                skill_out_dir = self.cline_skills_dir / name
+                skill_out_dir.mkdir(exist_ok=True)
+                out_path = skill_out_dir / "SKILL.md"
+
+                quoted_name = self._quote_yaml_value(name)
+                quoted_desc = self._quote_yaml_value(description)
+
                 out_path.write_text(
-                    f"# Skill: {name}\n\n{content}\n",
+                    f"---\n"
+                    f"name: {quoted_name}\n"
+                    f"description: {quoted_desc}\n"
+                    f"---\n"
+                    f"{content}\n",
                     encoding="utf-8",
                 )
                 synced += 1
@@ -177,14 +234,43 @@ class ClineAdapter(AdapterBase):
         return SyncResult(synced=synced, failed=failed, failed_files=failed_files)
 
     def sync_commands(self, commands: dict[str, Path]) -> SyncResult:
-        """Commands are appended to .clinerules as reference documentation."""
+        """Sync commands to .clinerules/workflows/ as markdown workflow files.
+
+        Each command becomes a .md file in the workflows directory,
+        with content adapted for Cline's workflow format.
+        """
         if not commands:
             return SyncResult(skipped=0)
 
-        return SyncResult(
-            skipped=len(commands),
-            skipped_files=[f"{name}: commands not natively supported in Cline" for name in commands],
-        )
+        ensure_dir(self.workflows_dir)
+        synced = 0
+        failed = 0
+        failed_files: list[str] = []
+
+        for name, cmd_path in commands.items():
+            cmd_md = cmd_path if cmd_path.is_file() else cmd_path / f"{name}.md"
+            if not cmd_md.is_file():
+                failed += 1
+                failed_files.append(f"{name}: command file not found at {cmd_md}")
+                continue
+            try:
+                content = cmd_md.read_text(encoding="utf-8")
+                adapted = self.adapt_command_content(content)
+
+                out_path = self.workflows_dir / f"{name}.md"
+                out_path.write_text(
+                    f"{HARNESSSYNC_MARKER}\n"
+                    f"# Workflow: {name}\n\n"
+                    f"{adapted}\n"
+                    f"{HARNESSSYNC_MARKER_END}\n",
+                    encoding="utf-8",
+                )
+                synced += 1
+            except OSError as e:
+                failed += 1
+                failed_files.append(f"{name}: {e}")
+
+        return SyncResult(synced=synced, failed=failed, failed_files=failed_files)
 
     def sync_mcp(self, mcp_servers: dict[str, dict]) -> SyncResult:
         """Sync MCP servers to .roo/mcp.json.

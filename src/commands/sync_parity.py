@@ -66,7 +66,7 @@ _SUPPORT_MATRIX: dict[str, dict[str, str]] = {
         "settings": "none",    # Managed by Continue extension
     },
     "zed": {
-        "rules": "full",       # .zed/system-prompt.md
+        "rules": "full",       # .rules
         "skills": "partial",   # .zed/prompts/skills/<name>.md
         "agents": "partial",   # .zed/prompts/agent-<name>.md
         "commands": "partial", # .zed/prompts/cmd-<name>.md
@@ -74,9 +74,9 @@ _SUPPORT_MATRIX: dict[str, dict[str, str]] = {
         "settings": "none",    # Managed by Zed editor
     },
     "neovim": {
-        "rules": "full",       # .avante/system-prompt.md + .codecompanion/system-prompt.md
-        "skills": "partial",   # .avante/rules/skills/<name>.md
-        "agents": "partial",   # .avante/rules/agents/<name>.md
+        "rules": "full",       # .avante/rules/system-prompt.avanterules + .codecompanion/system-prompt.md
+        "skills": "partial",   # .avante/rules/skills/<name>.avanterules
+        "agents": "partial",   # .avante/rules/agents/<name>.avanterules
         "commands": "partial", # .codecompanion/slash-commands/<name>.md
         "mcp": "full",         # .avante/mcp.json mcpServers
         "settings": "none",    # Managed by Neovim config

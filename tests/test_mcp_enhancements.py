@@ -366,8 +366,8 @@ class TestGeminiMcpEnhancements:
         has_url = "url" in server_cfg or "httpUrl" in server_cfg
         assert has_url
 
-    def test_timeout_dropped(self, tmp_path):
-        """timeout should not appear in Gemini output (not supported)."""
+    def test_timeout_passed_through(self, tmp_path):
+        """timeout should appear in Gemini output (supported since v0.3.0)."""
         adapter = GeminiAdapter(tmp_path)
         servers = {
             "timeout-server": {
@@ -380,7 +380,7 @@ class TestGeminiMcpEnhancements:
 
         settings = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
         server_cfg = settings["mcpServers"]["timeout-server"]
-        assert "timeout" not in server_cfg
+        assert server_cfg.get("timeout") == 30000
 
     def test_oauth_scopes_dropped(self, tmp_path):
         """oauth_scopes should not appear in Gemini output (not supported)."""
@@ -418,7 +418,7 @@ class TestGeminiMcpEnhancements:
         server_cfg = settings["mcpServers"]["full-server"]
         assert server_cfg["trust"] is True
         assert server_cfg["cwd"] == "/opt/mcp"
-        assert "timeout" not in server_cfg
+        assert server_cfg.get("timeout") == 30000
         assert "oauth_scopes" not in server_cfg
         assert "essential" not in server_cfg
 
@@ -840,13 +840,13 @@ class TestDroppedFields:
         content = (tmp_path / ".codex" / "config.toml").read_text()
         assert "essential" not in content
 
-    def test_gemini_drops_timeout(self, tmp_path, full_source_config):
-        """Gemini should drop timeout."""
+    def test_gemini_passes_timeout(self, tmp_path, full_source_config):
+        """Gemini should pass through timeout (supported since v0.3.0)."""
         adapter = GeminiAdapter(tmp_path)
         result = adapter.sync_mcp({"s": full_source_config})
         assert result.synced == 1
         settings = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
-        assert "timeout" not in settings["mcpServers"]["s"]
+        assert settings["mcpServers"]["s"].get("timeout") == full_source_config["timeout"]
 
     def test_gemini_drops_oauth_scopes(self, tmp_path, full_source_config):
         """Gemini should drop oauth_scopes."""
