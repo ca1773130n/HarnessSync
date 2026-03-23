@@ -738,3 +738,28 @@ class AdapterBase(ABC):
         except Exception as e:
             print(f"  [AdapterBase] effectiveness annotation propagation failed: {e}", file=sys.stderr)
             return content
+
+    def import_to_claude(self, target_path: Path) -> dict:
+        """Import configuration FROM this harness target INTO Claude Code format.
+
+        Reads the target harness config at ``target_path`` and converts it to
+        a Claude Code-compatible dict that the /sync-import command can stage
+        under ``.claude/imported/``.
+
+        Subclasses should override this method to perform actual conversion.
+        The base implementation returns an empty dict (no-op).
+
+        Args:
+            target_path: Root directory or config file for this harness target.
+
+        Returns:
+            Dict with any of the following optional keys:
+              - "rules":    str  — CLAUDE.md content extracted from the target
+              - "settings": dict — settings keys to merge into settings.json
+              - "skills":   dict — mapping skill_name -> skill content string
+              - "agents":   dict — mapping agent_name -> agent content string
+              - "commands": dict — mapping command_name -> command content string
+              - "mcp":      dict — MCP server configs extracted from the target
+            Missing keys are silently ignored by the importer.
+        """
+        return {}

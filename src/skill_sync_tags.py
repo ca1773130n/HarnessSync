@@ -238,6 +238,55 @@ def filter_skills_for_target(
     return result
 
 
+def parse_agent_sync_tag(agent_path: str | Path) -> dict:
+    """Parse the ``sync:`` frontmatter field from an agent .md file.
+
+    Args:
+        agent_path: Path to the agent .md file.
+
+    Returns:
+        Normalised sync-control dict identical to :func:`parse_skill_sync_tag`.
+    """
+    path = Path(agent_path)
+    if not path.is_file():
+        return {"mode": "all", "targets": frozenset()}
+
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {"mode": "all", "targets": frozenset()}
+
+    frontmatter = _parse_frontmatter_block(content)
+    if frontmatter is None or "sync" not in frontmatter:
+        return {"mode": "all", "targets": frozenset()}
+
+    return _normalise_sync_value(frontmatter["sync"])
+
+
+def filter_agents_for_target(
+    agents: dict[str, Path],
+    target: str,
+) -> dict[str, Path]:
+    """Filter an agents dict to only those allowed for a specific target.
+
+    Reads the ``sync:`` YAML frontmatter from each agent .md file and
+    returns only agents whose sync tag permits ``target``.
+
+    Args:
+        agents: Dict mapping agent_name -> path to agent .md file.
+        target: Canonical target name (e.g. "gemini").
+
+    Returns:
+        Filtered dict containing only agents that should be synced to target.
+    """
+    result: dict[str, Path] = {}
+    for name, path in agents.items():
+        sync_tag = parse_agent_sync_tag(path)
+        if skill_allowed_for_target(sync_tag, target):
+            result[name] = path
+    return result
+
+
 def describe_skill_sync_tag(sync_tag: dict) -> str:
     """Return a human-readable description of a skill's sync tag.
 

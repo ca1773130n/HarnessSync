@@ -61,6 +61,7 @@ class ProfileManager:
     VALID_PROFILE_KEYS = {
         "description", "scope", "only_sections", "skip_sections", "targets",
         "mcp_servers", "account", "harness_env", "extends",
+        "env_vars",  # per-harness env var overrides: {"codex": {"OPENAI_API_KEY": "..."}}
     }
 
     def __init__(self, config_dir: Path = None):
@@ -240,7 +241,52 @@ class ProfileManager:
         if "harness_env" in profile and profile["harness_env"]:
             result["harness_env"] = profile["harness_env"]
 
+        # Per-harness env var overrides.
+        # Format: {"codex": {"OPENAI_API_KEY": "sk-..."}, "gemini": {"GEMINI_API_KEY": "..."}}
+        # The caller (sync.py) is responsible for applying these to os.environ before sync.
+        if "env_vars" in profile and isinstance(profile["env_vars"], dict):
+            result["profile_env_vars"] = profile["env_vars"]
+
         return result
+
+    def get_env_vars_for_target(self, profile_name: str, target: str) -> dict[str, str]:
+        """Return env var overrides for a specific harness target from a profile.
+
+        Args:
+            profile_name: Name of the profile to look up.
+            target: Harness target name (e.g. "codex", "gemini").
+
+        Returns:
+            Dict mapping env var name -> value string.
+            Empty dict if no overrides for this target.
+        """
+        profile = self.get_profile(profile_name)
+        if not profile:
+            return {}
+        env_vars = profile.get("env_vars", {})
+        if not isinstance(env_vars, dict):
+            return {}
+        target_vars = env_vars.get(target.lower(), {})
+        return {k: str(v) for k, v in target_vars.items()} if isinstance(target_vars, dict) else {}
+
+    def apply_env_vars_for_target(self, profile_name: str, target: str) -> dict[str, str]:
+        """Apply profile env var overrides for target into os.environ.
+
+        Overwrites existing env vars with profile values. Returns the dict of
+        applied overrides so callers can restore originals if needed.
+
+        Args:
+            profile_name: Profile name.
+            target: Harness target name.
+
+        Returns:
+            Dict of applied env var overrides (name -> new value).
+        """
+        import os as _os
+        overrides = self.get_env_vars_for_target(profile_name, target)
+        for k, v in overrides.items():
+            _os.environ[k] = v
+        return overrides
 
     def filter_mcp_servers(self, mcp_servers: dict, name: str) -> dict:
         """Filter an MCP servers dict to only include servers listed in a profile.

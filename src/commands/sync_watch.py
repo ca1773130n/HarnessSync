@@ -8,11 +8,15 @@ settings.json for mtime changes and triggers Orchestrator.sync_all() on
 any modification. Fills the gap left by the PostToolUse hook, which only
 fires when Claude Code itself edits files.
 
+The daemon PID is stored at .claude/harness-sync/watch.pid so that
+/sync can detect a running watcher and skip redundant syncs.
+
 Usage:
     /sync-watch                    # poll every 2 seconds (default)
     /sync-watch --interval 5       # poll every 5 seconds
     /sync-watch --targets cursor,gemini  # only sync specific targets
     /sync-watch --dry-run          # show what would sync, don't write
+    /sync-watch --stop             # stop a running watcher daemon
 """
 
 import os
@@ -27,6 +31,59 @@ sys.path.insert(0, PLUGIN_ROOT)
 
 from pathlib import Path
 from src.orchestrator import SyncOrchestrator
+
+# PID file location: .claude/harness-sync/watch.pid (relative to project dir)
+_PID_FILE_REL = ".claude/harness-sync/watch.pid"
+
+
+def _pid_file_path(project_dir: Path) -> Path:
+    return project_dir / _PID_FILE_REL
+
+
+def _write_pid(project_dir: Path) -> None:
+    """Write current process PID to the watch.pid file."""
+    pid_file = _pid_file_path(project_dir)
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text(str(os.getpid()), encoding="utf-8")
+
+
+def _clear_pid(project_dir: Path) -> None:
+    """Remove the watch.pid file."""
+    pid_file = _pid_file_path(project_dir)
+    try:
+        pid_file.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def is_watcher_running(project_dir: Path) -> int | None:
+    """Return the watcher PID if a live watcher is running, else None."""
+    pid_file = _pid_file_path(project_dir)
+    if not pid_file.is_file():
+        return None
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+        # Check if the process is alive (signal 0 = existence check)
+        os.kill(pid, 0)
+        return pid
+    except (ValueError, OSError):
+        # Stale PID file — clean it up
+        _clear_pid(project_dir)
+        return None
+
+
+def _stop_watcher(project_dir: Path) -> None:
+    """Send SIGINT to a running watcher and remove its PID file."""
+    pid = is_watcher_running(project_dir)
+    if pid is None:
+        print("No sync-watch daemon is running.")
+        return
+    try:
+        os.kill(pid, signal.SIGINT)
+        print(f"Sent stop signal to watcher (PID {pid}).")
+        _clear_pid(project_dir)
+    except OSError as e:
+        print(f"Could not stop watcher (PID {pid}): {e}")
 
 
 # Files and directories to watch (relative to project root)
@@ -147,19 +204,40 @@ def main() -> None:
         "--dry-run", action="store_true",
         help="Preview what would sync without writing files",
     )
+    parser.add_argument(
+        "--stop", action="store_true",
+        help="Stop a running sync-watch daemon and exit",
+    )
+    parser.add_argument(
+        "--project-dir", default=None,
+        help="Project directory (default: current directory)",
+    )
 
     try:
         args = parser.parse_args(tokens)
     except SystemExit:
         return
 
-    project_dir = Path.cwd()
+    project_dir = Path(
+        args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+    )
     interval = max(0.5, args.interval)
-    only_targets = (
-        [t.strip() for t in args.targets.split(",") if t.strip()]
+    only_targets: set[str] | None = (
+        {t.strip() for t in args.targets.split(",") if t.strip()}
         if args.targets
         else None
     )
+
+    if args.stop:
+        _stop_watcher(project_dir)
+        return
+
+    # Check if a watcher is already running
+    existing_pid = is_watcher_running(project_dir)
+    if existing_pid is not None:
+        print(f"sync-watch: a watcher is already running (PID {existing_pid}).")
+        print("Use --stop to stop it, or kill it manually.")
+        return
 
     summary = _SyncSummary()
     stop_requested = False
@@ -170,9 +248,11 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, _handle_sigint)
 
-    print(f"sync-watch: monitoring config files (interval={interval}s)")
+    _write_pid(project_dir)
+
+    print(f"sync-watch: monitoring config files (interval={interval}s, PID={os.getpid()})")
     if only_targets:
-        print(f"  targets: {', '.join(only_targets)}")
+        print(f"  targets: {', '.join(sorted(only_targets))}")
     if args.dry_run:
         print("  dry-run mode: changes will be previewed, not written")
     print("  Press Ctrl+C to stop.\n")
@@ -180,49 +260,49 @@ def main() -> None:
     watch_paths = _collect_watch_targets(project_dir)
     if not watch_paths:
         print("No config files found to watch. Is this a Claude Code project directory?")
+        _clear_pid(project_dir)
         return
 
     snapshot = _snapshot_mtimes(watch_paths)
 
-    while not stop_requested:
-        time.sleep(interval)
-        if stop_requested:
-            break
+    try:
+        while not stop_requested:
+            time.sleep(interval)
+            if stop_requested:
+                break
 
-        # Refresh watch list (handles newly created files)
-        watch_paths = _collect_watch_targets(project_dir)
-        new_snapshot = _snapshot_mtimes(watch_paths)
-        changed = _detect_changes(snapshot, new_snapshot)
+            # Refresh watch list (handles newly created files)
+            watch_paths = _collect_watch_targets(project_dir)
+            new_snapshot = _snapshot_mtimes(watch_paths)
+            changed = _detect_changes(snapshot, new_snapshot)
 
-        if changed:
-            snapshot = new_snapshot
-            changed_display = ", ".join(
-                os.path.relpath(p, project_dir) for p in changed[:3]
-            )
-            if len(changed) > 3:
-                changed_display += f" (+{len(changed) - 3} more)"
-            print(f"[{_timestamp()}] Change detected: {changed_display}")
-
-            try:
-                orchestrator = SyncOrchestrator(
-                    project_dir=project_dir,
-                    dry_run=args.dry_run,
+            if changed:
+                snapshot = new_snapshot
+                changed_display = ", ".join(
+                    os.path.relpath(p, project_dir) for p in changed[:3]
                 )
-                if only_targets:
-                    results = orchestrator.sync_all(targets=only_targets)
-                else:
+                if len(changed) > 3:
+                    changed_display += f" (+{len(changed) - 3} more)"
+                print(f"[{_timestamp()}] Change detected: {changed_display}")
+
+                try:
+                    orchestrator = SyncOrchestrator(
+                        project_dir=project_dir,
+                        dry_run=args.dry_run,
+                        cli_only_targets=only_targets,
+                    )
                     results = orchestrator.sync_all()
 
-                success_count = sum(
-                    1 for tr in results.values()
-                    if isinstance(tr, dict) and not any(
-                        k == "error" for k in tr
+                    success_count = sum(
+                        1 for tr in results.values()
+                        if isinstance(tr, dict) and "error" not in tr
                     )
-                )
-                print(f"  Synced {success_count}/{len(results)} targets.")
-                summary.record(changed, results)
-            except Exception as e:
-                print(f"  Sync error: {e}")
+                    print(f"  Synced {success_count}/{len(results)} targets.")
+                    summary.record(changed, results)
+                except Exception as e:
+                    print(f"  Sync error: {e}")
+    finally:
+        _clear_pid(project_dir)
 
     summary.print_summary()
 

@@ -189,6 +189,22 @@ def _resolve_sections(args, pm, valid_sections: set[str]):
             only_sections = merged.get("only_sections", only_sections)
             skip_sections = merged.get("skip_sections", skip_sections)
             _profile_targets = merged.get("profile_targets")
+
+            # Apply per-harness env var overrides from the profile.
+            # These are applied globally (affecting all targets) because
+            # the orchestrator runs all adapters in the same process.
+            # Per-target env isolation would require subprocess-per-adapter.
+            _profile_env_vars = merged.get("profile_env_vars")
+            if _profile_env_vars and isinstance(_profile_env_vars, dict):
+                applied: list[str] = []
+                for _target_name, _vars in _profile_env_vars.items():
+                    if isinstance(_vars, dict):
+                        for _k, _v in _vars.items():
+                            os.environ[_k] = str(_v)
+                            applied.append(f"{_k} (for {_target_name})")
+                if applied:
+                    print(f"  [profile env vars: {', '.join(applied)}]")
+
             print(f"[profile: {args.profile}]")
         except KeyError as e:
             print(f"Error: {e}", file=sys.stderr)

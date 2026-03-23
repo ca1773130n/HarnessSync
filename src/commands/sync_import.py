@@ -1,17 +1,26 @@
 from __future__ import annotations
 
 """
-/sync-import slash command implementation.
+/sync-import slash command — Pull config FROM a target harness INTO Claude Code.
 
-Reads an existing Cursor .mdc rules file or Aider CONVENTIONS.md and merges
-its content into CLAUDE.md -- the reverse of the normal sync direction.
+HarnessSync normally pushes Claude Code config out to other harnesses. This
+command reverses the flow: it reads an existing harness config (Gemini, Codex,
+Cursor, etc.) and converts it to Claude Code format, staging the result under
+``.claude/imported/`` for review before merging.
 
-Implementation split: import_helpers.py contains content cleaning, merging,
-and drift detection logic.
+Each adapter exposes an ``import_to_claude(target_path) -> dict`` method that
+does the actual conversion. The command writes staged files and asks for
+confirmation before merging them into the live Claude Code config.
+
+Usage:
+    /sync-import gemini                     # import from Gemini (auto-detect path)
+    /sync-import codex --path ~/myproject   # import from specific path
+    /sync-import gemini --merge             # import and merge without staging
+    /sync-import gemini --dry-run           # preview what would be imported
 """
 
+import json
 import os
-import re
 import sys
 import shlex
 import argparse
@@ -20,266 +29,141 @@ from pathlib import Path
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PLUGIN_ROOT)
 
-from src.commands.import_helpers import (  # noqa: E402
-    DEFAULT_FILES as _DEFAULT_FILES,
-    clean_import_content as _clean_import_content,
-    detect_drift,
-    find_source_files as _find_source_files,
-    merge_into_claude_md as _merge_into_claude_md,
-)
+from src.adapters import AdapterRegistry
+from src.utils.paths import default_cc_home, ensure_dir, write_json_atomic
 
 
-def import_from_harness(
-    harness: str,
-    project_dir: Path,
-    file_path: Path | None = None,
-    dry_run: bool = False,
-) -> list[str]:
-    """Import configuration from a target harness into CLAUDE.md.
+# Default target config paths keyed by target name
+_DEFAULT_TARGET_PATHS: dict[str, str] = {
+    "gemini": ".",
+    "codex": ".",
+    "cursor": ".",
+    "aider": ".",
+    "windsurf": ".",
+    "opencode": ".",
+    "cline": ".",
+    "zed": str(Path.home() / ".config" / "zed"),
+    "neovim": str(Path.home() / ".config" / "nvim"),
+    "continue": str(Path.home() / ".continue"),
+    "vscode": ".",
+}
 
-    Args:
-        harness: Source harness ("cursor", "aider", "codex", "gemini", "windsurf",
-                 "opencode", "cline").
-        project_dir: Project root directory.
-        file_path: Specific file to import (auto-detected if None).
-        dry_run: If True, preview only.
 
-    Returns:
-        List of result message strings.
-    """
-    messages: list[str] = []
+def _stage_imported(imported: dict, staging_dir: Path, target_name: str) -> list[Path]:
+    """Write imported data to the staging area. Returns list of written paths."""
+    written: list[Path] = []
+    ensure_dir(staging_dir)
 
-    if file_path:
-        source_files = [file_path] if file_path.is_file() else []
-        if not source_files:
-            return [f"Error: file not found: {file_path}"]
-    else:
-        source_files = _find_source_files(harness, project_dir)
+    rules = imported.get("rules", "")
+    if rules and isinstance(rules, str) and rules.strip():
+        rules_path = staging_dir / "CLAUDE.md"
+        rules_path.write_text(rules, encoding="utf-8")
+        written.append(rules_path)
 
-    if not source_files:
-        return [
-            f"No {harness} config files found in {project_dir}.\n"
-            f"Expected: {', '.join(_DEFAULT_FILES.get(harness, ['?']))}",
-        ]
+    settings = imported.get("settings")
+    if isinstance(settings, dict) and settings:
+        settings_path = staging_dir / "settings.json"
+        write_json_atomic(settings_path, settings)
+        written.append(settings_path)
 
-    claude_md_path = project_dir / "CLAUDE.md"
+    mcp = imported.get("mcp")
+    if isinstance(mcp, dict) and mcp:
+        mcp_path = staging_dir / ".mcp.json"
+        write_json_atomic(mcp_path, {"mcpServers": mcp})
+        written.append(mcp_path)
 
-    for src in source_files:
+    skills = imported.get("skills")
+    if isinstance(skills, dict):
+        for skill_name, skill_content in skills.items():
+            if isinstance(skill_content, str) and skill_content.strip():
+                skill_dir = staging_dir / "skills" / skill_name
+                ensure_dir(skill_dir)
+                skill_file = skill_dir / "SKILL.md"
+                skill_file.write_text(skill_content, encoding="utf-8")
+                written.append(skill_file)
+
+    agents = imported.get("agents")
+    if isinstance(agents, dict):
+        agents_dir = staging_dir / "agents"
+        ensure_dir(agents_dir)
+        for agent_name, agent_content in agents.items():
+            if isinstance(agent_content, str) and agent_content.strip():
+                agent_file = agents_dir / f"{agent_name}.md"
+                agent_file.write_text(agent_content, encoding="utf-8")
+                written.append(agent_file)
+
+    commands = imported.get("commands")
+    if isinstance(commands, dict):
+        commands_dir = staging_dir / "commands"
+        ensure_dir(commands_dir)
+        for cmd_name, cmd_content in commands.items():
+            if isinstance(cmd_content, str) and cmd_content.strip():
+                cmd_file = commands_dir / f"{cmd_name}.md"
+                cmd_file.write_text(cmd_content, encoding="utf-8")
+                written.append(cmd_file)
+
+    return written
+
+
+def _merge_staged(staging_dir: Path, project_dir: Path, cc_home: Path) -> list[str]:
+    """Merge staged files into live Claude Code config. Returns list of actions."""
+    import shutil
+    actions: list[str] = []
+
+    staged_rules = staging_dir / "CLAUDE.md"
+    if staged_rules.is_file():
+        live_claude = project_dir / "CLAUDE.md"
+        imported_text = staged_rules.read_text(encoding="utf-8")
+        if live_claude.is_file():
+            existing = live_claude.read_text(encoding="utf-8")
+            merged = existing.rstrip("\n") + "\n\n" + imported_text
+            live_claude.write_text(merged, encoding="utf-8")
+            actions.append(f"Appended imported rules to {live_claude}")
+        else:
+            live_claude.write_text(imported_text, encoding="utf-8")
+            actions.append(f"Created {live_claude} from imported rules")
+
+    staged_settings = staging_dir / "settings.json"
+    if staged_settings.is_file():
+        live_settings = project_dir / ".claude" / "settings.json"
         try:
-            raw = src.read_text(encoding="utf-8", errors="replace")
-        except OSError as e:
-            messages.append(f"Error reading {src}: {e}")
-            continue
+            imported_settings = json.loads(staged_settings.read_text(encoding="utf-8"))
+            existing_settings: dict = {}
+            if live_settings.is_file():
+                try:
+                    existing_settings = json.loads(live_settings.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    pass
+            merged_settings = {**existing_settings, **imported_settings}
+            ensure_dir(live_settings.parent)
+            write_json_atomic(live_settings, merged_settings)
+            actions.append(f"Merged settings into {live_settings}")
+        except (json.JSONDecodeError, OSError) as e:
+            actions.append(f"Warning: could not merge settings: {e}")
 
-        clean = _clean_import_content(raw, harness)
+    staged_skills = staging_dir / "skills"
+    if staged_skills.is_dir():
+        live_skills = cc_home / "skills"
+        ensure_dir(live_skills)
+        for skill_dir in staged_skills.iterdir():
+            if skill_dir.is_dir():
+                dest = live_skills / skill_dir.name
+                if dest.exists():
+                    shutil.rmtree(dest)
+                shutil.copytree(skill_dir, dest)
+                actions.append(f"Imported skill '{skill_dir.name}' to {dest}")
 
-        if not clean.strip():
-            messages.append(f"Skipped {src}: no user content after stripping managed sections.")
-            continue
+    staged_agents = staging_dir / "agents"
+    if staged_agents.is_dir():
+        live_agents = cc_home / "agents"
+        ensure_dir(live_agents)
+        for agent_file in staged_agents.iterdir():
+            if agent_file.is_file():
+                dest = live_agents / agent_file.name
+                shutil.copy2(agent_file, dest)
+                actions.append(f"Imported agent '{agent_file.stem}' to {dest}")
 
-        msg, changed = _merge_into_claude_md(claude_md_path, clean, harness, dry_run)
-        messages.append(f"{'[dry-run] ' if dry_run else ''}{src.name}: {msg}")
-
-    if not dry_run and any("Merged" in m for m in messages):
-        messages.append(
-            f"\nImport complete. Review {claude_md_path} and remove duplicate rules."
-        )
-
-    return messages
-
-
-def find_unique_rules(
-    harness: str,
-    project_dir: Path,
-    file_path: Path | None = None,
-) -> list[dict]:
-    """Pull Mode: find rules in target harness that don't exist in CLAUDE.md.
-
-    Scans the target harness config for bullet-point rules and compares them
-    against what's already in CLAUDE.md. Returns rules that exist in the target
-    but are absent from CLAUDE.md.
-
-    Args:
-        harness: Source harness to pull from.
-        project_dir: Project root directory.
-        file_path: Specific file to scan (auto-detected if None).
-
-    Returns:
-        List of dicts with keys: rule, source_file, harness.
-    """
-    _RULE_BULLET_RE = re.compile(r"^[-*]\s+(.+)$")
-
-    def _extract_rules_from_text(text: str) -> set[str]:
-        rules: set[str] = set()
-        for line in text.splitlines():
-            m = _RULE_BULLET_RE.match(line.strip())
-            if m:
-                rules.add(m.group(1).strip())
-        return rules
-
-    # Load existing CLAUDE.md rules
-    claude_md = project_dir / "CLAUDE.md"
-    existing_rules: set[str] = set()
-    if claude_md.exists():
-        try:
-            existing_rules = _extract_rules_from_text(
-                claude_md.read_text(encoding="utf-8", errors="replace")
-            )
-        except OSError:
-            pass
-
-    # Load target harness rules
-    source_files = [file_path] if file_path and file_path.is_file() else _find_source_files(harness, project_dir)
-
-    unique: list[dict] = []
-    for src in source_files:
-        try:
-            raw = src.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-
-        clean = _clean_import_content(raw, harness)
-        target_rules = _extract_rules_from_text(clean)
-
-        for rule in sorted(target_rules - existing_rules):
-            unique.append({
-                "rule": rule,
-                "source_file": str(src),
-                "harness": harness,
-            })
-
-    return unique
-
-
-def pull_mode(
-    harness: str,
-    project_dir: Path,
-    file_path: Path | None = None,
-    dry_run: bool = False,
-    interactive: bool = False,
-) -> list[str]:
-    """Bidirectional Sync Pull Mode -- propose target-only rules as CLAUDE.md additions.
-
-    Args:
-        harness: Target harness to pull from.
-        project_dir: Project root directory.
-        file_path: Specific file to scan (auto-detected if None).
-        dry_run: If True, show proposals without writing.
-        interactive: If True, ask the user to confirm each rule.
-
-    Returns:
-        List of result message strings.
-    """
-    unique = find_unique_rules(harness, project_dir, file_path)
-    if not unique:
-        return [f"No unique rules found in {harness} config that aren't already in CLAUDE.md."]
-
-    messages: list[str] = [
-        f"Found {len(unique)} rule(s) in {harness} not present in CLAUDE.md:"
-    ]
-    for item in unique:
-        messages.append(f"  - {item['rule']}")
-
-    if dry_run:
-        messages.append("\n[dry-run] No changes written.")
-        return messages
-
-    # Decide which rules to accept
-    accepted: list[str] = []
-    if interactive and sys.stdin.isatty():
-        for item in unique:
-            try:
-                choice = input(f"\n  Add? [{item['rule'][:80]}]  [y/N]: ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                break
-            if choice in ("y", "yes"):
-                accepted.append(item["rule"])
-    else:
-        accepted = [item["rule"] for item in unique]
-
-    if not accepted:
-        return messages + ["No rules selected."]
-
-    # Append accepted rules to CLAUDE.md
-    claude_md = project_dir / "CLAUDE.md"
-    from datetime import datetime
-    timestamp = datetime.now().strftime("%Y-%m-%d")
-    section_header = f"\n\n<!-- Pulled from {harness} by HarnessSync ({timestamp}) -->\n"
-    section_footer = f"\n<!-- End pull from {harness} -->\n"
-    rule_lines = "\n".join(f"- {r}" for r in accepted)
-
-    try:
-        existing = claude_md.read_text(encoding="utf-8") if claude_md.exists() else ""
-        claude_md.write_text(
-            existing + section_header + rule_lines + section_footer,
-            encoding="utf-8",
-        )
-        messages.append(f"\nAdded {len(accepted)} rule(s) to {claude_md}.")
-    except OSError as e:
-        messages.append(f"Error writing {claude_md}: {e}")
-
-    return messages
-
-
-def reconcile_drift(
-    harness: str,
-    project_dir: Path,
-    file_path: Path | None = None,
-    dry_run: bool = False,
-) -> list[str]:
-    """Surface a drift report and offer to pull target-only sections into CLAUDE.md.
-
-    Args:
-        harness: Target harness to reconcile with.
-        project_dir: Project root directory.
-        file_path: Specific target file (auto-detected if None).
-        dry_run: If True, report but don't write any changes.
-
-    Returns:
-        List of formatted message strings.
-    """
-    drift = detect_drift(harness, project_dir, file_path)
-
-    if "error" in drift:
-        return [f"Error: {drift['error']}"]
-
-    messages: list[str] = [
-        f"\nBidirectional Drift Report: CLAUDE.md \u2194 {harness} ({drift['source_file']})",
-        "=" * 60,
-    ]
-
-    if not drift["drift_detected"]:
-        messages.append(f"\u2713 No drift detected. {drift['identical']} section(s) are in sync.")
-        return messages
-
-    if drift["source_only"]:
-        messages.append(f"\n\u2192 {len(drift['source_only'])} section(s) only in CLAUDE.md (would NOT appear in {harness}):")
-        for h in drift["source_only"]:
-            messages.append(f"  \u00b7 {h}")
-
-    if drift["target_only"]:
-        messages.append(f"\n\u2190 {len(drift['target_only'])} section(s) only in {harness} (at risk of being overwritten):")
-        for h in drift["target_only"]:
-            messages.append(f"  \u00b7 {h}")
-        if not dry_run:
-            messages.append(f"\nPulling {len(drift['target_only'])} target-only section(s) into CLAUDE.md...")
-            pull_results = pull_mode(harness, project_dir, file_path, dry_run=dry_run)
-            messages.extend(pull_results)
-
-    if drift["diverged"]:
-        messages.append(f"\n\u2260 {len(drift['diverged'])} section(s) differ between CLAUDE.md and {harness}:")
-        for item in drift["diverged"]:
-            messages.append(f"  \u00b7 {item['heading']}")
-            if item.get("diff"):
-                diff_preview = "\n".join(item["diff"].splitlines()[:8])
-                messages.append(f"    {diff_preview}")
-
-    if dry_run:
-        messages.append("\n[dry-run] No changes written.")
-    else:
-        messages.append(f"\nReconcile complete. Run /sync to propagate CLAUDE.md to {harness}.")
-
-    return messages
+    return actions
 
 
 def main() -> None:
@@ -292,23 +176,34 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(
         prog="sync-import",
-        description="Import rules from another harness into CLAUDE.md",
+        description="Import config FROM a target harness INTO Claude Code format.",
     )
-    parser.add_argument("--from", dest="harness",
-                        choices=["cursor", "aider", "codex", "gemini", "windsurf", "opencode", "cline"],
-                        required=True, help="Source harness to import from")
-    parser.add_argument("--file", type=str, default=None,
-                        help="Specific file to import (auto-detected if omitted)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Preview what would be added without writing")
-    parser.add_argument("--pull-mode", action="store_true",
-                        help="Bidirectional: find rules in target that don't exist in CLAUDE.md")
-    parser.add_argument("--reconcile", action="store_true",
-                        help="Bidirectional: detect drift between CLAUDE.md and target harness")
-    parser.add_argument("--interactive", action="store_true",
-                        help="With --pull-mode: ask before adding each proposed rule")
-    parser.add_argument("--project-dir", type=str, default=None,
-                        help="Project directory (default: cwd)")
+    parser.add_argument(
+        "target",
+        help="Target harness to import from (e.g. gemini, codex, cursor)",
+    )
+    parser.add_argument(
+        "--path",
+        default=None,
+        dest="target_path",
+        help="Path to target harness config root (default: auto-detect for current project)",
+    )
+    parser.add_argument(
+        "--project-dir",
+        default=None,
+        help="Project directory (default: current directory)",
+    )
+    parser.add_argument(
+        "--merge",
+        action="store_true",
+        help="After staging, immediately merge into live Claude Code config without prompting",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="dry_run",
+        help="Preview what would be imported without writing any files",
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -316,27 +211,80 @@ def main() -> None:
         return
 
     project_dir = Path(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
-    file_path = Path(args.file) if args.file else None
+    cc_home = default_cc_home()
 
-    if getattr(args, "reconcile", False):
-        results = reconcile_drift(
-            harness=args.harness, project_dir=project_dir,
-            file_path=file_path, dry_run=args.dry_run,
-        )
-    elif args.pull_mode:
-        results = pull_mode(
-            harness=args.harness, project_dir=project_dir,
-            file_path=file_path, dry_run=args.dry_run,
-            interactive=args.interactive,
-        )
+    if args.target_path:
+        target_path = Path(args.target_path).expanduser().resolve()
     else:
-        results = import_from_harness(
-            harness=args.harness, project_dir=project_dir,
-            file_path=file_path, dry_run=args.dry_run,
-        )
+        default_rel = _DEFAULT_TARGET_PATHS.get(args.target.lower(), ".")
+        target_path = (project_dir / default_rel).resolve()
 
-    for line in results:
-        print(line)
+    try:
+        adapter = AdapterRegistry.get_adapter(args.target.lower(), project_dir)
+    except Exception:
+        print(f"Error: unknown target '{args.target}'.", file=sys.stderr)
+        print(f"Known targets: {', '.join(sorted(AdapterRegistry.list_targets()))}")
+        sys.exit(1)
+
+    print(f"Importing from {args.target} at {target_path} ...")
+
+    try:
+        imported = adapter.import_to_claude(target_path)
+    except Exception as e:
+        print(f"Error during import: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not imported:
+        print(f"Nothing to import — the {args.target} adapter returned no data.")
+        print("(The adapter may not yet implement import_to_claude() for this harness.)")
+        return
+
+    summary_parts = []
+    if imported.get("rules"):
+        summary_parts.append("rules")
+    if imported.get("settings"):
+        summary_parts.append(f"{len(imported['settings'])} setting(s)")
+    if imported.get("mcp"):
+        summary_parts.append(f"{len(imported['mcp'])} MCP server(s)")
+    if imported.get("skills"):
+        summary_parts.append(f"{len(imported['skills'])} skill(s)")
+    if imported.get("agents"):
+        summary_parts.append(f"{len(imported['agents'])} agent(s)")
+    if imported.get("commands"):
+        summary_parts.append(f"{len(imported['commands'])} command(s)")
+
+    print(f"Found: {', '.join(summary_parts) or 'nothing'}")
+
+    if args.dry_run:
+        print("[dry-run] No files written.")
+        if imported.get("rules"):
+            print("\n--- Imported rules preview ---")
+            preview = imported["rules"][:500]
+            print(preview)
+            if len(imported["rules"]) > 500:
+                print(f"  ... ({len(imported['rules'])} chars total)")
+        return
+
+    staging_dir = project_dir / ".claude" / "imported" / args.target.lower()
+    written = _stage_imported(imported, staging_dir, args.target.lower())
+
+    print(f"\nStaged {len(written)} file(s) under {staging_dir}:")
+    for p in written:
+        try:
+            print(f"  {p.relative_to(project_dir)}")
+        except ValueError:
+            print(f"  {p}")
+
+    if args.merge:
+        print("\nMerging into live Claude Code config ...")
+        actions = _merge_staged(staging_dir, project_dir, cc_home)
+        for action in actions:
+            print(f"  {action}")
+        print("\nMerge complete. Run /sync to push changes to all targets.")
+    else:
+        print(f"\nReview staged files, then run:")
+        print(f"  /sync-import {args.target} --merge   # merge staged files into live config")
+        print(f"Or to discard: rm -rf \"{staging_dir}\"")
 
 
 if __name__ == "__main__":

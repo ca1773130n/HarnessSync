@@ -189,6 +189,15 @@ def build_target_data(
     except Exception:
         pass
 
+    # Agent sync tags (parallel to skill sync tags — filters before translation)
+    try:
+        from src.skill_sync_tags import filter_agents_for_target as _filter_agents
+        agents_for_tag_check = target_data.get('agents')
+        if isinstance(agents_for_tag_check, dict) and agents_for_tag_check:
+            target_data['agents'] = _filter_agents(agents_for_tag_check, target)
+    except Exception:
+        pass
+
     # Agent translation hints
     try:
         from src.skill_translator import inject_agent_translation_hints

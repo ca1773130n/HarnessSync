@@ -5839,3 +5839,48 @@ _2026-03-23T19:20:37.766Z_
 - sync_coverage.py fills a real gap: users currently have no way to know before syncing which config elements will be dropped for a given harness
 
 ---
+## Iteration 92
+_2026-03-23T20:13:00.328Z_
+
+### Items Attempted
+
+- **Guard None return from read_json_safe before .get()** — pass
+- **Strip orphaned start marker when end marker is missing** — pass
+- **Validate zip entry paths before writing in restore_from_archive** — pass
+- **Guard should_debounce against None state_manager argument** — pass
+- **Per-Harness Config Overrides** — pass
+- **Sync Translation Fidelity Report** — pass
+- **Interactive Conflict Resolver** — pass
+- **Git Pre-Commit Sync Hook Installer** — pass
+- **Live Capability Gap Tracker** — pass
+- **Wrap reader.discover_all() in try/except in orchestrator sync_all** — pass
+
+### Decisions Made
+
+- In _decompose_plugin(), returned 'decomposed' (the existing boolean) rather than bare 'return' so callers still get a useful value when mcp_data is None.
+- For the orphaned start marker fix, stripped content before start_idx rather than all of existing to preserve user content that appeared before the broken marker.
+- Path traversal guard uses resolve().relative_to() which is the canonical Python stdlib approach — raises ValueError on escape, continues to next zip entry rather than aborting the whole restore.
+- Added OverrideReader as an alias for OverrideManager in source_reader.py to match the spec naming without duplicating the implementation.
+- Extended OverrideManager to check .claude/overrides/ as a secondary location so the Claude Code conventional path works alongside .harness-sync/overrides/.
+- Created sync_fidelity.py as a thin analysis layer over the existing CAPABILITY_MATRIX data — no adapter instances needed, purely read/report.
+- Added --watch to sync_matrix.py using a simple mtime-polling loop (os.stat, time.sleep) — stdlib only, cross-platform, no inotify dependency.
+- Wrapped discover_all() in try/except and re-raised as SyncError so callers get a clear actionable message with the original cause chained via 'from e'.
+- Skipped 'Interactive Conflict Resolver' and 'Git Pre-Commit Sync Hook Installer' as separate items — both are already fully implemented (TuiConflictWizard with --no-interactive, sync_git_hook.py with pre-commit/gate/post-checkout/post-merge/pre-push hooks).
+
+### Patterns Discovered
+
+- The codebase uses a re-export facade pattern extensively (source_reader.py, conflict_detector.py) — implementation lives in sub-modules, public API is assembled in the facade.
+- Commands follow a consistent pattern: PLUGIN_ROOT resolution, sys.path insert, argparse with shlex.split for token parsing, main() as entry point.
+- Best-effort try/except wrapping is the dominant pattern for optional features in orchestrator — only core path gets strict error propagation.
+- The CAPABILITY_MATRIX in sync_matrix.py is a valuable shared data structure that can power additional analysis commands without re-implementing harness knowledge.
+- Several 'product-ideation' items were already implemented in prior iterations — the codebase has accumulated significant feature depth.
+
+### Takeaways
+
+- Before implementing any 'new' feature, grep for existing implementations — at least 3 of the 5 product-ideation items were already present in some form.
+- The zip path traversal fix is genuinely security-relevant — a maliciously crafted archive could have written files outside the project directory.
+- The orphaned start marker bug is a real data integrity issue that would cause silent content duplication on repeated syncs.
+- The OverrideManager dual-path approach (harness-native vs Claude Code conventional) is a good pattern for maintaining backward compatibility while adopting conventional paths.
+- The deepeval test failure is a pre-existing Python 3.9 incompatibility in a third-party package (uses 3.10+ union syntax) — unrelated to this iteration's changes.
+
+---

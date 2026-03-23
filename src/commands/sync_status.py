@@ -328,7 +328,7 @@ def _show_default_status():
     # Capability upgrade suggestions
     try:
         from src.harness_version_compat import format_upgrade_suggestions
-        source_data = reader.discover_all()
+        source_data = _source_data
         upgrade_msg = format_upgrade_suggestions(
             project_dir=project_dir,
             source_data=source_data,

@@ -1,6 +1,6 @@
 {
-  "iteration": 91,
-  "timestamp": "2026-03-23T19:20:37.768Z",
+  "iteration": 92,
+  "timestamp": "2026-03-23T20:13:00.328Z",
   "milestone": "",
   "pick_pct": 50,
   "selected_groups": [
@@ -11,55 +11,44 @@
       "title": "Miscellaneous (stability)",
       "items": [
         {
-          "id": "stability/canary-success-check-wrong-heuristic",
+          "id": "stability/none-guard-mcp-data-decompose-plugin",
           "dimension": "stability",
-          "slug": "canary-success-check-wrong-heuristic",
-          "title": "Canary sync success check always returns True",
-          "description": "In src/orchestrator.py ~lines 722-723, `getattr(canary_result, 'success', canary_result is not None)` always returns `True` because `canary_result` is a plain dict (e.g. `{'rules': SyncResult(...)}`), so `getattr` always falls through to the default `canary_result is not None`, which is always `True` for any existing key. A failed canary sync never aborts the rollout. Fix: replace with `all(r.success for r in canary_result.values() if hasattr(r, 'success'))` to actually inspect the `SyncResult` objects inside the dict. Same pattern repeats at ~line 777 for rollout results.",
+          "slug": "none-guard-mcp-data-decompose-plugin",
+          "title": "Guard None return from read_json_safe before .get()",
+          "description": "In src/adapters/base.py _decompose_plugin() ~line 544: `mcp_data = read_json_safe(mcp_json)` can return None on parse failure. The next line `servers = mcp_data.get('mcpServers', mcp_data)` then raises AttributeError. This is not caught by `except (OSError, json.JSONDecodeError, AdapterError)` so the exception propagates out of _decompose_plugin entirely. Fix: add `if mcp_data is None: return` (or `if not mcp_data:`) immediately after the read_json_safe call at line 543.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "stability/section-filter-empty-intersection-inverts-logic",
+          "id": "stability/orphaned-start-marker-replace-managed-section",
           "dimension": "stability",
-          "slug": "section-filter-empty-intersection-inverts-logic",
-          "title": "Empty section-filter intersection enables all sections instead of none",
-          "description": "In src/orchestrator.py `_apply_section_filter` (~lines 602-606), when both a global `only_sections` and a per-target `_per_target_only` are set and their intersection is empty (e.g. global=`{'rules'}`, per-target=`{'mcp'}`), `effective_only` becomes `set()`, which is falsy. The `if effective_only:` guard is then `False`, so all sections are included rather than zero. Fix: after computing `effective_only = global_set & per_target_set`, add `if global_set and per_target_set and not effective_only: return {}` (or equivalent) to correctly block all sections when the intersection is empty.",
+          "slug": "orphaned-start-marker-replace-managed-section",
+          "title": "Strip orphaned start marker when end marker is missing",
+          "description": "In src/adapters/base.py _replace_managed_section() line 332-333: when HARNESSSYNC_MARKER is found in `existing` but HARNESSSYNC_MARKER_END is absent (end_idx == -1), the else branch returns `f\"{existing.rstrip()}\\n\\n{managed}\"`. This leaves the orphaned start marker in the output. On the next sync, the start marker is found again, end marker is still missing, and another copy of `managed` gets appended — endless duplication. Fix: replace the else branch at line 332 with `before = existing[:start_idx].rstrip(); return f\"{before}\\n\\n{managed}\" if before else managed` to strip the dangling marker.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "stability/rollback-labeled-path-str-not-path",
+          "id": "stability/path-traversal-zip-restore",
           "dimension": "stability",
-          "slug": "rollback-labeled-path-str-not-path",
-          "title": "Rollback labeled-backup returns str where Path is expected, causing AttributeError",
-          "description": "In src/commands/sync_rollback.py `_resolve_backup` (~line 281), the labeled branch returns `labeled[0]['path']` raw from the snapshot metadata dict, which is a `str`. All other return branches return `Path` objects. The caller `_handle_rollback` (~line 221) immediately calls `.stat().st_mtime` on the return value, which raises `AttributeError: 'str' object has no attribute 'stat'`. Fix: change line 281 to `return Path(labeled[0]['path'])`.",
+          "slug": "path-traversal-zip-restore",
+          "title": "Validate zip entry paths before writing in restore_from_archive",
+          "description": "In src/backup_manager.py restore_from_archive() line 253: `dest = project_dir / entry.replace('home', '~')` does not prevent path traversal. A zip entry named `../../etc/crontab` produces a dest path outside project_dir. Fix: after computing dest, add `dest = dest.resolve(); dest.relative_to(project_dir.resolve())` wrapped in try/except ValueError to skip or raise on any entry that escapes the project directory.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "stability/opencode-rule-content-keyerror",
+          "id": "stability/debounce-none-state-manager",
           "dimension": "stability",
-          "slug": "opencode-rule-content-keyerror",
-          "title": "Unguarded KeyError on `rule['content']` crashes opencode multi-source sync",
-          "description": "In src/adapters/opencode.py `_sync_rules_multi_source` (~line 139), `rule_file.write_text(rule['content'], ...)` raises an unhandled `KeyError` if any rule dict is missing the `'content'` key (e.g. from a malformed source). The `'path'` key on line 127 is already accessed with `.get()`, but `'content'` is not. Fix: replace with `content = rule.get('content', '')`, and add `if not content.strip(): continue` with a stderr warning naming the skipped rule's path.",
-          "effort": "small",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "stability/state-manager-false-positive-corruption",
-          "dimension": "stability",
-          "slug": "state-manager-false-positive-corruption",
-          "title": "StateManager treats legitimately empty state as corrupted on every startup",
-          "description": "In src/state_manager.py `_load` (~lines 95-105), `read_json_safe` returns `{}` both on parse error and when the file legitimately contains `{}` (freshly initialised state). The check `if not state:` triggers the backup-and-reset cycle for a valid empty state, overwriting it on every startup. Fix: change `read_json_safe` to return `None` on parse/IO error (instead of `{}`), then guard with `if state is None: # corrupted` vs `if state == {}: # fresh`.",
+          "slug": "debounce-none-state-manager",
+          "title": "Guard should_debounce against None state_manager argument",
+          "description": "In src/lock.py should_debounce() line 75: `last_sync = state_manager.last_sync` is called with no prior None check on `state_manager`. Callers that pass None (e.g., early in startup before StateManager is initialised) will get an AttributeError. Fix: add `if state_manager is None: return False` at the top of the function body, before line 75.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
@@ -77,106 +66,84 @@
       "title": "Miscellaneous (product-ideation)",
       "items": [
         {
-          "id": "product-ideation/portability-coverage-matrix",
+          "id": "product-ideation/harness-override-layers",
           "dimension": "product-ideation",
-          "slug": "portability-coverage-matrix",
-          "title": "Portability Coverage Matrix",
-          "description": "Add `/sync-coverage` command implemented in `src/commands/sync_coverage.py` that reads source config via `SourceReader` and checks each element (MCP servers, skills, rules, env vars, permissions) against every adapter's declared capability map in `src/adapters/`. Outputs a per-harness table: which config elements will sync cleanly, which will be approximated, and which will be dropped. Solves the pain of users discovering post-sync that half their MCP servers silently didn't transfer to Codex — they need to know portability before choosing a secondary harness.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/post-sync-drift-changelog",
-          "dimension": "product-ideation",
-          "slug": "post-sync-drift-changelog",
-          "title": "Post-Sync Drift Changelog",
-          "description": "After every sync run, append a structured entry to `.harness-sync/CHANGELOG.md` (created by `src/utils/changelog_writer.py`) recording: timestamp, which targets changed, which config elements were added/removed/modified, and which were skipped with reason. The `/sync-log` command in `src/commands/sync_log.py` already exists but likely reads raw logs — replace with structured changelog reads and add `--since` and `--target` filters. Solves the team use case where a dev wants to audit 'what changed in Gemini config in the last week' without grepping logs.",
+          "slug": "harness-override-layers",
+          "title": "Per-Harness Config Overrides",
+          "description": "Let users create `.claude/overrides/codex.md`, `.claude/overrides/gemini.md`, etc. that get merged on top of CLAUDE.md during sync for that target only. Solves the pain of Codex needing stricter rules or Gemini needing different tool permissions than the global config. Implementation: add `OverrideReader` class in `src/source_reader.py` that checks `.claude/overrides/<target>.md` and merges content after base CLAUDE.md read; each adapter calls it in `src/adapters/base.py` `read_source()` before rendering. Entry point: `/sync` picks it up automatically, `/sync-status` reports which overrides are active.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "product-ideation/pre-sync-compatibility-linter",
+          "id": "product-ideation/sync-translation-report",
           "dimension": "product-ideation",
-          "slug": "pre-sync-compatibility-linter",
-          "title": "Pre-Sync Compatibility Linter",
-          "description": "Extend the existing `/sync-lint` command (`src/commands/sync_lint.py`) to add a `--pre-flight` mode that validates Claude Code source config against known adapter constraints before any sync occurs. Each adapter in `src/adapters/` exposes a `lint_source(config)` method returning warnings (e.g. 'MCP server X uses stdio transport unsupported by Codex', 'env var FOO contains a pattern matching secrets'). Orchestrator calls these in `src/orchestrator.py` before write phase and surfaces warnings with remediation hints. Solves the frustration of discovering incompatibilities only after a destructive sync.",
+          "slug": "sync-translation-report",
+          "title": "Sync Translation Fidelity Report",
+          "description": "Add `/sync-fidelity` command that, without syncing, analyzes your current Claude Code config and shows exactly what will be lost, approximated, or fully preserved per target harness — e.g. 'Codex: 3 MCP servers unsupported, 2 permissions will be dropped, 5 skills will symlink'. Solves the mystery of why a harness behaves differently after sync. Implementation: new `src/commands/sync_fidelity.py` that calls each adapter's `dry_run()` method (add to `base.py`) returning a `FidelityReport` dataclass with `preserved`, `approximated`, `lost` lists; renders as a markdown table per harness. No file writes.",
           "effort": "medium",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "product-ideation/conflict-resolve-interactive",
+          "id": "product-ideation/conflict-interactive-resolver",
           "dimension": "product-ideation",
-          "slug": "conflict-resolve-interactive",
+          "slug": "conflict-interactive-resolver",
           "title": "Interactive Conflict Resolver",
-          "description": "When `/sync-status` detects drift (target was manually edited since last sync), add a `--resolve` flag to the `/sync` command (`src/commands/sync.py`) that presents a per-file 3-way view: (1) what HarnessSync last wrote, (2) what's in the target now, (3) what the new sync would produce. User picks 'overwrite', 'skip', or 'merge' per file. State stored in `src/utils/conflict_state.py`. Solves the current binary choice between 'sync and lose manual edits' vs 'skip and stay out of date' — critical for users who tweak Gemini config locally for harness-specific experiments.",
+          "description": "When `/sync` detects a target file was manually edited since last sync, instead of just warning, launch an interactive side-by-side diff in the terminal letting the user pick: keep theirs, keep ours, or merge. Currently users just get a warning and manually fix — this eliminates that friction. Implementation: extend `src/conflict_detector.py` to write a temp file of the incoming content, then `src/commands/sync.py` calls a new `InteractiveResolver` class that uses Python `difflib.unified_diff` to render the diff and prompts for choice via `input()`. Winning content is passed back to the adapter write path. Add `--non-interactive` flag to preserve current behavior for CI.",
           "effort": "medium",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "product-ideation/harness-smoke-test",
+          "id": "product-ideation/sync-on-git-commit",
           "dimension": "product-ideation",
-          "slug": "harness-smoke-test",
-          "title": "Harness Smoke Test After Add",
-          "description": "Extend `/sync-add-harness` (`src/commands/sync_add_harness.py`) with a `--validate` step that, after writing the initial config, runs a lightweight smoke test: spawns the target harness binary with `--version` and `--help` flags, parses its output to confirm it loaded the config path, then reports 'harness read config successfully' or specific errors. Add `src/utils/harness_validator.py` with per-harness probe commands. Solves the onboarding drop-off where users add a harness, sync completes with no errors, but the harness silently ignores the config because the path was wrong.",
+          "slug": "sync-on-git-commit",
+          "title": "Git Pre-Commit Sync Hook Installer",
+          "description": "Add `/sync-git-install` command that installs a git pre-commit hook in the current repo so any commit that touches CLAUDE.md, settings.json, or `.claude/` automatically runs a sync before the commit lands. Solves the problem of committing config changes and forgetting to sync — teammates pull your CLAUDE.md but their harnesses are stale. Implementation: `src/commands/sync_git_install.py` writes `.git/hooks/pre-commit` (or appends to existing) with a shell snippet that calls `python3 src/commands/sync.py --quiet`; checks for existing hook content to avoid double-install; reports installed targets. Uninstall via `/sync-git-install --remove`.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/harness-capability-matrix-live",
+          "dimension": "product-ideation",
+          "slug": "harness-capability-matrix-live",
+          "title": "Live Capability Gap Tracker",
+          "description": "Extend `/sync-matrix` to add a `--watch` flag that monitors your config files with polling and re-renders the capability matrix in the terminal whenever CLAUDE.md or settings.json change — showing in real-time which new settings you added will/won't sync to each harness. Solves the pain of authoring CLAUDE.md blind, not knowing if what you're writing is Gemini/Codex-compatible. Implementation: add `--watch` arg to `src/commands/sync_matrix.py`; use a polling loop (`time.sleep(1)`, compare file mtimes via `os.stat`) to detect changes; on change, clear terminal with `\\033[2J` and re-render the matrix table. Works cross-platform via stdlib only.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         }
       ],
-      "priority": 13.4,
+      "priority": 13.6,
       "effort": "medium",
       "status": "selected"
     },
     {
-      "id": "product-ideation/mcp-tool-bindings",
-      "theme": "mcp-tool-bindings",
-      "dimension": "product-ideation",
-      "title": "Mcp Tool Bindings (product-ideation)",
+      "id": "consistency/miscellaneous",
+      "theme": "miscellaneous",
+      "dimension": "consistency",
+      "title": "Miscellaneous (consistency)",
       "items": [
         {
-          "id": "product-ideation/mcp-tool-stub-generation",
-          "dimension": "product-ideation",
-          "slug": "mcp-tool-stub-generation",
-          "title": "MCP Tool Stub Generation for Non-MCP Harnesses",
-          "description": "When syncing to harnesses without MCP support, auto-generate shell script stubs that approximate MCP tool behavior (e.g., a bash script that wraps the same underlying API). Users who rely on MCP tools in Claude Code get at least degraded-but-functional equivalents elsewhere.",
-          "effort": "large",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/mcp-tool-shim-generator",
-          "dimension": "product-ideation",
-          "slug": "mcp-tool-shim-generator",
-          "title": "MCP Tool Shim Generator",
-          "description": "For MCP tools unsupported in a target harness, generate a stub skill/command that explains the capability gap and suggests a manual workaround. Instead of silently missing a tool, the user gets a helpful prompt explaining what's unavailable and why.",
-          "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/mcp-tool-allowlist-bridge",
-          "dimension": "product-ideation",
-          "slug": "mcp-tool-allowlist-bridge",
-          "title": "MCP Tool Allowlist Bridge",
-          "description": "Automatically translate Claude Code's MCP tool allowlists/denylists into each harness's equivalent permission model (Codex tool permissions, Gemini tool access config). Permission mismatches are a top source of 'why does this work in Claude but not Gemini?' confusion.",
-          "effort": "medium",
+          "id": "consistency/discover-all-missing-exception-guard",
+          "dimension": "consistency",
+          "slug": "discover-all-missing-exception-guard",
+          "title": "Wrap reader.discover_all() in try/except in orchestrator sync_all",
+          "description": "In src/orchestrator.py sync_all() line 248: `source_data = reader.discover_all()` is called with no exception handling. Any OSError or parsing exception during source discovery propagates directly to the caller with no contextual error message. All other major operations in sync_all() (backup, conflict detection, adapter runs) are wrapped. Fix: wrap lines 246-248 in `try/except Exception as e` and re-raise as `SyncError(f'Source discovery failed: {e}')` from `src/exceptions.py` so callers get a clear, actionable message.",
+          "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         }
       ],
-      "priority": 12.666666666666666,
+      "priority": 12,
       "effort": "small",
       "status": "selected"
     }
@@ -249,6 +216,39 @@
           "slug": "opencode-agent-encoding-silent-corruption",
           "title": "Agent file read with `errors='replace'` silently corrupts non-UTF-8 content",
           "description": "In src/adapters/opencode.py `sync_agents` (~line 283), `agent_path.read_text(errors='replace')` silently replaces non-UTF-8 bytes with the Unicode replacement character (U+FFFD) before writing to `opencode.json`. This corrupts agent instructions without any error or warning. Fix: remove `errors='replace'` so `UnicodeDecodeError` propagates, then add `except UnicodeDecodeError as e: result.failed += 1; log_warning(f'Skipping {agent_path}: encoding error: {e}'); continue` in the surrounding loop.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "quality/hash-digest-length-constant",
+          "dimension": "quality",
+          "slug": "hash-digest-length-constant",
+          "title": "Extract magic number 16 to HASH_DIGEST_LENGTH constant in hashing.py",
+          "description": "In src/utils/hashing.py, the truncation `[:16]` appears at lines 37, 48, and 60 — three copies of the same magic number. If the length ever needs to change (e.g., for collision resistance), all three must be updated in sync. Fix: add `HASH_DIGEST_LENGTH = 16` at module level (after imports) and replace all three `[:16]` slices with `[:HASH_DIGEST_LENGTH]`.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "quality/opencode-adapted-unconditional",
+          "dimension": "quality",
+          "slug": "opencode-adapted-unconditional",
+          "title": "Only increment result.adapted when permissions were actually translated",
+          "description": "In src/adapters/opencode.py sync_settings() line 654: `result.adapted = 1` is set unconditionally even when `permission_config` is empty (no permissions were translated from the source settings). This misreports every settings sync as having adapted something. Fix: move line 654 (`result.adapted = 1`) inside the `if permission_config:` block at line 636 so it only fires when at least one permission entry was produced.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "quality/decompose-plugin-pre-check-dirs",
+          "dimension": "quality",
+          "slug": "decompose-plugin-pre-check-dirs",
+          "title": "Guard iterdir() calls with is_dir() in _decompose_plugin",
+          "description": "In src/adapters/base.py _decompose_plugin() lines 498, 513, 528: skills_dir, agents_dir, and commands_dir are passed to .iterdir() without first checking existence. When a plugin metadata flag (has_skills, has_agents, has_commands) is stale or the directory was never created, this raises OSError which is caught but logs a spurious error message to stderr. Fix: add `if not skills_dir.is_dir(): return` (or an equivalent guard before each .iterdir() call) so the OSError path is only hit for genuine permission failures, not missing directories.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
@@ -765,6 +765,28 @@
       ],
       "priority": 14,
       "effort": "medium",
+      "status": "completed"
+    },
+    {
+      "id": "consistency/miscellaneous",
+      "theme": "miscellaneous",
+      "dimension": "consistency",
+      "title": "Miscellaneous (consistency)",
+      "items": [
+        {
+          "id": "consistency/discover-all-missing-exception-guard",
+          "dimension": "consistency",
+          "slug": "discover-all-missing-exception-guard",
+          "title": "Wrap reader.discover_all() in try/except in orchestrator sync_all",
+          "description": "In src/orchestrator.py sync_all() line 248: `source_data = reader.discover_all()` is called with no exception handling. Any OSError or parsing exception during source discovery propagates directly to the caller with no contextual error message. All other major operations in sync_all() (backup, conflict detection, adapter runs) are wrapped. Fix: wrap lines 246-248 in `try/except Exception as e` and re-raise as `SyncError(f'Source discovery failed: {e}')` from `src/exceptions.py` so callers get a clear, actionable message.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        }
+      ],
+      "priority": 12,
+      "effort": "small",
       "status": "completed"
     }
   ],
@@ -1738,6 +1760,13 @@
       "timestamp": "2026-03-23T19:20:37.768Z",
       "selected_count": 3,
       "completed_count": 2,
+      "failed_count": 0
+    },
+    {
+      "iteration": 92,
+      "timestamp": "2026-03-23T20:13:00.328Z",
+      "selected_count": 3,
+      "completed_count": 3,
       "failed_count": 0
     }
   ]
