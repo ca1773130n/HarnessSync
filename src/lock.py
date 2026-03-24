@@ -58,8 +58,10 @@ def sync_lock(lock_path: Path = None):
     try:
         yield fd
     finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def should_debounce(state_manager, debounce_seconds: float = DEBOUNCE_SECONDS) -> bool:

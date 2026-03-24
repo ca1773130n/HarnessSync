@@ -266,6 +266,7 @@ class SyncOrchestrator:
         pre.check_skill_dependencies(source_data)
         pre.substitute_config_vars(source_data)
         pre.normalize_rules(source_data)
+        pre.annotate_rules(source_data)
         pre.record_rule_attribution(source_data)
 
         # Project-type adaptive sync (may update skip_sections)

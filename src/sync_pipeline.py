@@ -108,6 +108,36 @@ class PreSyncPipeline:
                 'scope': rf.get('scope', 'project'),
             })
 
+    def annotate_rules(self, source_data: dict) -> None:
+        """Add provenance annotation markers to each rule's content (in-place).
+
+        Must be called after normalize_rules() so rules are list[dict].
+        Uses src.rule_annotator.annotate() to wrap each rule's content with
+        harness-sync start/end markers, and RuleAttributionStore to persist
+        the attribution mapping.
+        """
+        try:
+            from src.rule_annotator import annotate, strip_annotations, RuleAttributionStore
+            store = RuleAttributionStore(self.project_dir) if self.project_dir else None
+            for rule in source_data.get('rules', []):
+                if not isinstance(rule, dict):
+                    continue
+                content = rule.get('content', '')
+                if not content:
+                    continue
+                source_path = rule.get('path', 'CLAUDE.md')
+                # Strip existing annotations to avoid double-wrapping on re-sync
+                content = strip_annotations(content)
+                # Count lines for line_range
+                line_count = len(content.splitlines())
+                line_range = f"1-{line_count}" if line_count > 1 else "1"
+                rule['content'] = annotate(content, source_path=source_path, line_range=line_range)
+                # Persist attribution
+                if store and not self.dry_run:
+                    store.record(target_path=source_path, source_path=source_path, line_range=line_range)
+        except Exception:
+            pass  # Annotation is best-effort, never blocks sync
+
     def record_rule_attribution(self, source_data: dict) -> None:
         """Record provenance for each source rule file."""
         if self.dry_run or not self.project_dir:

@@ -17,11 +17,18 @@ python3 src/commands/sync.py --dry-run   # preview without writing
 - `src/source_reader.py` — discovers and reads Claude Code config (CLAUDE.md, .mcp.json, settings.json, skills/, agents/, commands/)
 - `src/adapters/` — one adapter per target harness, all extend `src/adapters/base.py`
   - Targets: aider, cline, codex, continue, cursor, gemini, neovim, opencode, vscode, windsurf, zed
-- `src/commands/` — slash command implementations (28 commands: sync, sync-status, sync-diff, sync-health, sync-lint, sync-scope, sync-tutorial, etc.)
+- `src/commands/` — slash command implementations (33 commands: sync, sync-status, sync-diff, sync-health, sync-lint, sync-scope, sync-tutorial, etc.)
 - `commands/` — slash command markdown definitions that Claude Code discovers
 - `hooks/hooks.json` — PostToolUse hook triggers sync on Edit/Write/MultiEdit; SessionStart hook runs startup checks
 - `src/mcp/` — MCP server (JSON-RPC over stdio) exposing sync_all, sync_target, get_status tools
-- `src/utils/` — shared helpers (logging, hashing, paths)
+- `src/analysis/` — skill linting and portability analysis
+- `src/ui/` — interactive diff rendering
+- `src/notifiers/` — desktop notifications for sync events
+- `src/override_manager.py` — per-harness config overrides
+- `src/config_linter.py` — pre-sync config validation
+- `src/rule_annotator.py` — rule provenance tracking
+- `src/profile_manager.py` — named sync profiles
+- `src/utils/` — shared helpers (logging, hashing, paths, harness binary validation)
 - `.planning/` — project roadmap, milestones, and evolve state (not runtime code)
 
 ## Key Patterns

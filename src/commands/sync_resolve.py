@@ -192,7 +192,34 @@ def _resolve_file_interactive(
     return "".join(resolved_lines)
 
 
-def _list_conflicts(targets: list[str]) -> None:
+def _show_conflict_diff(file_path: Path, target_name: str) -> None:
+    """Print a unified diff between the pre-sync backup and the current target file."""
+    backup_content = _find_backup_content(target_name, file_path)
+    if backup_content is None:
+        print("    (no backup snapshot — cannot show diff)")
+        return
+    if not file_path.is_file():
+        print("    (file deleted since last sync)")
+        return
+    current_content = file_path.read_text(encoding="utf-8", errors="replace")
+    diff = difflib.unified_diff(
+        backup_content.splitlines(keepends=True),
+        current_content.splitlines(keepends=True),
+        fromfile=f"last-synced/{file_path.name}",
+        tofile=f"current/{file_path.name}",
+        lineterm="",
+    )
+    diff_lines = list(diff)
+    if not diff_lines:
+        print("    (files are identical — stale conflict flag)")
+        return
+    for line in diff_lines[:40]:
+        print(f"    {line}")
+    if len(diff_lines) > 40:
+        print(f"    ... ({len(diff_lines) - 40} more lines)")
+
+
+def _list_conflicts(targets: list[str], show_diff: bool = False) -> None:
     """Print a summary of all targets with active conflicts."""
     detector = ConflictDetector()
     found_any = False
@@ -204,6 +231,8 @@ def _list_conflicts(targets: list[str]) -> None:
             for c in conflicts:
                 note = f"  [{c.get('note', 'modified')}]"
                 print(f"    {c['file_path']}{note}")
+                if show_diff:
+                    _show_conflict_diff(Path(c["file_path"]), target)
     if not found_any:
         print("  No conflicts detected across all targets.")
 
@@ -248,6 +277,12 @@ def main() -> None:
         "--list",
         action="store_true",
         help="List all targets with active conflicts and exit",
+    )
+    parser.add_argument(
+        "--show-diff",
+        action="store_true",
+        dest="show_diff",
+        help="With --list: show unified diff of each conflicted file vs its last-sync snapshot",
     )
     parser.add_argument(
         "--no-interactive",

@@ -137,17 +137,26 @@ def _show_account_status(account_name: str):
         return
 
     state_manager = StateManager()
-    cc_home = Path(acc["source"]["path"])
+    source_path = (acc.get("source") or {}).get("path")
+    if not source_path:
+        print(f"Account '{account_name}' has no source path configured.")
+        return
+    cc_home = Path(source_path)
     registered = AdapterRegistry.list_targets()
 
     project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
-    reader = SourceReader(scope="all", project_dir=project_dir, cc_home=cc_home)
-    current_hashes = compute_source_hashes(project_dir, reader)
+    try:
+        reader = SourceReader(scope="all", project_dir=project_dir, cc_home=cc_home)
+        current_hashes = compute_source_hashes(project_dir, reader)
+    except OSError as e:
+        print(f"Warning: could not read source for account '{account_name}': {e}")
+        reader = None
+        current_hashes = {}
 
     # Header
     print(f"HarnessSync Status — {account_name}")
     print("=" * 60)
-    print(f"Source: {acc['source']['path']}")
+    print(f"Source: {source_path}")
 
     acct_state = state_manager.get_account_status(account_name)
     if acct_state:
@@ -199,17 +208,18 @@ def _show_account_status(account_name: str):
             print("  Drift: None detected")
 
     # MCP source grouping and plugin drift
-    mcp_scoped = reader.get_mcp_servers_with_scope()
-    if mcp_scoped:
-        print()
-        groups = _group_mcps_by_source(mcp_scoped)
-        for line in _format_mcp_groups(groups):
-            print(line)
+    if reader is not None:
+        mcp_scoped = reader.get_mcp_servers_with_scope()
+        if mcp_scoped:
+            print()
+            groups = _group_mcps_by_source(mcp_scoped)
+            for line in _format_mcp_groups(groups):
+                print(line)
 
-        current_plugins = _extract_current_plugins(mcp_scoped)
-        drift = state_manager.detect_plugin_drift(current_plugins, account=account_name)
-        for line in _format_plugin_drift(drift):
-            print(line)
+            current_plugins = _extract_current_plugins(mcp_scoped)
+            drift = state_manager.detect_plugin_drift(current_plugins, account=account_name)
+            for line in _format_plugin_drift(drift):
+                print(line)
 
 
 def _show_overrides_status():
@@ -314,6 +324,7 @@ def _show_default_status():
             print(line)
 
     # Config coverage scores
+    _source_data = None
     try:
         from src.compatibility_reporter import CompatibilityReporter
         _source_data = reader.discover_all()
@@ -326,18 +337,18 @@ def _show_default_status():
         pass
 
     # Capability upgrade suggestions
-    try:
-        from src.harness_version_compat import format_upgrade_suggestions
-        source_data = _source_data
-        upgrade_msg = format_upgrade_suggestions(
-            project_dir=project_dir,
-            source_data=source_data,
-        )
-        if upgrade_msg:
-            print()
-            print(upgrade_msg)
-    except Exception:
-        pass
+    if _source_data is not None:
+        try:
+            from src.harness_version_compat import format_upgrade_suggestions
+            upgrade_msg = format_upgrade_suggestions(
+                project_dir=project_dir,
+                source_data=_source_data,
+            )
+            if upgrade_msg:
+                print()
+                print(upgrade_msg)
+        except Exception:
+            pass
 
     # Version upgrade requirements
     try:

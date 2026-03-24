@@ -200,6 +200,17 @@ def main() -> None:
     )
     parser.add_argument("--project-dir", type=str, default=None)
     parser.add_argument("--account", type=str, default=None, help="Account name")
+    parser.add_argument(
+        "--proposed",
+        type=str,
+        default=None,
+        metavar="FILEPATH",
+        help=(
+            "Preview what all targets would look like if this draft file were the source "
+            "instead of the live CLAUDE.md. Runs all adapters in dry-run mode and shows "
+            "per-target unified diffs without writing any files."
+        ),
+    )
 
     try:
         args = parser.parse_args(tokens)
@@ -208,24 +219,32 @@ def main() -> None:
 
     project_dir = Path(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd()))
 
-    # Load source rules text
-    try:
-        from src.source_reader import SourceReader
-        cc_home = None
-        if args.account:
-            try:
-                from src.account_manager import AccountManager
-                am = AccountManager()
-                acc = am.get_account(args.account)
-                if acc:
-                    cc_home = Path(acc["source"]["path"])
-            except Exception:
-                pass
-        reader = SourceReader(project_dir=project_dir, cc_home=cc_home)
-        source_text = reader.get_rules() or ""
-    except Exception as e:
-        print(f"Error reading source: {e}", file=sys.stderr)
-        return
+    # Load source rules text (from proposed file or live CLAUDE.md)
+    proposed_path = Path(args.proposed) if getattr(args, "proposed", None) else None
+    if proposed_path is not None:
+        try:
+            source_text = proposed_path.read_text(encoding="utf-8")
+        except OSError as e:
+            print(f"Error reading proposed file '{proposed_path}': {e}", file=sys.stderr)
+            return
+    else:
+        try:
+            from src.source_reader import SourceReader
+            cc_home = None
+            if args.account:
+                try:
+                    from src.account_manager import AccountManager
+                    am = AccountManager()
+                    acc = am.get_account(args.account)
+                    if acc:
+                        cc_home = Path(acc["source"]["path"])
+                except Exception:
+                    pass
+            reader = SourceReader(project_dir=project_dir, cc_home=cc_home)
+            source_text = reader.get_rules() or ""
+        except Exception as e:
+            print(f"Error reading source: {e}", file=sys.stderr)
+            return
 
     targets = list(_TARGET_PRIMARY_FILES.keys())
     if args.target:
@@ -236,7 +255,10 @@ def main() -> None:
 
     print("HarnessSync Config Diff")
     print("=" * 60)
-    print(f"Source: CLAUDE.md ({len(source_text.splitlines())} lines)")
+    if proposed_path is not None:
+        print(f"Source: {proposed_path} (proposed — dry-run preview, no files written)")
+    else:
+        print(f"Source: CLAUDE.md ({len(source_text.splitlines())} lines)")
     print(f"Mode: {args.mode}")
     if args.semantic:
         print("Semantic: enabled")
