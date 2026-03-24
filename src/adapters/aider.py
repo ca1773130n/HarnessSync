@@ -14,7 +14,6 @@ Aider's primary config file is .aider.conf.yml and uses CONVENTIONS.md
 (or CLAUDE.md) as context. Rules sync to CONVENTIONS.md as project context.
 """
 
-import yaml
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -149,20 +148,71 @@ class AiderAdapter(AdapterBase):
     # ------------------------------------------------------------------
 
     def _read_aider_conf(self) -> dict:
-        """Read existing .aider.conf.yml, returning empty dict on missing/error."""
+        """Read existing .aider.conf.yml, returning empty dict on missing/error.
+
+        Uses a minimal YAML parser (stdlib only) since aider conf is simple
+        key-value pairs and lists.
+        """
         if not self.aider_conf_path.is_file():
             return {}
         try:
             text = self.aider_conf_path.read_text(encoding="utf-8")
-            data = yaml.safe_load(text)
-            return data if isinstance(data, dict) else {}
+            return self._parse_simple_yaml(text)
         except Exception:
             return {}
 
+    @staticmethod
+    def _parse_simple_yaml(text: str) -> dict:
+        """Parse simple key: value YAML without PyYAML dependency."""
+        result: dict = {}
+        current_key = None
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if not line[0].isspace() and ":" in stripped:
+                key, _, val = stripped.partition(":")
+                val = val.strip()
+                if val == "" or val == "[]":
+                    result[key.strip()] = [] if val == "[]" else None
+                    current_key = key.strip()
+                elif val.startswith("[") and val.endswith("]"):
+                    result[key.strip()] = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
+                    current_key = None
+                elif val.lower() in ("true", "yes"):
+                    result[key.strip()] = True
+                    current_key = None
+                elif val.lower() in ("false", "no"):
+                    result[key.strip()] = False
+                    current_key = None
+                else:
+                    result[key.strip()] = val.strip("'\"")
+                    current_key = None
+            elif line[0].isspace() and stripped.startswith("- ") and current_key is not None:
+                if not isinstance(result.get(current_key), list):
+                    result[current_key] = []
+                result[current_key].append(stripped[2:].strip().strip("'\""))
+        return result
+
     def _write_aider_conf(self, data: dict) -> None:
-        """Write .aider.conf.yml atomically."""
+        """Write .aider.conf.yml atomically without PyYAML dependency."""
         import os
-        text = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        lines: list[str] = []
+        for key, val in data.items():
+            if isinstance(val, list):
+                if not val:
+                    lines.append(f"{key}: []")
+                else:
+                    lines.append(f"{key}:")
+                    for item in val:
+                        lines.append(f"  - {item}")
+            elif isinstance(val, bool):
+                lines.append(f"{key}: {'true' if val else 'false'}")
+            elif val is None:
+                lines.append(f"{key}:")
+            else:
+                lines.append(f"{key}: {val}")
+        text = "\n".join(lines) + "\n"
         tmp = self.aider_conf_path.with_suffix(".yml.tmp")
         try:
             tmp.write_text(text, encoding="utf-8")
