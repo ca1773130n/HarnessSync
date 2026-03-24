@@ -140,7 +140,7 @@ class AdapterBase(ABC):
         Returns:
             SyncResult tracking synced/skipped/failed MCP servers
         """
-        flat = {name: entry.get("config", entry) for name, entry in mcp_servers_scoped.items()}
+        flat = {name: (entry.get("config", entry) if isinstance(entry, dict) else entry) for name, entry in mcp_servers_scoped.items()}
         return self.sync_mcp(flat)
 
     @abstractmethod

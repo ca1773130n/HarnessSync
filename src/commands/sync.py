@@ -143,6 +143,12 @@ def _parse_args(tokens: list[str]) -> argparse.Namespace | None:
                               "dotfiles git repository."))
     parser.add_argument("--dotfiles-push", action="store_true", dest="dotfiles_push",
                         help="With --dotfiles-path: push to remote after committing.")
+    parser.add_argument("--interactive", action="store_true", dest="interactive",
+                        help=("Before writing each target, show a colored unified diff and prompt "
+                              "y/n/skip. Skipped targets are saved to .claude/harness-sync/skipped.json "
+                              "and excluded from future auto-syncs until cleared."))
+    parser.add_argument("--reset-skips", action="store_true", dest="reset_skips",
+                        help="Clear the list of interactively-skipped targets and exit.")
 
     try:
         return parser.parse_args(tokens)
@@ -340,6 +346,110 @@ def _run_conflict_resolution(args, source_data: dict) -> None:
         pass  # Conflict resolution failure should not block sync
 
 
+def _run_interactive_approval(
+    project_dir: Path,
+    source_data: dict,
+    cli_only_targets: "set[str] | None",
+    cli_skip_targets: "set[str]",
+) -> "tuple[set[str] | None, set[str]]":
+    """Show per-target colored diffs and prompt for approval.
+
+    Reads .claude/harness-sync/skipped.json for persistently-skipped targets.
+    Saves new 'skip always' decisions back to that file.
+
+    Returns:
+        Updated (cli_only_targets, cli_skip_targets) tuple.
+    """
+    import json as _json
+    from src.adapters.registry import get_all_adapters
+    from src.ui.diff_renderer import render_diff, prompt_approval
+
+    skipped_path = project_dir / ".claude/harness-sync/skipped.json"
+    persisted_skips: set[str] = set()
+    try:
+        if skipped_path.exists():
+            _data = _json.loads(skipped_path.read_text(encoding="utf-8"))
+            persisted_skips = set(_data.get("skipped", []))
+    except Exception:
+        pass
+
+    if persisted_skips:
+        print(f"[interactive] persistently skipped: {', '.join(sorted(persisted_skips))} (use --reset-skips to clear)")
+
+    # Determine candidate targets
+    try:
+        all_target_names = list(get_all_adapters().keys())
+    except Exception:
+        return cli_only_targets, cli_skip_targets
+
+    if cli_only_targets:
+        candidate_targets = [t for t in all_target_names if t in cli_only_targets]
+    else:
+        candidate_targets = [t for t in all_target_names if t not in cli_skip_targets]
+
+    # Exclude persistently-skipped targets
+    candidate_targets = [t for t in candidate_targets if t not in persisted_skips]
+
+    source_rules = source_data.get("rules", "")
+    if isinstance(source_rules, list):
+        source_rules = "\n\n".join(
+            r.get("content", "") for r in source_rules if isinstance(r, dict)
+        )
+
+    approved: set[str] = set()
+    new_persistent_skips: set[str] = set()
+
+    print(f"\n[interactive] reviewing {len(candidate_targets)} targets — press Ctrl+C to abort\n")
+    for target_name in candidate_targets:
+        # Try to read the current target rules file (best-effort)
+        current_content = ""
+        _candidate_files = [
+            project_dir / "AGENTS.md",
+            project_dir / ".cursor/rules/CLAUDE.mdc",
+            project_dir / f".{target_name}" / "rules.md",
+            project_dir / f"{target_name}.md",
+        ]
+        for _cf in _candidate_files:
+            try:
+                if _cf.exists():
+                    current_content = _cf.read_text(encoding="utf-8", errors="replace")
+                    break
+            except OSError:
+                pass
+
+        decision = prompt_approval(target_name, current_content, source_rules)
+        if decision == "yes":
+            approved.add(target_name)
+        elif decision == "skip":
+            new_persistent_skips.add(target_name)
+        # "no" = skip this run only, not added to approved
+
+    # Persist new 'skip always' decisions
+    if new_persistent_skips:
+        all_skips = persisted_skips | new_persistent_skips
+        try:
+            skipped_path.parent.mkdir(parents=True, exist_ok=True)
+            skipped_path.write_text(
+                _json.dumps({"skipped": sorted(all_skips)}, indent=2),
+                encoding="utf-8",
+            )
+            print(f"[interactive] saved persistent skips: {', '.join(sorted(new_persistent_skips))}")
+        except OSError as e:
+            print(f"[interactive] could not save skipped.json: {e}", file=sys.stderr)
+
+    # Return updated filters: only sync approved targets
+    if cli_only_targets is not None:
+        new_only = cli_only_targets & approved
+    else:
+        new_only = approved if approved else None
+
+    # Add non-approved (non-skip) targets to skip set
+    declined = set(candidate_targets) - approved - new_persistent_skips
+    new_skip = cli_skip_targets | persisted_skips | new_persistent_skips | declined
+
+    return new_only, new_skip
+
+
 def main():
     """Entry point for /sync command."""
     args_string = " ".join(sys.argv[1:])
@@ -350,6 +460,16 @@ def main():
 
     args = _parse_args(tokens)
     if args is None:
+        return
+
+    # --- RESET SKIPS ---
+    if getattr(args, "reset_skips", False):
+        _skips_path = Path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())) / ".claude/harness-sync/skipped.json"
+        try:
+            _skips_path.unlink(missing_ok=True)
+            print("Interactive skip list cleared. All targets will be synced on next run.")
+        except OSError as e:
+            print(f"Could not clear skips: {e}", file=sys.stderr)
         return
 
     # --- GLOBAL DRY-RUN TOGGLE ---
@@ -459,6 +579,18 @@ def main():
                         return
                 except Exception:
                     pass
+
+            # --- INTERACTIVE PER-TARGET DIFF APPROVAL (--interactive) ---
+            if getattr(args, "interactive", False) and not args.dry_run and sys.stdin.isatty():
+                try:
+                    cli_only_targets, cli_skip_targets = _run_interactive_approval(
+                        project_dir=project_dir,
+                        source_data=source_data,
+                        cli_only_targets=cli_only_targets,
+                        cli_skip_targets=cli_skip_targets,
+                    )
+                except Exception as _ie:
+                    print(f"[interactive] approval error: {_ie}", file=sys.stderr)
 
             if getattr(args, 'watch', False):
                 _run_watch_mode(project_dir, args, only_sections, skip_sections)

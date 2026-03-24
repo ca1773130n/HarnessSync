@@ -176,10 +176,18 @@ def main() -> None:
 
     # Skill portability check (--skills flag)
     skill_portability_issues: dict = {}
+    skill_linter_reports: dict = {}
     if check_skills:
         skills = source_data.get("skills", {})
         if skills:
             skill_portability_issues = linter.lint_all_skills_portability(skills)
+            # Also run the focused per-harness linter for inline fix suggestions
+            try:
+                from src.analysis.skill_linter import SkillLinter
+                _sl = SkillLinter()
+                skill_linter_reports = _sl.lint_all(skills)
+            except Exception:
+                pass
 
     if output_json:
         payload = {
@@ -219,7 +227,11 @@ def main() -> None:
 
     # Skill portability report
     if check_skills:
-        if skill_portability_issues:
+        if skill_linter_reports:
+            print()
+            from src.analysis.skill_linter import SkillLinter
+            print(SkillLinter().format_all_reports(skill_linter_reports))
+        elif skill_portability_issues:
             print()
             print(linter.format_skill_portability_report(skill_portability_issues))
         elif source_data.get("skills"):

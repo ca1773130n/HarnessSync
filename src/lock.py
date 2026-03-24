@@ -51,7 +51,7 @@ def sync_lock(lock_path: Path = None):
 
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+    except Exception:
         os.close(fd)
         raise
 

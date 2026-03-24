@@ -21,7 +21,7 @@ import os
 import shutil
 import sys
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -133,7 +133,7 @@ class CloudBackupExporter:
         if not files:
             raise RuntimeError("No config files found to export.")
 
-        timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         # Add a manifest file to the gist
         manifest = {
             "created": timestamp,

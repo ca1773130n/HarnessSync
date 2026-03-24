@@ -1,64 +1,9 @@
 {
-  "iteration": 92,
-  "timestamp": "2026-03-23T20:13:00.328Z",
+  "iteration": 93,
+  "timestamp": "2026-03-23T22:50:22.813Z",
   "milestone": "",
   "pick_pct": 50,
   "selected_groups": [
-    {
-      "id": "stability/miscellaneous",
-      "theme": "miscellaneous",
-      "dimension": "stability",
-      "title": "Miscellaneous (stability)",
-      "items": [
-        {
-          "id": "stability/none-guard-mcp-data-decompose-plugin",
-          "dimension": "stability",
-          "slug": "none-guard-mcp-data-decompose-plugin",
-          "title": "Guard None return from read_json_safe before .get()",
-          "description": "In src/adapters/base.py _decompose_plugin() ~line 544: `mcp_data = read_json_safe(mcp_json)` can return None on parse failure. The next line `servers = mcp_data.get('mcpServers', mcp_data)` then raises AttributeError. This is not caught by `except (OSError, json.JSONDecodeError, AdapterError)` so the exception propagates out of _decompose_plugin entirely. Fix: add `if mcp_data is None: return` (or `if not mcp_data:`) immediately after the read_json_safe call at line 543.",
-          "effort": "small",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "stability/orphaned-start-marker-replace-managed-section",
-          "dimension": "stability",
-          "slug": "orphaned-start-marker-replace-managed-section",
-          "title": "Strip orphaned start marker when end marker is missing",
-          "description": "In src/adapters/base.py _replace_managed_section() line 332-333: when HARNESSSYNC_MARKER is found in `existing` but HARNESSSYNC_MARKER_END is absent (end_idx == -1), the else branch returns `f\"{existing.rstrip()}\\n\\n{managed}\"`. This leaves the orphaned start marker in the output. On the next sync, the start marker is found again, end marker is still missing, and another copy of `managed` gets appended — endless duplication. Fix: replace the else branch at line 332 with `before = existing[:start_idx].rstrip(); return f\"{before}\\n\\n{managed}\" if before else managed` to strip the dangling marker.",
-          "effort": "small",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "stability/path-traversal-zip-restore",
-          "dimension": "stability",
-          "slug": "path-traversal-zip-restore",
-          "title": "Validate zip entry paths before writing in restore_from_archive",
-          "description": "In src/backup_manager.py restore_from_archive() line 253: `dest = project_dir / entry.replace('home', '~')` does not prevent path traversal. A zip entry named `../../etc/crontab` produces a dest path outside project_dir. Fix: after computing dest, add `dest = dest.resolve(); dest.relative_to(project_dir.resolve())` wrapped in try/except ValueError to skip or raise on any entry that escapes the project directory.",
-          "effort": "small",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "stability/debounce-none-state-manager",
-          "dimension": "stability",
-          "slug": "debounce-none-state-manager",
-          "title": "Guard should_debounce against None state_manager argument",
-          "description": "In src/lock.py should_debounce() line 75: `last_sync = state_manager.last_sync` is called with no prior None check on `state_manager`. Callers that pass None (e.g., early in startup before StateManager is initialised) will get an AttributeError. Fix: add `if state_manager is None: return False` at the top of the function body, before line 75.",
-          "effort": "small",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        }
-      ],
-      "priority": 14,
-      "effort": "medium",
-      "status": "selected"
-    },
     {
       "id": "product-ideation/miscellaneous",
       "theme": "miscellaneous",
@@ -66,89 +11,65 @@
       "title": "Miscellaneous (product-ideation)",
       "items": [
         {
-          "id": "product-ideation/harness-override-layers",
+          "id": "product-ideation/selective-sync-frontmatter-tags",
           "dimension": "product-ideation",
-          "slug": "harness-override-layers",
-          "title": "Per-Harness Config Overrides",
-          "description": "Let users create `.claude/overrides/codex.md`, `.claude/overrides/gemini.md`, etc. that get merged on top of CLAUDE.md during sync for that target only. Solves the pain of Codex needing stricter rules or Gemini needing different tool permissions than the global config. Implementation: add `OverrideReader` class in `src/source_reader.py` that checks `.claude/overrides/<target>.md` and merges content after base CLAUDE.md read; each adapter calls it in `src/adapters/base.py` `read_source()` before rendering. Entry point: `/sync` picks it up automatically, `/sync-status` reports which overrides are active.",
+          "slug": "selective-sync-frontmatter-tags",
+          "title": "Frontmatter sync tags for skills/agents",
+          "description": "Users have Claude Code-specific skills (e.g., ones using Claude API internals) that break or make no sense in Codex/Gemini. Add YAML frontmatter parsing in `src/source_reader.py` to read `sync: [codex, gemini]` or `sync: false` from skill/agent markdown files. The orchestrator in `src/orchestrator.py` filters the asset list before passing to adapters. New `/sync-scope` command (already exists — extend `src/commands/sync_scope.py`) to preview which assets will sync to which targets. Solves the real pain of polluting other harnesses with Claude-only content that confuses or errors.",
           "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "product-ideation/sync-translation-report",
+          "id": "product-ideation/conflict-resolver-command",
           "dimension": "product-ideation",
-          "slug": "sync-translation-report",
-          "title": "Sync Translation Fidelity Report",
-          "description": "Add `/sync-fidelity` command that, without syncing, analyzes your current Claude Code config and shows exactly what will be lost, approximated, or fully preserved per target harness — e.g. 'Codex: 3 MCP servers unsupported, 2 permissions will be dropped, 5 skills will symlink'. Solves the mystery of why a harness behaves differently after sync. Implementation: new `src/commands/sync_fidelity.py` that calls each adapter's `dry_run()` method (add to `base.py`) returning a `FidelityReport` dataclass with `preserved`, `approximated`, `lost` lists; renders as a markdown table per harness. No file writes.",
+          "slug": "conflict-resolver-command",
+          "title": "/sync-resolve: interactive conflict resolver",
+          "description": "Currently conflict detection warns but leaves users stranded — they must manually diff and decide. Add `src/commands/sync_resolve.py` and `commands/sync-resolve.md` that reads the backup snapshot from the backup manager and the current target file, then renders a side-by-side diff with numbered hunks. User picks `keep-mine`, `keep-theirs`, or `merge-manual` per hunk. Writes the resolved file and clears the conflict flag in state. Entry point: `/sync-resolve [target]`. Solves the 'I edited my Cursor config manually and now sync is blocked forever' problem.",
           "effort": "medium",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         },
         {
-          "id": "product-ideation/conflict-interactive-resolver",
+          "id": "product-ideation/import-from-harness",
           "dimension": "product-ideation",
-          "slug": "conflict-interactive-resolver",
-          "title": "Interactive Conflict Resolver",
-          "description": "When `/sync` detects a target file was manually edited since last sync, instead of just warning, launch an interactive side-by-side diff in the terminal letting the user pick: keep theirs, keep ours, or merge. Currently users just get a warning and manually fix — this eliminates that friction. Implementation: extend `src/conflict_detector.py` to write a temp file of the incoming content, then `src/commands/sync.py` calls a new `InteractiveResolver` class that uses Python `difflib.unified_diff` to render the diff and prompts for choice via `input()`. Winning content is passed back to the adapter write path. Add `--non-interactive` flag to preserve current behavior for CI.",
+          "slug": "import-from-harness",
+          "title": "/sync-import: pull config FROM a target harness INTO Claude Code",
+          "description": "HarnessSync is one-way, but users who onboard a teammate's Gemini setup or inherit a Codex project want to pull that config into Claude Code format. Add `src/commands/sync_import.py` and `commands/sync-import.md`. Each adapter in `src/adapters/` gets a reverse `import_to_claude(target_path) -> dict` method alongside the existing `sync()`. The command reads target config, converts to Claude Code format (CLAUDE.md section, skill files, settings keys), writes to a staging area under `.claude/imported/`, and asks for confirmation before merging. Entry point: `/sync-import gemini`. Unlocks team adoption — new members can bootstrap Claude Code from any harness they already have configured.",
+          "effort": "large",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/sync-watch-mode",
+          "dimension": "product-ideation",
+          "slug": "sync-watch-mode",
+          "title": "/sync-watch: live file-watch daemon with terminal status line",
+          "description": "The PostToolUse hook only fires inside Claude Code sessions. Users running external editors (Cursor, Zed) that modify CLAUDE.md or skills get no auto-sync. Add `src/commands/sync_watch.py` using `watchdog`-free polling (stdlib `os.stat` loop, 2s interval) that monitors source files and triggers `Orchestrator.sync_all()` on change, printing a one-line status to stdout. Add `commands/sync-watch.md` as entry point `/sync-watch`. Store the daemon PID in `.claude/harness-sync/watch.pid` so `/sync` can detect if watch is already running and skip redundant sync. Solves the 'my hook isn't firing because I edited the file outside Claude Code' gap.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        },
+        {
+          "id": "product-ideation/per-harness-env-override-profiles",
+          "dimension": "product-ideation",
+          "slug": "per-harness-env-override-profiles",
+          "title": "Named env profiles per harness (dev/staging/prod)",
+          "description": "Users switch between dev and prod API keys but must manually update each harness. Add a `[profiles]` section to `.claude/harness-sync/config.json` (read by `src/utils/paths.py`) mapping profile names to env var overrides per harness: `{\"prod\": {\"codex\": {\"OPENAI_API_KEY\": \"...\"}}}`. Extend `src/commands/sync.py` with `--profile prod` flag. The Codex/Gemini/OpenCode adapters merge profile env vars over base env during sync. Add `/sync-preset` command (already stub exists — implement `src/commands/sync_preset.py`) to list, activate, and create profiles. Solves the painful multi-environment context-switching that currently requires editing config files by hand.",
           "effort": "medium",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/sync-on-git-commit",
-          "dimension": "product-ideation",
-          "slug": "sync-on-git-commit",
-          "title": "Git Pre-Commit Sync Hook Installer",
-          "description": "Add `/sync-git-install` command that installs a git pre-commit hook in the current repo so any commit that touches CLAUDE.md, settings.json, or `.claude/` automatically runs a sync before the commit lands. Solves the problem of committing config changes and forgetting to sync — teammates pull your CLAUDE.md but their harnesses are stale. Implementation: `src/commands/sync_git_install.py` writes `.git/hooks/pre-commit` (or appends to existing) with a shell snippet that calls `python3 src/commands/sync.py --quiet`; checks for existing hook content to avoid double-install; reports installed targets. Uninstall via `/sync-git-install --remove`.",
-          "effort": "small",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        },
-        {
-          "id": "product-ideation/harness-capability-matrix-live",
-          "dimension": "product-ideation",
-          "slug": "harness-capability-matrix-live",
-          "title": "Live Capability Gap Tracker",
-          "description": "Extend `/sync-matrix` to add a `--watch` flag that monitors your config files with polling and re-renders the capability matrix in the terminal whenever CLAUDE.md or settings.json change — showing in real-time which new settings you added will/won't sync to each harness. Solves the pain of authoring CLAUDE.md blind, not knowing if what you're writing is Gemini/Codex-compatible. Implementation: add `--watch` arg to `src/commands/sync_matrix.py`; use a polling loop (`time.sleep(1)`, compare file mtimes via `os.stat`) to detect changes; on change, clear terminal with `\\033[2J` and re-render the matrix table. Works cross-platform via stdlib only.",
-          "effort": "small",
           "source": "discovery",
           "status": "pending",
           "iteration_added": 1
         }
       ],
-      "priority": 13.6,
+      "priority": 13.2,
       "effort": "medium",
       "status": "selected"
     },
-    {
-      "id": "consistency/miscellaneous",
-      "theme": "miscellaneous",
-      "dimension": "consistency",
-      "title": "Miscellaneous (consistency)",
-      "items": [
-        {
-          "id": "consistency/discover-all-missing-exception-guard",
-          "dimension": "consistency",
-          "slug": "discover-all-missing-exception-guard",
-          "title": "Wrap reader.discover_all() in try/except in orchestrator sync_all",
-          "description": "In src/orchestrator.py sync_all() line 248: `source_data = reader.discover_all()` is called with no exception handling. Any OSError or parsing exception during source discovery propagates directly to the caller with no contextual error message. All other major operations in sync_all() (backup, conflict detection, adapter runs) are wrapped. Fix: wrap lines 246-248 in `try/except Exception as e` and re-raise as `SyncError(f'Source discovery failed: {e}')` from `src/exceptions.py` so callers get a clear, actionable message.",
-          "effort": "small",
-          "source": "discovery",
-          "status": "pending",
-          "iteration_added": 1
-        }
-      ],
-      "priority": 12,
-      "effort": "small",
-      "status": "selected"
-    }
-  ],
-  "remaining_groups": [
     {
       "id": "productivity/miscellaneous",
       "theme": "miscellaneous",
@@ -169,8 +90,10 @@
       ],
       "priority": 11,
       "effort": "small",
-      "status": "pending"
-    },
+      "status": "selected"
+    }
+  ],
+  "remaining_groups": [
     {
       "id": "quality/miscellaneous",
       "theme": "miscellaneous",
@@ -788,6 +711,28 @@
       "priority": 12,
       "effort": "small",
       "status": "completed"
+    },
+    {
+      "id": "productivity/miscellaneous",
+      "theme": "miscellaneous",
+      "dimension": "productivity",
+      "title": "Miscellaneous (productivity)",
+      "items": [
+        {
+          "id": "productivity/sync-status-double-discover-all",
+          "dimension": "productivity",
+          "slug": "sync-status-double-discover-all",
+          "title": "sync_status calls `discover_all()` twice, doubling file-read work",
+          "description": "In src/commands/sync_status.py `_show_default_status` (~lines 319 and 331), `reader.discover_all()` is called twice in the same function: once assigned to `_source_data` and once to `source_data`. Both calls run the full config-discovery pipeline (reading and hashing all CLAUDE.md, settings, skills, agents, commands). Fix: remove the second call at ~line 331 and use `_source_data` directly, saving one full traversal on every `sync-status` invocation.",
+          "effort": "small",
+          "source": "discovery",
+          "status": "pending",
+          "iteration_added": 1
+        }
+      ],
+      "priority": 11,
+      "effort": "small",
+      "status": "completed"
     }
   ],
   "failed_groups": [
@@ -1122,8 +1067,8 @@
       "status": "failed"
     }
   ],
-  "all_items_count": 13,
-  "groups_count": 5,
+  "all_items_count": 6,
+  "groups_count": 3,
   "history": [
     {
       "iteration": 1,
@@ -1767,6 +1712,13 @@
       "timestamp": "2026-03-23T20:13:00.328Z",
       "selected_count": 3,
       "completed_count": 3,
+      "failed_count": 0
+    },
+    {
+      "iteration": 93,
+      "timestamp": "2026-03-23T22:50:22.813Z",
+      "selected_count": 2,
+      "completed_count": 2,
       "failed_count": 0
     }
   ]

@@ -51,8 +51,8 @@ def main():
         except (json.JSONDecodeError, ValueError):
             sys.exit(0)  # Invalid input, allow action
 
-        # Extract file path
-        file_path = hook_data.get("tool_input", {}).get("file_path", "")
+        # Extract file path (tool_input may be None for tools without file_path param)
+        file_path = (hook_data.get("tool_input") or {}).get("file_path", "")
 
         # Check if edited file is a config file
         if not is_config_file(file_path):
@@ -81,7 +81,10 @@ def main():
             pass  # Pause check failure must never block sync
 
         # Debounce check
-        state_manager = StateManager()
+        try:
+            state_manager = StateManager()
+        except Exception:
+            state_manager = None
         if should_debounce(state_manager):
             print("HarnessSync: sync skipped (debounce)", file=sys.stderr)
             sys.exit(0)

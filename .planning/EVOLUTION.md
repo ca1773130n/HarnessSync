@@ -5884,3 +5884,43 @@ _2026-03-23T20:13:00.328Z_
 - The deepeval test failure is a pre-existing Python 3.9 incompatibility in a third-party package (uses 3.10+ union syntax) — unrelated to this iteration's changes.
 
 ---
+## Iteration 93
+_2026-03-23T22:50:22.813Z_
+
+### Items Attempted
+
+- **Frontmatter sync tags for skills/agents** — pass
+- **/sync-resolve: interactive conflict resolver** — pass
+- **/sync-import: pull config FROM a target harness INTO Claude Code** — pass
+- **/sync-watch: live file-watch daemon with terminal status line** — pass
+- **Named env profiles per harness (dev/staging/prod)** — pass
+- **sync_status calls `discover_all()` twice, doubling file-read work** — pass
+
+### Decisions Made
+
+- Reused `skill_allowed_for_target()` for agent sync tag filtering instead of duplicating the allow/deny logic — agents use the same frontmatter semantics as skills so the predicate is identical
+- Added agent sync tag filtering BEFORE the agent translation hints pass in sync_target_builder.py so excluded agents are never processed by the translation layer, saving work and avoiding spurious tmp files
+- Extended sync_scope.py with --assets/--target flags rather than creating a separate command — the scope command is the natural home for asset visibility inspection
+- sync_resolve.py uses the existing BackupManager timestamped directories as the 'theirs' source, avoiding any new state format; finds most-recent backup by directory name sort (timestamp prefix guarantees correct order)
+- sync_import.py adds import_to_claude() as a non-abstract method on AdapterBase returning {} — this avoids breaking all existing adapters while still providing a callable interface. Subclasses opt-in
+- sync_watch.py stores PID at .claude/harness-sync/watch.pid (project-relative) rather than a global path so multiple projects can each have an independent watcher without conflicts
+- Profile env_vars are applied globally to os.environ rather than per-target subprocess because the orchestrator runs all adapters in-process; added a comment explaining this trade-off
+- env-profile subcommand maskes secret values (first 4 chars + ***) in list output to prevent accidental secret leakage in terminal logs
+- Fixed the double discover_all() by reusing _source_data that was already computed in the coverage block above — single-line fix with zero risk
+
+### Patterns Discovered
+
+- The codebase heavily uses best-effort try/except blocks around optional features — new features should follow the same pattern to avoid breaking the core sync path
+- sync_target_builder.py is the correct place to add per-target filtering passes; all such transforms are co-located there and follow the same try/except structure
+- Commands follow a consistent pattern: argparse parser + tokens from sys.argv, PLUGIN_ROOT path injection, delegates to src/ library functions
+- ProfileManager uses a VALID_PROFILE_KEYS set to document recognized keys — new keys should be added there for discoverability even if not strictly enforced
+- The codebase already has skill_sync_tags.py handling skills but nothing for agents — agents use .md files (not directories like skills) so parse_agent_sync_tag reads the file directly without the directory indirection
+
+### Takeaways
+
+- sync_watch.py existed but had a broken sync_all(targets=...) call — the orchestrator takes cli_only_targets as a constructor argument, not a sync_all() argument. Worth auditing other callers of sync_all()
+- The conflict resolution infrastructure (ConflictDetector, ConflictResolver, BackupManager) is already quite rich — sync_resolve.py could be extended to call the existing TuiConflictWizard for a richer UI
+- ProfileManager.apply_to_kwargs is the single application point for all profile effects — keeping env_vars handling there makes it composable with the existing profile inheritance (extends) feature
+- The deepeval pytest plugin causes a Python 3.9 incompatibility (union type syntax) — tests must be run with -p no:deepeval on Python 3.9; this is a pre-existing issue unrelated to these changes
+
+---

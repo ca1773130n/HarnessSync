@@ -101,6 +101,83 @@ _WATCH_DIRS = [
     ".claude/agents",
 ]
 
+# Known target (harness) output files that drift detection watches.
+# Maps harness name -> list of paths relative to project root.
+_TARGET_FILES: dict[str, list[str]] = {
+    "codex": ["AGENTS.md"],
+    "gemini": ["GEMINI.md"],
+    "cursor": [".cursor/rules/CLAUDE.mdc", ".cursorrules"],
+    "aider": [".aider.conf.yml", "aider.conf.yml"],
+    "cline": [".clinerules"],
+    "windsurf": [".windsurfrules"],
+    "opencode": ["opencode.json"],
+    "zed": [".zed/settings.json"],
+    "continue": [".continue/config.json"],
+    "vscode": [".vscode/settings.json"],
+    "neovim": [".config/nvim/codecompanion.json"],
+}
+
+
+def _collect_target_paths(project_dir: Path) -> list[Path]:
+    """Return list of existing harness target output files."""
+    paths: list[Path] = []
+    for file_list in _TARGET_FILES.values():
+        for rel in file_list:
+            p = project_dir / rel
+            if p.exists():
+                paths.append(p)
+    return paths
+
+
+def _load_last_synced_hashes(project_dir: Path) -> dict[str, str]:
+    """Load per-file hashes from the last sync state."""
+    import hashlib
+    import json as _json
+    state_path = project_dir / ".claude/harness-sync/state.json"
+    try:
+        if state_path.exists():
+            data = _json.loads(state_path.read_text(encoding="utf-8"))
+            return data.get("file_hashes", {})
+    except Exception:
+        pass
+    return {}
+
+
+def _hash_file(path: Path) -> str:
+    """Return MD5 hex digest of file content."""
+    import hashlib
+    try:
+        return hashlib.md5(path.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _check_target_drift(
+    project_dir: Path,
+    last_synced_hashes: dict[str, str],
+    known_hashes: dict[str, str],
+) -> list[tuple[str, str]]:
+    """Return list of (path, harness_name) for target files that drifted externally.
+
+    A file has drifted if its current hash differs from the last-synced hash
+    AND differs from what we recorded at watch start (to avoid double-reporting).
+    """
+    drifted: list[tuple[str, str]] = []
+    for harness, file_list in _TARGET_FILES.items():
+        for rel in file_list:
+            p = project_dir / rel
+            key = str(p)
+            if not p.exists():
+                continue
+            current_hash = _hash_file(p)
+            synced_hash = last_synced_hashes.get(key) or last_synced_hashes.get(rel)
+            # Only report if: we have a known synced hash AND current differs from it
+            # AND this is a new change (not already in known_hashes)
+            if synced_hash and current_hash != synced_hash:
+                if known_hashes.get(key) != current_hash:
+                    drifted.append((key, harness))
+    return drifted
+
 
 def _collect_watch_targets(project_dir: Path) -> list[Path]:
     """Return list of existing paths to watch."""
@@ -265,6 +342,11 @@ def main() -> None:
 
     snapshot = _snapshot_mtimes(watch_paths)
 
+    # Snapshot of target file hashes at watch start (for drift detection)
+    _target_known_hashes: dict[str, str] = {
+        str(p): _hash_file(p) for p in _collect_target_paths(project_dir)
+    }
+
     try:
         while not stop_requested:
             time.sleep(interval)
@@ -275,6 +357,28 @@ def main() -> None:
             watch_paths = _collect_watch_targets(project_dir)
             new_snapshot = _snapshot_mtimes(watch_paths)
             changed = _detect_changes(snapshot, new_snapshot)
+
+            # --- TARGET DRIFT DETECTION ---
+            try:
+                last_hashes = _load_last_synced_hashes(project_dir)
+                if last_hashes:
+                    drifted = _check_target_drift(project_dir, last_hashes, _target_known_hashes)
+                    for drift_path, harness_name in drifted:
+                        # Update our known snapshot so we don't re-notify
+                        _target_known_hashes[drift_path] = _hash_file(Path(drift_path))
+                        rel = os.path.relpath(drift_path, project_dir)
+                        msg = (
+                            f"{rel} manually edited — "
+                            f"run /sync to re-sync or /sync-resolve to merge"
+                        )
+                        print(f"[{_timestamp()}] Drift detected: {msg}")
+                        try:
+                            from src.notifiers.desktop import notify
+                            notify(msg, title=f"HarnessSync — {harness_name} drift")
+                        except Exception:
+                            pass
+            except Exception:
+                pass  # Drift check must never interrupt the watch loop
 
             if changed:
                 snapshot = new_snapshot
@@ -299,6 +403,9 @@ def main() -> None:
                     )
                     print(f"  Synced {success_count}/{len(results)} targets.")
                     summary.record(changed, results)
+                    # Update target known hashes after a successful sync
+                    for p in _collect_target_paths(project_dir):
+                        _target_known_hashes[str(p)] = _hash_file(p)
                 except Exception as e:
                     print(f"  Sync error: {e}")
     finally:
