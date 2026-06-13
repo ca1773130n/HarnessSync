@@ -4,8 +4,8 @@ from __future__ import annotations
 
 Covers:
 - Hook normalization from settings.json format and hooks/hooks.json legacy format
-- Event mapping for Codex (SessionStart, Stop, PostToolUse->AfterToolUse, PreToolUse skipped)
-- Codex feature gate behavior (hooks written when flag set, AGENTS.md warning when not)
+- Event mapping for Codex (SessionStart, Stop, PreToolUse, PostToolUse, UserPromptSubmit — direct names)
+- Codex hooks default-on (written unless [features] hooks = false, then documented in AGENTS.md)
 - Default no-op behavior in base adapter
 - Orchestrator section filter includes hooks
 - discover_all() includes hooks key
@@ -334,8 +334,8 @@ class TestCodexHooksSync:
         content = (config_dir / "config.toml").read_text()
         assert "[[hooks.Stop]]" in content
 
-    def test_event_mapping_post_tool_use_renamed(self, tmp_path):
-        """PostToolUse is renamed to AfterToolUse in Codex."""
+    def test_event_mapping_post_tool_use(self, tmp_path):
+        """PostToolUse keeps its name in Codex (no legacy AfterToolUse)."""
         adapter = self._make_adapter(tmp_path)
         config_dir = tmp_path / ".codex"
         config_dir.mkdir()
@@ -347,11 +347,13 @@ class TestCodexHooksSync:
         result = adapter.sync_hooks(hooks)
         assert result.synced == 1
         content = (config_dir / "config.toml").read_text()
-        assert "[[hooks.AfterToolUse]]" in content
-        assert "PostToolUse" not in content.split("# Hooks")[1] if "# Hooks" in content else True
+        assert "[[hooks.PostToolUse]]" in content
+        assert "[[hooks.PostToolUse.hooks]]" in content
+        assert 'matcher = "Edit"' in content
+        assert "AfterToolUse" not in content
 
-    def test_pre_tool_use_skipped(self, tmp_path):
-        """PreToolUse is skipped (unsupported by Codex)."""
+    def test_pre_tool_use_written(self, tmp_path):
+        """PreToolUse is now a supported Codex hook event (written, not skipped)."""
         adapter = self._make_adapter(tmp_path)
         config_dir = tmp_path / ".codex"
         config_dir.mkdir()
@@ -361,8 +363,9 @@ class TestCodexHooksSync:
             {"event": "PreToolUse", "type": "shell", "command": "echo pre", "scope": "user"},
         ]}
         result = adapter.sync_hooks(hooks)
-        assert result.skipped >= 1
-        assert result.synced == 0
+        assert result.synced == 1
+        content = (config_dir / "config.toml").read_text()
+        assert "[[hooks.PreToolUse]]" in content
 
     def test_http_hooks_skipped(self, tmp_path):
         """HTTP hooks are skipped (Codex is shell-only)."""
@@ -379,8 +382,12 @@ class TestCodexHooksSync:
         assert result.synced == 0
 
     def test_feature_gate_disabled_documents_in_agents_md(self, tmp_path):
-        """When feature gate is off, hooks are documented in AGENTS.md, not written to config."""
+        """When hooks are explicitly disabled, they're documented in AGENTS.md, not written."""
         adapter = self._make_adapter(tmp_path)
+        # Explicit opt-out: [features] hooks = false
+        config_dir = tmp_path / ".codex"
+        config_dir.mkdir()
+        (config_dir / "config.toml").write_text('[features]\nhooks = false\n')
         # Create AGENTS.md with managed section
         agents_md = tmp_path / "AGENTS.md"
         agents_md.write_text(
@@ -398,7 +405,17 @@ class TestCodexHooksSync:
         # Check AGENTS.md has the documentation
         content = agents_md.read_text()
         assert "Available Hooks" in content
-        assert "features" in content.lower() or "hooks = true" in content
+
+    def test_hooks_written_by_default_without_flag(self, tmp_path):
+        """With no [features] opt-out, hooks are written by default (stable feature)."""
+        adapter = self._make_adapter(tmp_path)
+        hooks = {"hooks": [
+            {"event": "SessionStart", "type": "shell", "command": "echo start", "scope": "user"},
+        ]}
+        result = adapter.sync_hooks(hooks)
+        assert result.synced == 1
+        content = (tmp_path / ".codex" / "config.toml").read_text()
+        assert "[[hooks.SessionStart]]" in content
 
     def test_feature_gate_enabled_writes_config(self, tmp_path):
         """When feature gate is on, hooks are written to config.toml."""
@@ -417,11 +434,11 @@ class TestCodexHooksSync:
         assert result.synced == 2
         content = (config_dir / "config.toml").read_text()
         assert "[[hooks.SessionStart]]" in content
-        assert "[[hooks.AfterToolUse]]" in content
+        assert "[[hooks.PostToolUse]]" in content
         assert 'matcher = "Edit"' in content
 
     def test_mixed_hooks_with_skips(self, tmp_path):
-        """Mix of supported and unsupported hooks."""
+        """Mix of supported events and an unsupported HTTP hook."""
         adapter = self._make_adapter(tmp_path)
         config_dir = tmp_path / ".codex"
         config_dir.mkdir()
@@ -433,8 +450,8 @@ class TestCodexHooksSync:
             {"event": "Stop", "type": "http", "url": "https://example.com", "scope": "user"},
         ]}
         result = adapter.sync_hooks(hooks)
-        assert result.synced == 1   # Only SessionStart
-        assert result.skipped == 2  # PreToolUse + HTTP Stop
+        assert result.synced == 2   # SessionStart + PreToolUse (now supported)
+        assert result.skipped == 1  # HTTP Stop only
 
 
 # ---------------------------------------------------------------------------
@@ -513,15 +530,17 @@ class TestCodexFeatureGate:
         assert CodexAdapter._codex_hooks_feature_enabled(config_dir / "config.toml") is False
 
     def test_feature_not_set(self, tmp_path):
+        """No [features] opt-out -> hooks enabled by default (stable feature)."""
         from src.adapters.codex import CodexAdapter
         config_dir = tmp_path / ".codex"
         config_dir.mkdir()
         (config_dir / "config.toml").write_text('sandbox_mode = "workspace-write"\n')
-        assert CodexAdapter._codex_hooks_feature_enabled(config_dir / "config.toml") is False
+        assert CodexAdapter._codex_hooks_feature_enabled(config_dir / "config.toml") is True
 
     def test_no_config_file(self, tmp_path):
+        """No config at all -> hooks enabled by default."""
         from src.adapters.codex import CodexAdapter
-        assert CodexAdapter._codex_hooks_feature_enabled(tmp_path / "nonexistent.toml") is False
+        assert CodexAdapter._codex_hooks_feature_enabled(tmp_path / "nonexistent.toml") is True
 
 
 # ---------------------------------------------------------------------------
@@ -580,7 +599,7 @@ class TestCodexSyncAllDispatchesHooks:
         assert results["hooks"].failed == 0
 
     def test_sync_all_hooks_with_skipped_events(self, tmp_path):
-        """sync_all() correctly propagates skipped hooks (e.g., PreToolUse unsupported by Codex)."""
+        """sync_all() propagates skipped hooks (events with no Codex equivalent)."""
         from src.adapters.codex import CodexAdapter
 
         adapter = CodexAdapter(tmp_path)
@@ -597,7 +616,8 @@ class TestCodexSyncAllDispatchesHooks:
             "settings": {},
             "hooks": {
                 "hooks": [
-                    {"event": "PreToolUse", "type": "shell", "command": "echo pre", "scope": "user"},
+                    # Notification is a Claude Code event with no Codex equivalent.
+                    {"event": "Notification", "type": "shell", "command": "echo n", "scope": "user"},
                 ]
             },
         }

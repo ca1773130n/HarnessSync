@@ -220,11 +220,18 @@ def format_mcp_server_toml(name: str, config: dict) -> str:
             # Preserve env var references like ${API_KEY} as-is
             lines.append(f'{key} = {format_toml_value(str(val))}')
 
-    # HTTP headers (nested table)
+    # HTTP headers (nested table) — static header values
     if 'http_headers' in config and isinstance(config['http_headers'], dict):
         lines.append('')
         lines.append(f'[mcp_servers."{name}".http_headers]')
         for key, val in config['http_headers'].items():
+            lines.append(f'{key} = {format_toml_value(str(val))}')
+
+    # HTTP headers sourced from environment (nested table) — header -> env var name
+    if 'env_http_headers' in config and isinstance(config['env_http_headers'], dict):
+        lines.append('')
+        lines.append(f'[mcp_servers."{name}".env_http_headers]')
+        for key, val in config['env_http_headers'].items():
             lines.append(f'{key} = {format_toml_value(str(val))}')
 
     return '\n'.join(lines)
