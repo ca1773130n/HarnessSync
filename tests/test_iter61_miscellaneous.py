@@ -273,7 +273,7 @@ def test_check_before_sync_codex_returns_dict():
 
 def test_check_before_sync_all_fields_present():
     matrix = HarnessFeatureMatrix()
-    result = matrix.check_before_sync("gemini")
+    result = matrix.check_before_sync("cursor")
     for key in ("target", "ready", "degraded", "blocked", "score", "verdict", "summary"):
         assert key in result
 
@@ -327,7 +327,7 @@ def test_get_diff_history_parses_entries(tmp_path):
     changelog_dir.mkdir(parents=True)
     (changelog_dir / "changelog.md").write_text(
         "## Sync 2026-03-13T10:00:00Z scope=all\n"
-        "Synced: codex gemini opencode\n"
+        "Synced: codex opencode\n"
         "synced=5 skipped=1 failed=0\n"
         "\n"
         "## Sync 2026-03-13T11:00:00Z scope=project\n"
@@ -352,13 +352,13 @@ def test_format_diff_history_empty(tmp_path):
 def test_build_text_diff_preview_created_files(tmp_path):
     preview_all = {
         "codex": {"AGENTS.md": "# Rules\n- rule1\n- rule2\n"},
-        "gemini": {"GEMINI.md": "# Gemini\n- rule1\n"},
+        "windsurf": {".windsurfrules": "# Windsurf\n- rule1\n"},
     }
     diffs = build_text_diff_preview(preview_all, project_dir=tmp_path)
     assert len(diffs) == 2
     statuses = {d["file_path"]: d["status"] for d in diffs}
     assert statuses["AGENTS.md"] == "created"
-    assert statuses["GEMINI.md"] == "created"
+    assert statuses[".windsurfrules"] == "created"
 
 
 def test_build_text_diff_preview_modified_file(tmp_path):
@@ -389,7 +389,7 @@ def test_format_text_diff_preview_empty():
 def test_format_text_diff_preview_with_changes(tmp_path):
     preview_all = {
         "codex": {"AGENTS.md": "- new rule\n"},
-        "gemini": {"GEMINI.md": "# gemini\n"},
+        "windsurf": {".windsurfrules": "# windsurf\n"},
     }
     diffs = build_text_diff_preview(preview_all, project_dir=tmp_path)
     result = format_text_diff_preview(diffs)
@@ -402,12 +402,12 @@ def test_format_text_diff_preview_hides_unchanged_by_default(tmp_path):
     (tmp_path / "AGENTS.md").write_text(content)
     preview_all = {
         "codex": {"AGENTS.md": content},  # unchanged
-        "gemini": {"GEMINI.md": "# New\n"},  # created
+        "windsurf": {".windsurfrules": "# New\n"},  # created
     }
     diffs = build_text_diff_preview(preview_all, project_dir=tmp_path)
     result = format_text_diff_preview(diffs, show_unchanged=False)
     # Unchanged file should not appear prominently
-    assert "1 to create" in result or "GEMINI" in result.upper()
+    assert "1 to create" in result or "WINDSURFRULES" in result.upper()
 
 
 def test_format_text_diff_preview_shows_unchanged_when_requested(tmp_path):

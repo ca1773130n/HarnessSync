@@ -5,7 +5,7 @@ description: List and restore HarnessSync config snapshots
 List available config snapshots or restore a previous state. Snapshots are
 created automatically before every sync operation.
 
-Usage: /sync-restore [--list] [--latest] [--date YYYY-MM-DD] [--target codex|gemini|opencode]
+Usage: /sync-restore [--list] [--latest] [--date YYYY-MM-DD] [--target codex|opencode]
 
 Options:
 - --list: Show all available snapshots (default when no flags given)

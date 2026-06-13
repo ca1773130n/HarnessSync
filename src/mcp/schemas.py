@@ -9,7 +9,7 @@ stdlib has no JSON Schema validator.
 
 SYNC_ALL_TOOL = {
     "name": "sync_all",
-    "description": "Sync all Claude Code configuration to all registered target CLIs (Codex, Gemini, OpenCode). Returns structured results with per-target sync counts and any errors.",
+    "description": "Sync all Claude Code configuration to all registered target CLIs (Codex, OpenCode, Cursor, Aider, Windsurf, Cline, Continue, Zed, Neovim, VSCode). Returns structured results with per-target sync counts and any errors.",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -37,7 +37,7 @@ SYNC_TARGET_TOOL = {
             "target": {
                 "type": "string",
                 "description": "Target CLI to sync to",
-                "enum": ["codex", "gemini", "opencode"],
+                "enum": ["codex", "opencode", "cursor", "aider", "windsurf", "cline", "continue", "zed", "neovim", "vscode"],
             },
             "dry_run": {
                 "type": "boolean",
@@ -118,7 +118,7 @@ def validate_sync_target_params(arguments: dict) -> dict:
     if not isinstance(target, str):
         raise ValueError("Parameter 'target' must be a string")
 
-    valid_targets = ["codex", "gemini", "opencode"]
+    valid_targets = ["codex", "opencode", "cursor", "aider", "windsurf", "cline", "continue", "zed", "neovim", "vscode"]
     if target not in valid_targets:
         raise ValueError(f"Invalid target: {target}. Must be one of: {', '.join(valid_targets)}")
 

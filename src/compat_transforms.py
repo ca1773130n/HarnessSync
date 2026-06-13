@@ -27,23 +27,6 @@ from src.compat_rules import (
 # Migration functions: schema transforms between harness versions
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _gemini_migrate_tools_permissions(config: dict) -> dict:
-    """Gemini 1.5 → 2.0: rename blockedTools/allowedTools → tools.exclude/tools.allowed."""
-    settings = config.get("settings", {})
-    if not settings:
-        return config
-    changed = False
-    if "blockedTools" in settings and "tools" not in settings:
-        settings.setdefault("tools", {})["exclude"] = settings.pop("blockedTools")
-        changed = True
-    if "allowedTools" in settings and "tools" not in settings.get("tools", {}):
-        settings.setdefault("tools", {})["allowed"] = settings.pop("allowedTools")
-        changed = True
-    if changed:
-        config["settings"] = settings
-    return config
-
-
 def _codex_migrate_approval_policy(config: dict) -> dict:
     """Codex 1.0 → 1.2: rename fullAuto → on-request in approval_policy."""
     settings = config.get("settings", {})
@@ -63,10 +46,6 @@ def _windsurf_migrate_mcp_config(config: dict) -> dict:
 
 # Migration table: (min_from_ver, target_version, label, fn)
 _MIGRATION_RULES: dict[str, list[tuple[str, str, str, object]]] = {
-    "gemini": [
-        ("1.5", "2.0", "Rename blockedTools/allowedTools to tools.exclude/tools.allowed",
-         _gemini_migrate_tools_permissions),
-    ],
     "codex": [
         ("1.0", "1.2", "Rename approval_policy 'fullAuto' to 'on-request'",
          _codex_migrate_approval_policy),
@@ -122,7 +101,7 @@ def migrate_config(
     config and get back an updated config that matches the new schema.
 
     Args:
-        target: Harness name (e.g. "gemini", "codex").
+        target: Harness name (e.g. "codex", "windsurf").
         config: Current config dict for the target.
         from_version: The version the config was written for.
         to_version: The version being migrated to.
@@ -218,7 +197,7 @@ def generate_upgrade_migration_guide(
 ) -> dict:
     """Generate a step-by-step migration guide when a harness is upgraded.
 
-    When the user upgrades a harness (e.g. Gemini CLI from 1.5 to 2.0) and the
+    When the user upgrades a harness (e.g. Codex CLI from 1.0 to 1.2) and the
     config format changes, this function produces a structured guide covering:
       - Features gained/lost between the two versions
       - Migration rules that will be applied automatically by HarnessSync
@@ -226,7 +205,7 @@ def generate_upgrade_migration_guide(
       - Manual action items the user must perform
 
     Args:
-        target: Harness name (e.g. "gemini", "cursor").
+        target: Harness name (e.g. "codex", "cursor").
         from_version: The version being upgraded from.
         to_version: The version being upgraded to.
         project_dir: Project root directory (used for pinned version lookup).

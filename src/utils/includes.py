@@ -125,7 +125,7 @@ def resolve_includes(
 def extract_include_refs(content: str) -> list[str]:
     """Extract raw ``@include`` path strings without resolving them.
 
-    Useful for adapters that want the raw references (e.g., Gemini's
+    Useful for adapters that want the raw references (e.g., a harness's
     ``@file.md`` native import syntax).
 
     Args:

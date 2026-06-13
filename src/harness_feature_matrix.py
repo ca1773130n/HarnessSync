@@ -23,7 +23,7 @@ Features tracked:
   plugins       Claude Code plugin definitions
 
 Covered harnesses (matching HarnessSync adapter targets):
-  codex, gemini, opencode, cursor, aider, windsurf, cline, continue, zed, neovim
+  codex, opencode, cursor, aider, windsurf, cline, continue, zed, neovim
 
 Usage:
     from src.harness_feature_matrix import HarnessFeatureMatrix
@@ -69,7 +69,6 @@ ALL_FEATURES: list[str] = [
 
 ALL_HARNESSES: list[str] = [
     "codex",
-    "gemini",
     "opencode",
     "cursor",
     "aider",
@@ -95,7 +94,6 @@ _FEATURE_MATRIX: dict[str, dict[str, SupportLevel]] = {
         # Rules (CLAUDE.md content) translate to every harness's system-prompt
         # or rules file.  All support it; quality of fidelity varies.
         "codex":    "native",     # → AGENTS.md, fully inlined
-        "gemini":   "native",     # → GEMINI.md, fully inlined
         "opencode": "native",     # → OPENCODE.md / opencode.json system field
         "cursor":   "native",     # → .cursor/rules/*.mdc, glob-scoped
         "aider":    "native",     # → CONVENTIONS.md, fully inlined
@@ -110,7 +108,6 @@ _FEATURE_MATRIX: dict[str, dict[str, SupportLevel]] = {
         # Skills are reusable workflow descriptions.  Most harnesses can receive
         # them as additional context files; a few have no skill concept at all.
         "codex":    "native",     # → .agents/skills/
-        "gemini":   "native",     # → .gemini/skills/
         "opencode": "native",     # → .opencode/skills/
         "cursor":   "partial",    # → .cursor/rules/skills/ as .mdc (format converted)
         "aider":    "adapter",    # → read_files list in .aider.conf.yml (context only)
@@ -125,7 +122,6 @@ _FEATURE_MATRIX: dict[str, dict[str, SupportLevel]] = {
         # Sub-agent definitions (.claude/agents/).  Only a few harnesses have a
         # native agent system; others convert to inlined instructions.
         "codex":    "partial",    # → AGENTS.md agent sections (no separate files)
-        "gemini":   "partial",    # → GEMINI.md agent sections
         "opencode": "partial",    # → OPENCODE.md agent sections
         "cursor":   "adapter",    # → flattened into .cursor/rules/ bodies
         "aider":    "adapter",    # → flattened into CONVENTIONS.md
@@ -140,7 +136,6 @@ _FEATURE_MATRIX: dict[str, dict[str, SupportLevel]] = {
         # Slash commands (.claude/commands/).  Very few harnesses have an
         # equivalent command palette concept.
         "codex":    "partial",    # → documented in AGENTS.md (not executable)
-        "gemini":   "unsupported",# Gemini CLI has no slash command system
         "opencode": "partial",    # → opencode.json keybinding section (limited)
         "cursor":   "partial",    # → .cursor/rules/ as inline usage instructions
         "aider":    "unsupported",# Aider has no slash command forwarding
@@ -154,7 +149,6 @@ _FEATURE_MATRIX: dict[str, dict[str, SupportLevel]] = {
     "mcp": {
         # MCP server configuration.  Harnesses vary widely in support.
         "codex":    "native",     # → .codex/config.toml [mcp.servers.*]
-        "gemini":   "native",     # → .gemini/settings.json mcpServers
         "opencode": "native",     # → .opencode/settings.json mcpServers
         "cursor":   "native",     # → .cursor/mcp.json (Cursor ≥ 0.43)
         "aider":    "unsupported",# Aider has no MCP server concept
@@ -170,7 +164,6 @@ _FEATURE_MATRIX: dict[str, dict[str, SupportLevel]] = {
         # No harness has an equivalent hook system; hooks are either dropped
         # or partially documented as instructions.
         "codex":    "unsupported",
-        "gemini":   "unsupported",
         "opencode": "unsupported",
         "cursor":   "unsupported",
         "aider":    "unsupported",
@@ -185,7 +178,6 @@ _FEATURE_MATRIX: dict[str, dict[str, SupportLevel]] = {
         # Permission / model / env settings from claude settings.json.
         # Most harnesses have some form of settings but the fields differ.
         "codex":    "partial",    # → approval_policy, sandbox_mode in config.toml
-        "gemini":   "partial",    # → tools.exclude / tools.allowed in settings.json
         "opencode": "partial",    # → model/provider in opencode.json
         "cursor":   "partial",    # → frontmatter in .mdc files (limited fields)
         "aider":    "partial",    # → .aider.conf.yml model / auto-commit flags
@@ -199,7 +191,6 @@ _FEATURE_MATRIX: dict[str, dict[str, SupportLevel]] = {
     "env_vars": {
         # Environment variable forwarding (settings.json env section).
         "codex":    "partial",    # → env block in config.toml
-        "gemini":   "unsupported",# Gemini CLI does not read env from config
         "opencode": "native",     # → opencode.json env section
         "cursor":   "unsupported",# Cursor does not expose env var forwarding
         "aider":    "partial",    # → .env file (referenced via .aider.conf.yml)
@@ -214,7 +205,6 @@ _FEATURE_MATRIX: dict[str, dict[str, SupportLevel]] = {
         # Claude Code plugin definitions ($CLAUDE_PLUGIN_ROOT).
         # No other harness has a plugin system equivalent.
         "codex":    "unsupported",
-        "gemini":   "unsupported",
         "opencode": "unsupported",
         "cursor":   "unsupported",
         "aider":    "unsupported",
@@ -241,9 +231,6 @@ VERSION_REQUIREMENTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "codex": {
         "settings": ("1.2", "approval_policy / sandbox_mode require Codex 1.2+"),
-    },
-    "gemini": {
-        "settings": ("1.5", "tools.exclude requires Gemini CLI 1.5+"),
     },
     "aider": {
         "skills": ("0.50", "read_files list for skill context requires Aider 0.50+"),
@@ -310,16 +297,12 @@ class MatrixQueryResult:
 # Keyed by (feature, harness). Displayed as tooltip in export_html_report().
 
 _FEATURE_NOTES: dict[tuple[str, str], str] = {
-    ("skills", "gemini"):   "Inlined into GEMINI.md — no dedicated skill runtime",
     ("skills", "aider"):    "No skill system — content appended to CONVENTIONS.md",
-    ("agents", "gemini"):   "Inlined into GEMINI.md — no sub-agent dispatch",
-    ("commands", "gemini"): "Summarized as prose in GEMINI.md — not executable",
     ("commands", "aider"):  "Translated to shell aliases in CONVENTIONS.md",
     ("hooks", "codex"):     "Mapped to closest Codex lifecycle hooks — subset only",
     ("hooks", "cursor"):    "No hook runtime — converted to .mdc guardrails",
     ("hooks", "aider"):     "No hook system — converted to --before/after-apply flags",
     ("plugins", "codex"):   "No plugin API — rules inlined into AGENTS.md",
-    ("plugins", "gemini"):  "No plugin API — rules inlined into GEMINI.md",
     ("plugins", "aider"):   "No plugin system — rules added to CONVENTIONS.md",
     ("mcp", "aider"):       "Aider cannot execute MCP servers — tools unavailable",
     ("env_vars", "codex"):  "Forwarded via config.toml [env] section",
@@ -764,13 +747,11 @@ class HarnessFeatureMatrix:
         _WORKAROUNDS: dict[tuple[str, str], str] = {
             ("skills", "zed"):      "Inline skill content in .rules manually.",
             ("skills", "neovim"):   "Add skill content to .avante/rules/ as .avanterules files.",
-            ("commands", "gemini"): "Document commands as GEMINI.md workflow steps instead.",
             ("commands", "aider"):  "Use aider /ask prefix or shell aliases as command proxies.",
             ("commands", "zed"):    "Zed has no command forwarding — document as prose notes.",
             ("commands", "neovim"): "avante.nvim has no command system — use Neovim keymaps.",
             ("hooks", "aider"):     "Use aider --before-apply / --after-apply shell hooks instead.",
             ("hooks", "cursor"):    "Cursor has no hook system — use .cursorrules for guardrails.",
-            ("plugins", "gemini"):  "Gemini CLI has no plugin API — replicate plugin rules inline.",
             ("plugins", "aider"):   "Aider has no plugin system — apply plugin rules to CONVENTIONS.md.",
             ("plugins", "cursor"):  "Replicate plugin behavior as .mdc rule files in .cursor/rules/.",
             ("plugins", "cline"):   "Cline has no plugin API — add plugin guidance to .clinerules.",

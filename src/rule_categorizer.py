@@ -57,7 +57,7 @@ CATEGORIES: dict[str, list[re.Pattern]] = {
     ],
     "tool-use": [
         re.compile(r"\b(bash|grep|awk|sed|curl|wget|docker|kubectl|helm|terraform|ansible|make|npm|pip|cargo|go\s+build)\b", re.I),
-        re.compile(r"\b(claude.code|gemini|codex|opencode|aider|cursor|windsurf|mcp|tool.call)\b", re.I),
+        re.compile(r"\b(claude.code|codex|opencode|aider|cursor|windsurf|mcp|tool.call)\b", re.I),
         re.compile(r"\b(read.tool|write.tool|edit.tool|glob.tool|agent.tool|bash.tool)\b", re.I),
         re.compile(r"\b(use\s+(the\s+)?(bash|read|write|edit|glob|grep|agent|task|todo)\s+tool)\b", re.I),
     ],

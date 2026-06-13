@@ -5,7 +5,7 @@ from __future__ import annotations
 Integrates with git to show how CLAUDE.md has evolved over time and lets
 users restore any target harness to the config state from any past commit.
 
-Answers 'what was my Gemini config set to two weeks ago when things were
+Answers 'what was my Codex config set to two weeks ago when things were
 working?' without manually reading git history.
 
 Operations:

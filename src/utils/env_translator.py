@@ -7,14 +7,14 @@ and target CLI formats:
 
 - ENV-01: Codex requires literal env maps (no ${VAR} interpolation in config.toml)
 - ENV-02: ${VAR:-default} syntax must be expanded at sync time for Codex
-- ENV-03: Gemini supports ${VAR} natively, no translation needed
+- ENV-03: Cursor supports ${VAR} natively, no translation needed
 
 Updates Decision #13: v0.0.1 preserved ${VAR} in TOML; v0.0.2 translates for Codex
 since Codex doesn't support runtime variable interpolation.
 
 Transport detection validates MCP server compatibility per target CLI:
 - Codex: stdio + http (NO SSE)
-- Gemini: stdio + http + sse
+- Cursor: stdio + http + sse
 - OpenCode: stdio + http (NO SSE)
 """
 
@@ -33,7 +33,6 @@ VAR_PATTERN = re.compile(r'\$\{([A-Z_][A-Z0-9_]*)(:-([^}]+))?\}')
 # Empty set means the harness writes config but never executes MCP servers.
 TRANSPORT_SUPPORT = {
     "codex":    {"stdio", "http"},
-    "gemini":   {"stdio", "http", "sse"},
     "opencode": {"stdio", "http"},
     "cursor":   {"stdio", "http", "sse"},
     "aider":    set(),               # Name written to .aider.conf.yml only
@@ -121,21 +120,6 @@ def translate_env_vars_for_codex(config: dict) -> tuple[dict, list[str]]:
     return config, warnings
 
 
-def preserve_env_vars_for_gemini(config: dict) -> tuple[dict, list[str]]:
-    """Pass config through unchanged for Gemini (ENV-03).
-
-    Gemini supports ${VAR} natively in settings.json, so no translation needed.
-    Returns a shallow copy for safety (not the same object reference).
-
-    Args:
-        config: Claude Code MCP server config dict
-
-    Returns:
-        Tuple of (config_copy, empty_warnings)
-    """
-    return config.copy(), []
-
-
 def translate_env_vars_for_opencode_headers(headers: dict) -> tuple[dict, list[str]]:
     """Translate ${VAR} references in MCP headers to OpenCode {env:VAR} syntax.
 
@@ -200,7 +184,7 @@ def check_transport_support(server_name: str, config: dict, target: str) -> tupl
     Args:
         server_name: MCP server name (for warning messages)
         config: MCP server config dict
-        target: Target CLI name ("codex", "gemini", "opencode")
+        target: Target CLI name ("codex", "cursor", "opencode")
 
     Returns:
         Tuple of (is_supported, warning_message)
@@ -241,7 +225,6 @@ HARNESS_ENV_VAR_REMAP: dict[str, dict[str, str]] = {
     # Primary API authentication key
     "ANTHROPIC_API_KEY": {
         "codex":    "ANTHROPIC_API_KEY",   # Codex supports Anthropic directly
-        "gemini":   "GEMINI_API_KEY",      # Gemini CLI uses its own key name
         "opencode": "ANTHROPIC_API_KEY",
         "cursor":   "ANTHROPIC_API_KEY",
         "aider":    "ANTHROPIC_API_KEY",
@@ -250,7 +233,6 @@ HARNESS_ENV_VAR_REMAP: dict[str, dict[str, str]] = {
     # Default model selection
     "CLAUDE_MODEL": {
         "codex":    "OPENAI_DEFAULT_MODEL",
-        "gemini":   "GEMINI_MODEL",
         "opencode": "OPENCODE_MODEL",
         "cursor":   "CURSOR_DEFAULT_MODEL",
         "aider":    "AIDER_MODEL",
@@ -259,7 +241,6 @@ HARNESS_ENV_VAR_REMAP: dict[str, dict[str, str]] = {
     # Base URL for API proxy / custom endpoints
     "ANTHROPIC_BASE_URL": {
         "codex":    "OPENAI_BASE_URL",
-        "gemini":   "GEMINI_API_BASE",
         "opencode": "ANTHROPIC_BASE_URL",
         "cursor":   "OPENAI_API_BASE",
         "aider":    "OPENAI_API_BASE",
@@ -268,7 +249,6 @@ HARNESS_ENV_VAR_REMAP: dict[str, dict[str, str]] = {
     # Disable streaming (useful in CI)
     "ANTHROPIC_STREAMING": {
         "codex":    "OPENAI_STREAM",
-        "gemini":   "GEMINI_STREAMING",
         "opencode": "ANTHROPIC_STREAMING",
         "cursor":   "CURSOR_STREAMING",
         "aider":    "AIDER_STREAM",
@@ -277,7 +257,6 @@ HARNESS_ENV_VAR_REMAP: dict[str, dict[str, str]] = {
     # Max token budget
     "ANTHROPIC_MAX_TOKENS": {
         "codex":    "OPENAI_MAX_TOKENS",
-        "gemini":   "GEMINI_MAX_OUTPUT_TOKENS",
         "opencode": "ANTHROPIC_MAX_TOKENS",
         "cursor":   "CURSOR_MAX_TOKENS",
         "aider":    "AIDER_MAX_TOKENS",
@@ -304,7 +283,7 @@ def translate_env_var_names_in_text(text: str, target: str) -> tuple[str, list[s
 
     Args:
         text: Rules/instructions text that may mention env var names.
-        target: Target harness name (e.g. "gemini", "codex").
+        target: Target harness name (e.g. "cursor", "codex").
 
     Returns:
         Tuple of (translated_text, list_of_replacements_made).
@@ -406,15 +385,6 @@ if __name__ == "__main__":
     translate_env_vars_for_codex(original)
     assert original == original_copy, "Original config should not be mutated"
 
-    # --- Test preserve_env_vars_for_gemini ---
-
-    # Test 5: Config passed through unchanged
-    config = {"command": "server", "args": ["${TEST_KEY}"], "env": {"X": "1"}}
-    result, warns = preserve_env_vars_for_gemini(config)
-    assert result["args"][0] == "${TEST_KEY}", "Gemini should preserve ${VAR}"
-    assert len(warns) == 0, "No warnings for Gemini passthrough"
-    assert result is not config, "Should return copy, not same object"
-
     # --- Test detect_transport_type ---
 
     # Test 6: stdio
@@ -440,9 +410,9 @@ if __name__ == "__main__":
     assert not ok, "SSE should NOT be supported on Codex"
     assert "SSE" in msg, f"Message should mention SSE: {msg}"
 
-    # Test 12: SSE on gemini (supported)
-    ok, _ = check_transport_support("sse-server", {"url": "https://x/sse"}, "gemini")
-    assert ok, "SSE should be supported on Gemini"
+    # Test 12: SSE on cursor (supported)
+    ok, _ = check_transport_support("sse-server", {"url": "https://x/sse"}, "cursor")
+    assert ok, "SSE should be supported on Cursor"
 
     # Test 13: unknown transport
     ok, msg = check_transport_support("bad-server", {}, "codex")

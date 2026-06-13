@@ -15,7 +15,6 @@ from pathlib import Path
 # expected_fragment is checked case-insensitively against combined stdout+stderr
 _PROBE_COMMANDS: dict[str, tuple[str, list[str], str]] = {
     "codex":    ("codex",    ["--version"],                     "codex"),
-    "gemini":   ("gemini",   ["--version"],                     "gemini"),
     "opencode": ("opencode", ["--version"],                     "opencode"),
     "cursor":   ("cursor",   ["--version"],                     "cursor"),
     "aider":    ("aider",    ["--version"],                     "aider"),
@@ -29,7 +28,6 @@ _PROBE_COMMANDS: dict[str, tuple[str, list[str], str]] = {
 # Config paths that the harness should have received (used for path check)
 _CONFIG_PATH_INDICATORS: dict[str, list[str]] = {
     "codex":    ["AGENTS.md", ".codex/AGENTS.md"],
-    "gemini":   [".gemini/GEMINI.md"],
     "opencode": [".opencode/AGENTS.md", ".opencode/opencode.json"],
     "cursor":   [".cursor/rules/"],
     "aider":    ["CONVENTIONS.md", ".aider.conf.yml"],
@@ -116,7 +114,6 @@ class HarnessValidator:
         if not result["config_present"]:
             _user_dirs: dict[str, Path] = {
                 "codex":    Path.home() / ".codex" / "AGENTS.md",
-                "gemini":   Path.home() / ".gemini" / "GEMINI.md",
                 "opencode": Path.home() / ".config" / "opencode" / "AGENTS.md",
             }
             user_path = _user_dirs.get(harness)

@@ -159,7 +159,7 @@ _register(
         ),
         harness_notes={
             "codex": "Run `npm test` or `pytest` after every implementation step",
-            "gemini": "Run test suite before marking any task complete",
+            "opencode": "Run test suite before marking any task complete",
         },
         confidence="high",
     ),
@@ -549,7 +549,7 @@ _register(
             "- Do not suppress type errors with `@ts-ignore` without a comment explaining why."
         ),
         harness_notes={
-            "gemini": "Gemini CLI: add ESLint strict rules to reinforce at lint time",
+            "codex": "Codex CLI: add ESLint strict rules to reinforce at lint time",
         },
         confidence="high",
     ),
@@ -802,8 +802,8 @@ class NLConfigGenerator:
           → {"skip_sections": {"codex": ["rules"]}}
         - "never sync to Aider"
           → {"skip_targets": ["aider"]}
-        - "only sync to Gemini and Codex"
-          → {"only_targets": ["gemini", "codex"]}
+        - "only sync to OpenCode and Codex"
+          → {"only_targets": ["opencode", "codex"]}
         - "skip MCP for all targets"
           → {"skip_sections": ["mcp"]}
 
@@ -828,7 +828,7 @@ class NLConfigGenerator:
 
         # Known harness aliases → canonical target names
         _TARGET_ALIASES: dict[str, str] = {
-            "aider": "aider", "codex": "codex", "gemini": "gemini",
+            "aider": "aider", "codex": "codex",
             "opencode": "opencode", "cursor": "cursor",
             "windsurf": "windsurf", "cline": "cline",
             "continue": "continue", "zed": "zed", "neovim": "neovim",
@@ -922,7 +922,7 @@ class NLConfigGenerator:
         """Answer a natural-language question about the current sync state.
 
         Users can ask questions like:
-          - "which MCP servers are available in Gemini?"
+          - "which MCP servers are available in OpenCode?"
           - "what rules didn't sync to Codex and why?"
           - "which harnesses support skills?"
           - "is file-system MCP synced to Cursor?"
@@ -968,7 +968,7 @@ class NLConfigGenerator:
 
         return (
             "I couldn't interpret that question. Try asking:\n"
-            "  - 'which MCP servers are available in Gemini?'\n"
+            "  - 'which MCP servers are available in OpenCode?'\n"
             "  - 'what rules didn't sync to Codex?'\n"
             "  - 'which harnesses support skills?'\n"
             "  - 'which harnesses support agents?'\n"
@@ -983,7 +983,7 @@ class NLConfigGenerator:
 
         # Determine which harness the user is asking about
         _TARGET_ALIASES = {
-            "aider": "aider", "codex": "codex", "gemini": "gemini",
+            "aider": "aider", "codex": "codex",
             "opencode": "opencode", "cursor": "cursor",
             "windsurf": "windsurf", "cline": "cline",
             "continue": "continue", "zed": "zed", "neovim": "neovim",
@@ -1041,7 +1041,7 @@ class NLConfigGenerator:
         """Answer questions about rule sync state."""
         from pathlib import Path as _Path
         _TARGET_ALIASES = {
-            "aider": "aider", "codex": "codex", "gemini": "gemini",
+            "aider": "aider", "codex": "codex",
             "opencode": "opencode", "cursor": "cursor", "windsurf": "windsurf",
         }
         target = next((v for k, v in _TARGET_ALIASES.items() if k in text), None)
@@ -1083,7 +1083,7 @@ class NLConfigGenerator:
         if target:
             lines.append(f"All rules sync to {target} (full support).")
         else:
-            lines.append("Rules sync to: codex, gemini, opencode, cursor, aider, windsurf (all targets, full support).")
+            lines.append("Rules sync to: codex, opencode, cursor, aider, windsurf (all targets, full support).")
         return "\n".join(lines)
 
     def _query_skills(self, text: str, project_dir, cc_home) -> str:
@@ -1119,12 +1119,12 @@ class NLConfigGenerator:
         """Answer 'is X available in Y?' style questions."""
         # Try to extract what they're asking about
         _TARGET_ALIASES = {
-            "aider": "aider", "codex": "codex", "gemini": "gemini",
+            "aider": "aider", "codex": "codex",
             "opencode": "opencode", "cursor": "cursor", "windsurf": "windsurf",
         }
         target = next((v for k, v in _TARGET_ALIASES.items() if k in text), None)
         if not target:
-            return "Please specify a harness (e.g. 'available in Gemini')."
+            return "Please specify a harness (e.g. 'available in OpenCode')."
 
         from src.harness_comparison import _FEATURE_SUPPORT
         lines = [f"Feature availability in {target.title()}:"]
@@ -1140,7 +1140,7 @@ class NLConfigGenerator:
         agent_support = _FEATURE_SUPPORT.get("agents", {})
 
         _TARGET_ALIASES = {
-            "aider": "aider", "codex": "codex", "gemini": "gemini",
+            "aider": "aider", "codex": "codex",
             "opencode": "opencode", "cursor": "cursor", "windsurf": "windsurf",
         }
         target = next((v for k, v in _TARGET_ALIASES.items() if k in text), None)
@@ -1149,7 +1149,6 @@ class NLConfigGenerator:
             level = agent_support.get(target, "none")
             icon = {"full": "✓", "partial": "~", "none": "✗"}.get(level, "?")
             notes = {
-                "gemini": "Agent tool bindings are dropped; agent text is inlined into GEMINI.md.",
                 "codex": "Agents are inlined into AGENTS.md (no separate agent files).",
                 "opencode": "Agents written as OpenCode project files.",
                 "cursor": "Agents inlined as .mdc rule blocks in .cursor/rules/.",
@@ -1175,7 +1174,7 @@ class NLConfigGenerator:
         command_support = _FEATURE_SUPPORT.get("commands", {})
 
         _TARGET_ALIASES = {
-            "aider": "aider", "codex": "codex", "gemini": "gemini",
+            "aider": "aider", "codex": "codex",
             "opencode": "opencode", "cursor": "cursor", "windsurf": "windsurf",
         }
         target = next((v for k, v in _TARGET_ALIASES.items() if k in text), None)
@@ -1201,7 +1200,6 @@ class NLConfigGenerator:
             level = command_support.get(target, "none")
             icon = {"full": "✓", "partial": "~", "none": "✗"}.get(level, "?")
             notes = {
-                "gemini": "Slash commands converted to plain GEMINI.md instruction blocks.",
                 "codex": "Slash commands have no direct Codex equivalent; converted to AGENTS.md notes.",
                 "opencode": "Commands have no direct OpenCode equivalent.",
                 "cursor": "Commands written as .mdc rule blocks.",

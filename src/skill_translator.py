@@ -4,7 +4,7 @@ from __future__ import annotations
 
 Strips or rewrites Claude Code-specific tool references from skill/agent/command
 content before it is deployed to non-Claude Code harnesses. Prevents Codex or
-Gemini from receiving instructions that reference tools they don't have.
+OpenCode from receiving instructions that reference tools they don't have.
 
 Transformations applied:
 - Tool-use XML blocks (<tool_call>...</tool_call>) → removed
@@ -63,11 +63,11 @@ def translate_skill_content(content: str, target_name: str) -> str:
 
     Claude Code skills are verbatim-copied by default. This function strips
     or rewrites references that only make sense in Claude Code so that Codex
-    and Gemini receive clean, portable instructions.
+    and OpenCode receive clean, portable instructions.
 
     Args:
         content: Raw skill file content (markdown, possibly with YAML frontmatter).
-        target_name: Destination harness ("codex", "gemini", "opencode").
+        target_name: Destination harness ("codex", "opencode").
                      If "claude" or unknown, content is returned unchanged.
 
     Returns:
@@ -261,7 +261,7 @@ def score_skills_batch(
 
     Args:
         skills: List of (skill_name, raw_content) tuples.
-        target_name: Destination harness (e.g. "codex", "gemini").
+        target_name: Destination harness (e.g. "codex", "opencode").
         low_score_threshold: Scores below this value trigger a warning.
                              Default: 70.
 
@@ -374,7 +374,7 @@ def format_batch_score_report(batch_result: dict) -> str:
 # ---------------------------------------------------------------------------
 
 # Harnesses that can embed instructions in their agent/rules format
-_PLAIN_TEXT_TARGETS = frozenset(("codex", "gemini", "opencode", "aider", "windsurf", "cursor"))
+_PLAIN_TEXT_TARGETS = frozenset(("codex", "opencode", "aider", "windsurf", "cursor"))
 
 # Header inserted into generated degraded variants to make them self-documenting
 _DEGRADED_HEADER_TEMPLATE = (
@@ -599,7 +599,6 @@ Target harness characteristics:
 
 _TARGET_CHARACTERISTICS: dict[str, str] = {
     "codex": "OpenAI Codex CLI. Uses AGENTS.md for rules. No tool-call XML. Plain markdown instructions only.",
-    "gemini": "Google Gemini CLI. Uses GEMINI.md. No Claude-specific tool names. Plain markdown instructions.",
     "opencode": "OpenCode CLI. Uses opencode.json + markdown rule files. No Claude-specific constructs.",
     "cursor": "Cursor IDE AI. Uses .cursor/rules/*.mdc files with YAML frontmatter. No Claude tool names.",
     "aider": "Aider (command-line AI). Uses CONVENTIONS.md. Plain text instructions, no frontmatter.",
@@ -624,7 +623,7 @@ def ai_translate_rule(
 
     Args:
         rule_content: Original rule text (markdown, possibly with frontmatter).
-        target_name: Target harness name (codex, gemini, etc.)
+        target_name: Target harness name (codex, opencode, etc.)
         api_key: Anthropic API key. Reads ANTHROPIC_API_KEY env var if not provided.
         model: Claude model ID to use for translation.
         timeout: HTTP request timeout in seconds.
@@ -865,13 +864,13 @@ def format_skill_translation_report(
     Args:
         skills_dir: Path to the skills directory (e.g. ``~/.claude/skills/``).
         targets: Target harness names to report on. Defaults to
-                 ``["codex", "gemini", "cursor", "aider"]``.
+                 ``["codex", "opencode", "cursor", "aider"]``.
 
     Returns:
         Formatted multi-line report string.
     """
     if targets is None:
-        targets = ["codex", "gemini", "cursor", "aider"]
+        targets = ["codex", "opencode", "cursor", "aider"]
 
     # Collect skill files (top-level .md or SKILL.md inside sub-dirs)
     skill_paths: list[tuple[str, Path]] = []
@@ -951,11 +950,6 @@ def format_skill_translation_report(
 
 # Target-specific skill idioms: what the harness natively supports
 _TARGET_NATIVE_IDIOMS: dict[str, list[str]] = {
-    "gemini": [
-        "Use tool_code blocks for shell commands (Gemini natively executes these)",
-        "Replace 'use the Bash tool' with direct shell command examples",
-        "Gemini supports structured output — prefer JSON response schemas over prose",
-    ],
     "codex": [
         "Use markdown code fences with language hints (Codex parses these for diffs)",
         "Replace skill invocations with plain instructions (no slash commands in Codex)",
@@ -1094,7 +1088,6 @@ def annotate_with_improvement_hints(
 #     ~/.claude/skills/my-skill/
 #         SKILL.md               ← canonical Claude Code version
 #         SKILL.codex.md         ← fallback for Codex
-#         SKILL.gemini.md        ← fallback for Gemini
 #         SKILL.fallback.md      ← fallback for ALL other harnesses
 #
 # If a harness-specific variant file exists it is used verbatim (no
@@ -1122,7 +1115,7 @@ def get_skill_variant_path(skill_dir: Path, target: str) -> Path | None:
 
     Args:
         skill_dir: Directory containing the skill (e.g. ~/.claude/skills/my-skill).
-        target: Target harness name (e.g. "codex", "gemini").
+        target: Target harness name (e.g. "codex", "opencode").
 
     Returns:
         Path to the variant file, or None if no variant is defined.
@@ -1300,7 +1293,7 @@ def annotate_with_confidence(
 
     Format::
 
-        <!-- sync:confidence level=exact skill=my-skill target=gemini -->
+        <!-- sync:confidence level=exact skill=my-skill target=opencode -->
         <!-- sync:confidence level=approximate skill=my-skill target=codex
              Rewrote 2 Claude Code tool reference(s): Read, Write -->
         <!-- sync:confidence level=lossy skill=my-skill target=cursor

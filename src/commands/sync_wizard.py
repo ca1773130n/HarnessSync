@@ -140,7 +140,7 @@ def main() -> None:
     )
     if not detected:
         print("  No supported harnesses found on this machine.")
-        print("  Install one of: codex, gemini, opencode, cursor, aider, windsurf")
+        print("  Install one of: codex, opencode, cursor, aider, windsurf")
         print("  Then re-run /sync-wizard.")
         return
 

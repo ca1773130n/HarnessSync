@@ -27,7 +27,7 @@ Schema:
       "name": "rename-tool",
       "pattern": "computer_use",
       "replacement": "computer-use",
-      "targets": ["gemini"],
+      "targets": ["opencode"],
       "scope": "regex"
     }
   ]
@@ -217,7 +217,7 @@ class TransformEngine:
 
         Args:
             content: Rule/config text to transform.
-            target: Harness target name (e.g. 'codex', 'gemini').
+            target: Harness target name (e.g. 'codex', 'opencode').
 
         Returns:
             Transformed content string.

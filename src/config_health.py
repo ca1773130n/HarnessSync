@@ -24,7 +24,6 @@ from pathlib import Path
 # Based on sync_matrix.py CAPABILITY_MATRIX
 _TARGET_NATIVE_FRACTIONS: dict[str, float] = {
     "codex": 0.70,
-    "gemini": 0.90,
     "opencode": 0.90,
     "cursor": 0.75,
     "aider": 0.35,
@@ -286,7 +285,6 @@ class ConfigHealthChecker:
         # Known target harness config files relative to project dir
         _HARNESS_CONFIG_PATHS = [
             project_dir / "AGENTS.md",                       # Codex
-            project_dir / ".gemini" / "GEMINI.md",           # Gemini
             project_dir / ".opencode" / "instructions.md",   # OpenCode
             project_dir / ".cursor" / "rules",               # Cursor rules dir
             project_dir / "CONVENTIONS.md",                  # Aider
@@ -562,11 +560,6 @@ def pre_sync_gap_warnings(
     # Per-target gap matrix: setting_key -> {target: (severity, message, suggestion)}
     _GAPS: dict[str, dict[str, tuple[str, str, str]]] = {
         "allowedTools": {
-            "gemini": (
-                "warn",
-                "Claude Code tool allowlist has no direct Gemini equivalent",
-                "Add '<!-- sync:gemini-only --> Use caution with tool execution' to GEMINI.md",
-            ),
             "aider": (
                 "warn",
                 "Claude Code tool allowlist has no Aider equivalent",
@@ -574,11 +567,6 @@ def pre_sync_gap_warnings(
             ),
         },
         "deniedTools": {
-            "gemini": (
-                "error",
-                "Claude Code tool denylist has no Gemini equivalent — denied tools will not be blocked",
-                "Add explicit instructions in GEMINI.md: '<!-- sync:gemini-only --> Do not use: <tool>'",
-            ),
             "aider": (
                 "error",
                 "Claude Code tool denylist has no Aider equivalent",
@@ -598,11 +586,6 @@ def pre_sync_gap_warnings(
             ),
         },
         "env": {
-            "gemini": (
-                "warn",
-                "Environment variables in settings.json are not forwarded to Gemini CLI",
-                "Add required env vars to ~/.gemini/.env manually or via /sync-setup",
-            ),
         },
     }
 
@@ -635,7 +618,7 @@ def pre_sync_gap_warnings(
                 })
 
     # Warn about slash commands for harnesses that don't support them
-    _NO_COMMAND_SUPPORT = {"aider", "gemini"}
+    _NO_COMMAND_SUPPORT = {"aider"}
     if has_commands:
         for target in targets:
             if target in _NO_COMMAND_SUPPORT:
@@ -738,7 +721,7 @@ def get_drift_analytics(state_manager, targets: list[str] | None = None) -> dict
 
     if targets is None:
         targets = [
-            "codex", "gemini", "opencode", "cursor", "aider", "windsurf",
+            "codex", "opencode", "cursor", "aider", "windsurf",
         ]
 
     now = _time.time()
@@ -926,7 +909,7 @@ class SyncHealthTracker:
         """Compute and persist a health score for a single harness.
 
         Args:
-            target: Harness name (e.g. "gemini", "codex").
+            target: Harness name (e.g. "opencode", "codex").
             skills_coverage: 0.0-1.0 fraction of skills synced natively.
             rule_fidelity: 0.0-1.0 fraction of rules preserved faithfully.
             mcp_availability: 0.0-1.0 fraction of MCP servers reachable.

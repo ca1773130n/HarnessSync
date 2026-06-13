@@ -45,7 +45,6 @@ from src.compatibility_reporter import GapTracker
 # Users can override by passing --url explicitly.
 _DEFAULT_ISSUE_URLS: dict[str, str] = {
     "codex":    "https://github.com/openai/codex/issues",
-    "gemini":   "https://github.com/google-gemini/gemini-cli/issues",
     "opencode": "https://github.com/sst/opencode/issues",
     "cursor":   "https://forum.cursor.com",
     "aider":    "https://github.com/paul-gauthier/aider/issues",
@@ -61,7 +60,6 @@ _KNOWN_GAPS: list[tuple[str, str, str]] = [
     ("aider",    "commands", "Aider has no slash-command system — commands are dropped."),
     ("cursor",   "commands", "Cursor .mdc files have no $ARGUMENTS substitution — dynamic args are lost."),
     ("windsurf", "commands", "Windsurf workflows have no $ARGUMENTS substitution — dynamic args are lost."),
-    ("gemini",   "settings", "Gemini tool permission model differs; some settings have no equivalent."),
     ("opencode", "mcp",      "OpenCode supports local/remote MCP only; tunnel/SSE proxies not supported."),
 ]
 

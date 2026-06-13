@@ -33,14 +33,6 @@ _SUPPORT_MATRIX: dict[str, dict[str, str]] = {
         "mcp": "partial",      # stdio supported; SSE/HTTP limited
         "settings": "partial", # permission model differs
     },
-    "gemini": {
-        "rules": "full",
-        "skills": "full",
-        "agents": "partial",   # native agent format, CC fields dropped
-        "commands": "partial", # converted to TOML
-        "mcp": "full",         # JSON mcpServers format
-        "settings": "partial", # tools.exclude / tools.allowed mapping
-    },
     "opencode": {
         "rules": "full",
         "skills": "full",
@@ -90,11 +82,6 @@ _GAPS: dict[str, dict[str, str]] = {
         "commands": "Converted to SKILL.md; $ARGUMENTS becomes [user-provided arguments]",
         "mcp": "SSE/HTTP transports may not be supported; env vars translated",
         "settings": "Approval policy mapped; no equivalent for tool-level allow/deny lists",
-    },
-    "gemini": {
-        "agents": "name/description/role preserved; color and tool allowlist dropped",
-        "commands": "Converted to .gemini/commands/*.toml; $ARGUMENTS adapted",
-        "settings": "tools.exclude/tools.allowed used; no native bash-restriction equivalent",
     },
     "opencode": {
         "agents": "Symlinked verbatim — CC-specific frontmatter visible in OpenCode",

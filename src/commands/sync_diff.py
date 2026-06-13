@@ -7,7 +7,7 @@ Shows a side-by-side comparison of what Claude Code has vs what's currently
 written to each target harness. Makes drift visible at a glance.
 
 Answers: "what exactly is different between my Claude Code config and
-what Gemini/Codex currently has?"
+what Codex currently has?"
 """
 
 import os
@@ -26,7 +26,6 @@ from src.diff_formatter import compute_semantic_diff
 # Map from target name to their primary config file(s) (relative to project root)
 _TARGET_PRIMARY_FILES: dict[str, list[str]] = {
     "codex":    ["AGENTS.md"],
-    "gemini":   ["GEMINI.md"],
     "opencode": ["AGENTS.md", "opencode.json"],
     "cursor":   [".cursor/rules/harnesssync.mdc"],
     "aider":    ["CONVENTIONS.md"],
@@ -183,7 +182,7 @@ def main() -> None:
         "--target",
         type=str,
         default=None,
-        help="Diff only this target (codex, gemini, opencode, cursor, aider, windsurf)",
+        help="Diff only this target (codex, opencode, cursor, aider, windsurf)",
     )
     parser.add_argument(
         "--mode",

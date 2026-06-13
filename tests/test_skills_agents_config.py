@@ -5,7 +5,6 @@ from __future__ import annotations
 Covers:
 - @include resolution: happy path, self-referential cycle, diamond dependency,
   missing file, depth=10 limit, depth=11 rejection
-- Gemini @file.md native import conversion
 - OpenCode instructions array (multi-source vs single-source)
 - OpenCode agent config new shape
 - Codex hierarchical AGENTS.md from subdirectory rules
@@ -24,7 +23,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.utils.includes import resolve_includes, extract_include_refs, MAX_INCLUDE_DEPTH
 from src.source_reader import SourceReader
 from src.adapters.codex import CodexAdapter
-from src.adapters.gemini import GeminiAdapter
 from src.adapters.opencode import OpenCodeAdapter
 
 
@@ -263,64 +261,6 @@ class TestSourceReaderIncludes:
         data = reader.discover_all()
 
         assert data["include_refs"] == []
-
-
-# ---------------------------------------------------------------------------
-# Gemini @file.md native import conversion
-# ---------------------------------------------------------------------------
-
-class TestGeminiNativeImports:
-    """Test Gemini adapter @include -> @file.md conversion."""
-
-    def test_convert_includes_to_native(self):
-        """@include foo.md -> @foo.md"""
-        content = "Some rules\n@include foo.md\nMore rules"
-        result = GeminiAdapter.convert_includes_to_native(content)
-
-        assert "@foo.md" in result
-        assert "@include" not in result
-        assert "Some rules" in result
-        assert "More rules" in result
-
-    def test_convert_multiple_includes(self):
-        """Multiple @include directives all convert."""
-        content = "@include a.md\n@include path/to/b.md"
-        result = GeminiAdapter.convert_includes_to_native(content)
-
-        assert "@a.md" in result
-        assert "@path/to/b.md" in result
-        assert "@include" not in result
-
-    def test_no_includes_passthrough(self):
-        """Content without @include passes through unchanged."""
-        content = "Plain text rules\nNo directives"
-        result = GeminiAdapter.convert_includes_to_native(content)
-        assert result == content
-
-    def test_sync_rules_with_include_refs(self, tmp_path):
-        """sync_rules uses native conversion when include_refs provided."""
-        adapter = GeminiAdapter(tmp_path)
-        rules = [{"path": tmp_path / "test.md", "content": "Rules\n@include extra.md"}]
-        result = adapter.sync_rules(rules, include_refs=["extra.md"])
-
-        assert result.synced == 1
-        # Read the written GEMINI.md
-        gemini_md = tmp_path / "GEMINI.md"
-        assert gemini_md.exists()
-        content = gemini_md.read_text(encoding="utf-8")
-        assert "@extra.md" in content
-        assert "@include" not in content
-
-    def test_sync_rules_without_include_refs(self, tmp_path):
-        """sync_rules without include_refs does not convert."""
-        adapter = GeminiAdapter(tmp_path)
-        rules = [{"path": tmp_path / "test.md", "content": "Rules\n@include extra.md"}]
-        result = adapter.sync_rules(rules)
-
-        assert result.synced == 1
-        content = (tmp_path / "GEMINI.md").read_text(encoding="utf-8")
-        # Without include_refs, @include is left as-is (already resolved by SourceReader)
-        assert "@include extra.md" in content
 
 
 # ---------------------------------------------------------------------------
@@ -589,36 +529,6 @@ class TestCodexHierarchicalAgentsMd:
 
 class TestSkillFrontmatterPassthrough:
     """Verify skill frontmatter (including new fields) passes through."""
-
-    def test_gemini_preserves_frontmatter(self, tmp_path):
-        """Gemini adapter copies SKILL.md content including frontmatter."""
-        adapter = GeminiAdapter(tmp_path)
-
-        # Create skill directory with SKILL.md containing new frontmatter fields
-        skill_dir = tmp_path / "skills" / "my-skill"
-        skill_dir.mkdir(parents=True)
-        skill_md = skill_dir / "SKILL.md"
-        skill_md.write_text(
-            "---\n"
-            "name: my-skill\n"
-            "description: A test skill\n"
-            "context: fork\n"
-            "agent: developer\n"
-            "---\n\n"
-            "Skill instructions here.\n",
-            encoding="utf-8",
-        )
-
-        skills = {"my-skill": skill_dir}
-        result = adapter.sync_skills(skills)
-
-        assert result.synced == 1
-        target_skill = tmp_path / ".gemini" / "skills" / "my-skill" / "SKILL.md"
-        assert target_skill.exists()
-        content = target_skill.read_text()
-        # New frontmatter fields preserved
-        assert "context: fork" in content
-        assert "agent: developer" in content
 
     def test_codex_preserves_frontmatter_via_symlink(self, tmp_path):
         """Codex adapter symlinks skill dirs, preserving all content including frontmatter."""

@@ -153,7 +153,7 @@ _DEFAULT_OVERRIDES_DIR = Path.home() / ".harnesssync" / "overrides"
 # keep harness-specific additions as plain Markdown next to CLAUDE.md.
 # Supported file patterns (tried in order, first match wins):
 _FILE_OVERRIDE_PATTERNS = [
-    "CLAUDE.{harness}.md",     # canonical: CLAUDE.codex.md, CLAUDE.gemini.md
+    "CLAUDE.{harness}.md",     # canonical: CLAUDE.codex.md, CLAUDE.opencode.md
     ".harness-{harness}.md",   # dotfile alternative
 ]
 
@@ -176,7 +176,7 @@ class HarnessOverride:
         """Load override config for a harness.
 
         Args:
-            harness: Target harness name (e.g. "codex", "gemini").
+            harness: Target harness name (e.g. "codex", "opencode").
 
         Returns:
             Override dict, or empty dict if no override file exists.
@@ -400,7 +400,7 @@ class HarnessOverride:
     def find_file_override(project_dir: Path, harness: str) -> Path | None:
         """Find a CLAUDE.<harness>.md (or .harness-<harness>.md) override file.
 
-        Implements the ``CLAUDE.codex.md`` / ``CLAUDE.gemini.md`` pattern:
+        Implements the ``CLAUDE.codex.md`` / ``CLAUDE.opencode.md`` pattern:
         users can place a harness-specific Markdown file next to CLAUDE.md and
         HarnessSync will merge its content on top of the base rules when syncing
         to that target.
@@ -411,7 +411,7 @@ class HarnessOverride:
 
         Args:
             project_dir: Project root directory to search in.
-            harness: Target harness name (e.g. "codex", "gemini", "cursor").
+            harness: Target harness name (e.g. "codex", "opencode", "cursor").
 
         Returns:
             Path to the override file, or None if not found.
@@ -564,8 +564,7 @@ class HarnessOverride:
 
         Args:
             harness: Target harness name (e.g. "codex").
-            model: Model identifier to pin (e.g. "o3", "claude-opus-4-6",
-                   "gemini-2.0-flash").
+            model: Model identifier to pin (e.g. "o3", "claude-opus-4-6").
         """
         override = self.load(harness)
         override["model"] = model
@@ -592,7 +591,7 @@ class HarnessOverride:
         """Inject the pinned model into synced settings if one is configured.
 
         The pinned model is stored under the key ``"model"`` in the returned
-        settings dict.  Adapters that support model selection (Codex, Gemini,
+        settings dict.  Adapters that support model selection (Codex,
         OpenCode) should call this after ``apply_settings_override()`` so the
         model pin takes highest priority.
 

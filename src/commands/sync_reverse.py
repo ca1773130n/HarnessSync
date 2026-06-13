@@ -3,7 +3,7 @@ from __future__ import annotations
 """
 /sync-reverse slash command — import config from a target harness back into Claude Code.
 
-Pulls rules, MCP servers, and env vars from Codex, Gemini, OpenCode, Cursor, Aider,
+Pulls rules, MCP servers, and env vars from Codex, OpenCode, Cursor, Aider,
 or Windsurf and merges them into Claude Code's canonical format (CLAUDE.md, .mcp.json,
 settings.json).  Useful for users who started on another harness and want to migrate
 their existing configs into Claude Code as the source of truth.
@@ -12,7 +12,7 @@ Usage:
     /sync-reverse --from HARNESS [--merge STRATEGY] [--apply] [--dry-run]
 
 Options:
-    --from HARNESS     Source harness to import from (codex|gemini|opencode|cursor|aider|windsurf)
+    --from HARNESS     Source harness to import from (codex|opencode|cursor|aider|windsurf)
     --merge STRATEGY   How to merge rules into CLAUDE.md:
                          append    — append after existing content (default)
                          prepend   — prepend before existing content

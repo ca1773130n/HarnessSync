@@ -26,13 +26,12 @@ NA = "N/A"             # Not applicable
 
 
 # Matrix definition: section -> {target: (level, note)}
-# Targets: codex, gemini, opencode, cursor, aider, windsurf
+# Targets: codex, opencode, cursor, aider, windsurf
 CAPABILITY_MATRIX: list[dict] = [
     {
         "section": "rules",
         "description": "CLAUDE.md project rules",
         "codex":     (NATIVE,  "AGENTS.md managed section"),
-        "gemini":    (NATIVE,  "GEMINI.md managed section"),
         "opencode":  (NATIVE,  "AGENTS.md managed section"),
         "cursor":    (NATIVE,  ".cursor/rules/*.mdc files"),
         "aider":     (ADAPTED, "CONVENTIONS.md managed section"),
@@ -46,7 +45,6 @@ CAPABILITY_MATRIX: list[dict] = [
         "section": "skills",
         "description": "Claude Code skill directories",
         "codex":    (NATIVE,  "Symlinks in .agents/skills/"),
-        "gemini":   (NATIVE,  "Native .gemini/skills/<name>/SKILL.md"),
         "opencode": (NATIVE,  "Symlinks in .opencode/skills/"),
         "cursor":   (ADAPTED, ".cursor/rules/skills/*.mdc (content copy)"),
         "aider":    (ADAPTED, "Added to .aider.conf.yml read list"),
@@ -60,7 +58,6 @@ CAPABILITY_MATRIX: list[dict] = [
         "section": "agents",
         "description": "Agent .md files",
         "codex":    (ADAPTED, "Converted to SKILL.md in .agents/skills/"),
-        "gemini":   (NATIVE,  "Native .gemini/agents/<name>.md"),
         "opencode": (NATIVE,  "Symlinks in .opencode/agents/"),
         "cursor":   (ADAPTED, ".cursor/rules/agents/*.mdc files"),
         "aider":    (DROPPED, "No agent concept in Aider"),
@@ -74,7 +71,6 @@ CAPABILITY_MATRIX: list[dict] = [
         "section": "commands",
         "description": "Slash command .md files",
         "codex":    (ADAPTED, "Converted to SKILL.md in .agents/skills/cmd-*"),
-        "gemini":   (NATIVE,  "Native .gemini/commands/<name>.toml"),
         "opencode": (NATIVE,  "Symlinks in .opencode/commands/"),
         "cursor":   (ADAPTED, ".cursor/rules/commands/*.mdc (no $ARGUMENTS)"),
         "aider":    (DROPPED, "No command concept in Aider"),
@@ -88,7 +84,6 @@ CAPABILITY_MATRIX: list[dict] = [
         "section": "mcp_servers",
         "description": "MCP server configurations",
         "codex":    (NATIVE,  "config.toml [mcp_servers] section"),
-        "gemini":   (NATIVE,  "settings.json mcpServers key"),
         "opencode": (NATIVE,  "opencode.json mcp section (type-discriminated)"),
         "cursor":   (NATIVE,  ".cursor/mcp.json mcpServers"),
         "aider":    (PARTIAL, "Server names noted in .aider.conf.yml; no exec support"),
@@ -102,7 +97,6 @@ CAPABILITY_MATRIX: list[dict] = [
         "section": "settings",
         "description": "IDE/tool settings (approval mode, permissions)",
         "codex":    (ADAPTED, "config.toml approval_policy (conservative mapping)"),
-        "gemini":   (ADAPTED, "settings.json tools.exclude/tools.allowed"),
         "opencode": (ADAPTED, "opencode.json permission per-tool entries"),
         "cursor":   (DROPPED, "Managed by Cursor IDE — not written"),
         "aider":    (ADAPTED, ".aider.conf.yml --yes flag mapping"),
@@ -116,7 +110,6 @@ CAPABILITY_MATRIX: list[dict] = [
         "section": "sync_tags",
         "description": "<!-- sync:target-only --> content filtering",
         "codex":    (NATIVE,  "codex-only / exclude regions filtered"),
-        "gemini":   (NATIVE,  "gemini-only / exclude regions filtered"),
         "opencode": (NATIVE,  "opencode-only / exclude regions filtered"),
         "cursor":   (DROPPED, "Tags not interpreted — content passed through"),
         "aider":    (DROPPED, "Tags not interpreted — content passed through"),
@@ -130,7 +123,6 @@ CAPABILITY_MATRIX: list[dict] = [
         "section": "harness_overrides",
         "description": ".harness-sync/overrides/<target>.md per-harness injections",
         "codex":    (NATIVE,  "Appended after HarnessSync section"),
-        "gemini":   (NATIVE,  "Appended after HarnessSync section"),
         "opencode": (NATIVE,  "Appended after HarnessSync section"),
         "cursor":   (DROPPED, "Override file not applied to .mdc format"),
         "aider":    (DROPPED, "Override file not applied to CONVENTIONS.md"),

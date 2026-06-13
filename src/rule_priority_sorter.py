@@ -58,12 +58,11 @@ class RuleBlock:
 # How each harness interprets rule ordering
 # "top_wins"  — first rule wins on conflict (cursor .mdc, codex AGENTS.md)
 # "last_wins" — later rules override earlier ones (aider conventions)
-# "unordered" — rules treated as an unordered set (gemini, opencode, windsurf)
+# "unordered" — rules treated as an unordered set (opencode, windsurf)
 HARNESS_ORDER_SEMANTICS: dict[str, str] = {
     "cursor":   "top_wins",
     "codex":    "top_wins",
     "aider":    "last_wins",
-    "gemini":   "unordered",
     "opencode": "unordered",
     "windsurf": "unordered",
 }

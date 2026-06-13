@@ -18,7 +18,6 @@ from pathlib import Path
 # Known skill output directories per target (relative to project_dir)
 _TARGET_SKILL_DIRS: dict[str, str] = {
     "codex": ".agents/skills",
-    "gemini": ".gemini/skills",
     "opencode": ".opencode/skills",
     "cursor": ".cursor/rules/skills",
     "aider": None,     # Aider doesn't sync skills to a dedicated dir
@@ -176,10 +175,6 @@ _TARGET_SKILL_WORKAROUNDS: dict[str, str] = {
         "Codex supports skills via AGENTS.md. "
         "Add the skill instructions to your AGENTS.md under a dedicated heading, "
         "or place the skill file in .agents/skills/ so HarnessSync can sync it."
-    ),
-    "gemini": (
-        "Gemini CLI supports skills via .gemini/skills/. "
-        "Ensure the skill directory is present under ~/.claude/skills/ and run /sync."
     ),
     "opencode": (
         "OpenCode supports skills via .opencode/skills/. "
@@ -458,7 +453,6 @@ class SkillGapAnalyzer:
         active = []
         indicators = {
             "codex": "AGENTS.md",
-            "gemini": "GEMINI.md",
             "opencode": "OPENCODE.md",
             "cursor": ".cursor/rules/claude-code-rules.mdc",
             "aider": "CONVENTIONS.md",
@@ -805,18 +799,6 @@ _HARNESS_AGENT_CAPABILITIES: dict[str, dict[str, bool | None]] = {
         "mcp_tools": True,
         "streaming": True,
     },
-    "gemini": {
-        "tool_access": True,
-        "memory": False,
-        "context_window": True,
-        "multi_turn": True,
-        "sub_agents": False,
-        "file_access": True,
-        "web_search": True,
-        "code_execution": False,
-        "mcp_tools": True,
-        "streaming": True,
-    },
     "opencode": {
         "tool_access": True,
         "memory": False,
@@ -988,7 +970,7 @@ def build_agent_gap_report(target: str) -> AgentCapabilityGapReport:
     """Build an agent capability gap report for a single target harness.
 
     Args:
-        target: Target harness name (e.g. "codex", "gemini").
+        target: Target harness name (e.g. "codex", "opencode").
 
     Returns:
         AgentCapabilityGapReport for the given target.
@@ -1285,7 +1267,6 @@ def _check_skill_in_target(skill_name: str, target: str, project_dir: Path) -> b
     """
     target_paths: dict[str, list[Path]] = {
         "codex":    [project_dir / ".agents" / "skills" / skill_name / "SKILL.md"],
-        "gemini":   [project_dir / ".gemini" / "skills" / skill_name / "SKILL.md"],
         "opencode": [project_dir / ".opencode" / "skills" / skill_name / "SKILL.md"],
         "cursor":   [project_dir / ".cursor" / "rules" / "skills" / f"{skill_name}.mdc"],
         "aider":    [],  # Aider embeds skills in CONVENTIONS.md — not a discrete file

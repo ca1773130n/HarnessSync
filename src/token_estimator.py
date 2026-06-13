@@ -16,7 +16,6 @@ Token counting method:
 
 Context window limits per harness (2026 actuals):
   codex:    ~200,000 tokens (Claude Sonnet 4 / Opus 4 default)
-  gemini:   ~1,000,000 tokens (Gemini 2.0 Flash default)
   opencode: ~200,000 tokens (configurable; defaults to Claude tier)
   cursor:   ~200,000 tokens (Claude Sonnet 4 default)
   aider:    ~200,000 tokens (Claude Sonnet / GPT-4o class)
@@ -42,7 +41,6 @@ CHARS_PER_TOKEN = 4.0
 # These are approximate — actual costs depend on the model selected by the user
 INPUT_COST_PER_MTK: dict[str, float] = {
     "codex":    3.00,   # Claude Sonnet 4 ($3/MTok input)
-    "gemini":   0.10,   # Gemini 2.0 Flash (~$0.10/MTok input)
     "opencode": 3.00,   # Claude Sonnet 4 (configurable)
     "cursor":   3.00,   # Claude Sonnet 4 (Cursor default)
     "aider":    3.00,   # Claude Sonnet 4 / GPT-4o (model-dependent)
@@ -56,7 +54,6 @@ INPUT_COST_PER_MTK: dict[str, float] = {
 # Context window sizes per harness (in tokens) — 2026 actuals
 CONTEXT_WINDOWS: dict[str, int] = {
     "codex":    200_000,    # Claude Sonnet 4 / Opus 4 — 200K context
-    "gemini":   1_000_000,  # Gemini 2.0 Flash — 1M context
     "opencode": 200_000,    # Claude Sonnet 4 default
     "cursor":   200_000,    # Claude Sonnet 4 — full context available
     "aider":    200_000,    # Claude Sonnet 4 / GPT-4o class
@@ -76,7 +73,6 @@ CRITICAL_THRESHOLD = 0.10  # Critical at 10% usage
 # Harness default model names for display in reports
 HARNESS_DEFAULT_MODELS: dict[str, str] = {
     "codex":    "Claude Sonnet 4",
-    "gemini":   "Gemini 2.0 Flash",
     "opencode": "Claude Sonnet 4",
     "cursor":   "Claude Sonnet 4",
     "aider":    "Claude Sonnet 4",
@@ -368,7 +364,6 @@ def _get_rules_files(target: str, project_dir: Path) -> list[Path]:
     """
     patterns: dict[str, list[str]] = {
         "codex":    ["AGENTS.md"],
-        "gemini":   ["GEMINI.md"],
         "opencode": ["AGENTS.md"],
         "cursor":   [".cursor/rules/claude-code-rules.mdc"],
         "aider":    ["CONVENTIONS.md"],

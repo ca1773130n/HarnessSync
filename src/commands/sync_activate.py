@@ -39,7 +39,6 @@ from src.harness_detector import scan_all_with_versions
 # First existing path wins.
 _PRIMARY_CONFIG: dict[str, list[str]] = {
     "codex":    ["AGENTS.md", ".codex/AGENTS.md"],
-    "gemini":   ["GEMINI.md", ".gemini/GEMINI.md"],
     "opencode": [".opencode/config.json"],
     "cursor":   [".cursor/rules/claude-code-rules.mdc", ".cursor/rules/"],
     "aider":    ["CONVENTIONS.md", ".aider.conf.yml"],
@@ -183,7 +182,7 @@ def main() -> None:
         description="Activate a harness context: show sync summary and export env vars.",
     )
     parser.add_argument("harness", nargs="?", default=None,
-                        help="Harness name to activate (codex, gemini, opencode, cursor, aider, windsurf)")
+                        help="Harness name to activate (codex, opencode, cursor, aider, windsurf)")
     parser.add_argument("--export", action="store_true",
                         help="Emit only shell export statements (suitable for eval)")
     parser.add_argument("--open", dest="open_config", action="store_true",

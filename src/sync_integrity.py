@@ -6,7 +6,7 @@ Signs synced harness configs with HMAC-SHA256 at write time and verifies
 signatures before reads, flagging tampering or external modification.
 
 Provides an audit trail for team environments where synced AGENTS.md or
-GEMINI.md could be modified by malicious or accidental out-of-band edits.
+opencode.json could be modified by malicious or accidental out-of-band edits.
 
 How it works:
 1. When a target file is written by HarnessSync, sign_file() computes

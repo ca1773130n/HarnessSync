@@ -54,7 +54,7 @@ def test_improvement_hints_clean_content_no_hints():
     """Clean skill content with no CC-specific constructs generates no hints."""
     original = "Use Python for all scripts. Write unit tests for each function."
     translated = original  # No changes needed
-    hints = generate_improvement_hints(original, translated, "my-skill", "gemini")
+    hints = generate_improvement_hints(original, translated, "my-skill", "codex")
     # Clean content with no tool refs or MCP calls should have only idiom hints
     # (if content is long enough) but no critical problem hints
     assert isinstance(hints, list)
@@ -89,7 +89,7 @@ def test_improvement_hints_slash_commands():
 def test_annotate_with_improvement_hints_clean():
     """Clean content returns the translated content unchanged."""
     content = "Always write docstrings for public functions."
-    result = annotate_with_improvement_hints(content, content, "my-skill", "gemini")
+    result = annotate_with_improvement_hints(content, content, "my-skill", "codex")
     # For very short clean content with no tool refs or slash commands,
     # the result may or may not have hints appended
     assert content in result
@@ -143,13 +143,13 @@ def test_gap_upvote_tracker_min_votes_filter(tmp_path):
 def test_gap_upvote_tracker_check_resolved(tmp_path):
     """check_resolved returns gaps that are now supported."""
     tracker = GapUpvoteTracker(store_path=tmp_path / "upvotes.json")
-    # gemini:skills is in _KNOWN_SUPPORT as True (resolved)
-    tracker.upvote("gemini", "skills")
+    # codex:mcp is in _KNOWN_SUPPORT as True (resolved)
+    tracker.upvote("codex", "mcp")
     # cursor:skills is not resolved
     tracker.upvote("cursor", "skills")
     resolved = tracker.check_resolved()
     resolved_keys = [(g["harness"], g["feature"]) for g in resolved]
-    assert ("gemini", "skills") in resolved_keys
+    assert ("codex", "mcp") in resolved_keys
     assert ("cursor", "skills") not in resolved_keys
 
 
@@ -197,7 +197,7 @@ def test_format_rule_win_map_no_blocks():
 def test_format_rule_win_map_single_block():
     """Win map with one block returns valid output (no pairs to compare)."""
     blocks = [RuleBlock(heading="## Rules", body="Be concise.", index=0)]
-    result = format_rule_win_map(blocks, targets=["codex", "gemini"])
+    result = format_rule_win_map(blocks, targets=["codex", "opencode"])
     # One block has no adjacent pairs — the header should still appear
     assert isinstance(result, str)
     assert len(result) > 0
@@ -314,13 +314,13 @@ def test_skill_coverage_report_coverage_pct_all_present():
 def test_skill_coverage_report_coverage_pct_partial():
     """coverage_pct returns 50 when half the skills are present."""
     entries = [
-        SkillCoverageEntry("skill-a", "gemini", present=True, translation_score=75),
-        SkillCoverageEntry("skill-b", "gemini", present=False, translation_score=0),
+        SkillCoverageEntry("skill-a", "opencode", present=True, translation_score=75),
+        SkillCoverageEntry("skill-b", "opencode", present=False, translation_score=0),
     ]
     report = SkillCoverageReport(
-        entries=entries, source_skills=["skill-a", "skill-b"], targets=["gemini"]
+        entries=entries, source_skills=["skill-a", "skill-b"], targets=["opencode"]
     )
-    assert report.coverage_pct("gemini") == 50.0
+    assert report.coverage_pct("opencode") == 50.0
 
 
 def test_skill_coverage_report_avg_translation_score():
@@ -341,14 +341,14 @@ def test_skill_coverage_report_avg_translation_score():
 def test_skill_coverage_report_format_includes_headers():
     """format() output contains skill names and target headers."""
     entries = [
-        SkillCoverageEntry("my-skill", "gemini", present=True, translation_score=85),
+        SkillCoverageEntry("my-skill", "opencode", present=True, translation_score=85),
     ]
     report = SkillCoverageReport(
-        entries=entries, source_skills=["my-skill"], targets=["gemini"]
+        entries=entries, source_skills=["my-skill"], targets=["opencode"]
     )
     output = report.format()
     assert "my-skill" in output
-    assert "gemini" in output
+    assert "opencode" in output
     assert "Coverage" in output
 
 
@@ -364,8 +364,8 @@ def test_skill_coverage_report_unknown_target():
 def test_pinned_target_pin_and_is_pinned(tmp_path):
     """pin() marks a target as pinned; is_pinned() returns True."""
     mgr = PinnedTargetManager(pins_file=tmp_path / "pins.json")
-    mgr.pin("gemini", checkpoint_tag="stable-v1", reason="testing pinning")
-    assert mgr.is_pinned("gemini") is True
+    mgr.pin("opencode", checkpoint_tag="stable-v1", reason="testing pinning")
+    assert mgr.is_pinned("opencode") is True
     assert mgr.is_pinned("codex") is False
 
 
@@ -388,10 +388,10 @@ def test_pinned_target_unpin_nonexistent(tmp_path):
 def test_pinned_target_get_pin(tmp_path):
     """get_pin returns the pin entry with expected fields."""
     mgr = PinnedTargetManager(pins_file=tmp_path / "pins.json")
-    mgr.pin("gemini", checkpoint_tag="snap-2026", reason="stable release")
-    pin = mgr.get_pin("gemini")
+    mgr.pin("opencode", checkpoint_tag="snap-2026", reason="stable release")
+    pin = mgr.get_pin("opencode")
     assert pin is not None
-    assert pin["target"] == "gemini"
+    assert pin["target"] == "opencode"
     assert pin["checkpoint_tag"] == "snap-2026"
     assert pin["reason"] == "stable release"
     assert "pinned_at" in pin
@@ -400,10 +400,10 @@ def test_pinned_target_get_pin(tmp_path):
 def test_pinned_target_filter_unpinned(tmp_path):
     """filter_unpinned excludes pinned targets from the list."""
     mgr = PinnedTargetManager(pins_file=tmp_path / "pins.json")
-    mgr.pin("gemini")
-    all_targets = ["codex", "gemini", "opencode"]
+    mgr.pin("aider")
+    all_targets = ["codex", "aider", "opencode"]
     unpinned = mgr.filter_unpinned(all_targets)
-    assert "gemini" not in unpinned
+    assert "aider" not in unpinned
     assert "codex" in unpinned
     assert "opencode" in unpinned
 
@@ -413,7 +413,7 @@ def test_pinned_target_list_pins(tmp_path):
     mgr = PinnedTargetManager(pins_file=tmp_path / "pins.json")
     mgr.pin("opencode")
     mgr.pin("codex")
-    mgr.pin("gemini")
+    mgr.pin("aider")
     pins = mgr.list_pins()
     assert len(pins) == 3
     names = [p["target"] for p in pins]
@@ -430,9 +430,9 @@ def test_pinned_target_format_status_no_pins(tmp_path):
 def test_pinned_target_format_status_with_pins(tmp_path):
     """format_status with pins lists them."""
     mgr = PinnedTargetManager(pins_file=tmp_path / "pins.json")
-    mgr.pin("gemini", reason="stable")
+    mgr.pin("opencode", reason="stable")
     status = mgr.format_status()
-    assert "gemini" in status
+    assert "opencode" in status
     assert "Pinned" in status or "pinned" in status
 
 
@@ -515,9 +515,9 @@ def test_sync_trigger_no_rules_syncs_all(tmp_path):
     targets = matcher.targets_for_changes(
         changed_files=["CLAUDE.md"],
         changed_sections=["rules"],
-        all_targets=["codex", "gemini", "opencode"],
+        all_targets=["codex", "aider", "opencode"],
     )
-    assert set(targets) == {"codex", "gemini", "opencode"}
+    assert set(targets) == {"codex", "aider", "opencode"}
 
 
 def test_sync_trigger_file_match(tmp_path):
@@ -535,10 +535,10 @@ def test_sync_trigger_file_match(tmp_path):
     targets = matcher.targets_for_changes(
         changed_files=["CLAUDE.md"],
         changed_sections=[],
-        all_targets=["codex", "gemini"],
+        all_targets=["codex", "aider"],
     )
     assert "codex" in targets
-    assert "gemini" not in targets
+    assert "aider" not in targets
 
 
 def test_sync_trigger_section_match(tmp_path):
@@ -546,9 +546,9 @@ def test_sync_trigger_section_match(tmp_path):
     matcher = SyncTriggerMatcher(project_dir=tmp_path)
     rules = [
         SyncTriggerRule(
-            target="gemini",
+            target="aider",
             watch_sections=["rules"],
-            description="sync gemini on rules change",
+            description="sync aider on rules change",
         )
     ]
     matcher.save_rules(rules)
@@ -556,9 +556,9 @@ def test_sync_trigger_section_match(tmp_path):
     targets = matcher.targets_for_changes(
         changed_files=[],
         changed_sections=["rules"],
-        all_targets=["codex", "gemini"],
+        all_targets=["codex", "aider"],
     )
-    assert "gemini" in targets
+    assert "aider" in targets
     assert "codex" not in targets
 
 
@@ -577,9 +577,9 @@ def test_sync_trigger_all_target(tmp_path):
     targets = matcher.targets_for_changes(
         changed_files=[".claude/skills/my-skill/SKILL.md"],
         changed_sections=[],
-        all_targets=["codex", "gemini", "aider"],
+        all_targets=["codex", "opencode", "aider"],
     )
-    assert set(targets) == {"codex", "gemini", "aider"}
+    assert set(targets) == {"codex", "opencode", "aider"}
 
 
 def test_sync_trigger_no_match_skips_all(tmp_path):
@@ -597,7 +597,7 @@ def test_sync_trigger_no_match_skips_all(tmp_path):
     targets = matcher.targets_for_changes(
         changed_files=["README.md"],  # Not watched
         changed_sections=[],
-        all_targets=["codex", "gemini"],
+        all_targets=["codex", "aider"],
     )
     assert targets == []
 
@@ -605,7 +605,7 @@ def test_sync_trigger_no_match_skips_all(tmp_path):
 def test_sync_trigger_explain_no_rules(tmp_path):
     """explain() with no rules returns default-sync message."""
     matcher = SyncTriggerMatcher(project_dir=tmp_path)
-    explanation = matcher.explain(["CLAUDE.md"], ["rules"], ["codex", "gemini"])
+    explanation = matcher.explain(["CLAUDE.md"], ["rules"], ["codex", "aider"])
     assert "No trigger rules" in explanation
     assert "all targets" in explanation.lower()
 
@@ -620,9 +620,9 @@ def test_sync_trigger_explain_with_rules(tmp_path):
             description="codex on CLAUDE.md",
         ),
         SyncTriggerRule(
-            target="gemini",
+            target="aider",
             watch_paths=["settings.json"],
-            description="gemini on settings",
+            description="aider on settings",
         ),
     ]
     matcher.save_rules(rules)
@@ -630,7 +630,7 @@ def test_sync_trigger_explain_with_rules(tmp_path):
     explanation = matcher.explain(
         changed_files=["CLAUDE.md"],
         changed_sections=[],
-        all_targets=["codex", "gemini"],
+        all_targets=["codex", "aider"],
     )
     assert "codex" in explanation
     assert "FIRED" in explanation or "fired" in explanation.lower()

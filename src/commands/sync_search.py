@@ -26,7 +26,6 @@ sys.path.insert(0, PLUGIN_ROOT)
 # Known harness config locations relative to project root
 _HARNESS_RULES_FILES = {
     "codex": "AGENTS.md",
-    "gemini": "GEMINI.md",
     "opencode": "OPENCODE.md",
     "cursor": ".cursor/rules/harnesssync.mdc",
     "aider": "CONVENTIONS.md",
@@ -35,22 +34,18 @@ _HARNESS_RULES_FILES = {
 
 _HARNESS_SKILL_DIRS = {
     "codex": ".agents/skills",
-    "gemini": ".gemini/skills",
     "opencode": ".opencode/skills",
 }
 
 _HARNESS_AGENT_DIRS = {
-    "gemini": ".gemini/agents",
     "opencode": ".opencode/agents",
 }
 
 _HARNESS_COMMAND_DIRS = {
-    "gemini": ".gemini/commands",
     "opencode": ".opencode/commands",
 }
 
 _HARNESS_MCP_FILES = {
-    "gemini": ".gemini/settings.json",
     "opencode": ".opencode/settings.json",
     "cursor": ".cursor/mcp.json",
 }
@@ -231,7 +226,7 @@ def main() -> None:
         "--target",
         type=str,
         default=None,
-        help="Limit search to specific harness (codex, gemini, opencode, ...)",
+        help="Limit search to specific harness (codex, opencode, ...)",
     )
     parser.add_argument(
         "--type",

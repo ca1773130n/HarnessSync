@@ -7,7 +7,7 @@ levels, this module inspects the *actual current config* (MCP servers, skills,
 rules sections, env vars, permissions) and shows whether each specific item
 will be fully synced, approximated, or lost in each target harness.
 
-This answers the question: "Does Gemini support the 'context7' MCP server I
+This answers the question: "Does Codex support the 'context7' MCP server I
 just added?" — without trial and error.
 """
 
@@ -32,7 +32,6 @@ _LABELS = {STATUS_FULL: "Full", STATUS_APPROX: "Approx", STATUS_NONE: "No"}
 # ---------------------------------------------------------------------------
 _MCP_TRANSPORT_SUPPORT: dict[str, set[str]] = {
     "codex":    {"stdio"},
-    "gemini":   {"stdio", "http", "sse"},
     "opencode": {"stdio", "http"},
     "cursor":   {"stdio", "http"},
     "aider":    set(),
@@ -45,23 +44,23 @@ _MCP_TRANSPORT_SUPPORT: dict[str, set[str]] = {
 
 # Harnesses that fully support MCP.
 _MCP_CAPABLE: set[str] = {
-    "codex", "gemini", "opencode", "cursor", "windsurf", "cline", "continue", "zed", "neovim"
+    "codex", "opencode", "cursor", "windsurf", "cline", "continue", "zed", "neovim"
 }
 
 # Harnesses that support skills/agents.
 _SKILLS_CAPABLE: set[str] = {
-    "codex", "gemini", "opencode", "cursor", "windsurf", "cline", "continue", "zed", "neovim"
+    "codex", "opencode", "cursor", "windsurf", "cline", "continue", "zed", "neovim"
 }
 _SKILLS_APPROX: set[str] = {"codex", "cursor"}  # Skills folded into rules/mdc
 
 # Harnesses that support commands.
 _COMMANDS_CAPABLE: set[str] = {
-    "codex", "gemini", "opencode", "cursor", "windsurf", "cline", "continue"
+    "codex", "opencode", "cursor", "windsurf", "cline", "continue"
 }
 _COMMANDS_APPROX: set[str] = {"codex", "cursor", "windsurf"}  # No $ARGUMENTS substitution
 
 # Permission support tiers.
-_PERM_FULL: set[str] = {"codex", "gemini", "opencode"}
+_PERM_FULL: set[str] = {"codex", "opencode"}
 _PERM_APPROX: set[str] = {"cursor", "windsurf", "aider"}
 
 # Env var support.

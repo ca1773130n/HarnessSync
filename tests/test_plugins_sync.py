@@ -6,7 +6,7 @@ Covers:
 - Plugin discovery and metadata extraction (SourceReader.get_plugins)
 - Equivalence lookup (PLUGIN_EQUIVALENTS + user override)
 - Decomposition fallback (skills/agents/commands/mcp/hooks routed)
-- Native plugin reference for Codex/Gemini/OpenCode
+- Native plugin reference for Codex/OpenCode
 - Base adapter no-op behavior
 - sync_plugins wired into all three sync_all methods
 """
@@ -240,7 +240,7 @@ class TestPluginRegistry:
 
         config = {
             "plugin_map": {
-                "my-plugin": {"codex": "codex-equiv", "gemini": None},
+                "my-plugin": {"codex": "codex-equiv", "opencode": None},
             }
         }
         (tmp_project / ".harnesssync").write_text(json.dumps(config))
@@ -385,82 +385,6 @@ class TestCodexPluginSync:
         from src.adapters.codex import CodexAdapter
 
         adapter = CodexAdapter(tmp_project)
-        source_data = {
-            "rules": [],
-            "skills": {},
-            "agents": {},
-            "commands": {},
-            "mcp": {},
-            "settings": {},
-            "hooks": {},
-            "plugins": {},
-        }
-
-        results = adapter.sync_all(source_data)
-        assert "plugins" in results
-
-
-# ─── Gemini Plugin Sync Tests ───────────────────────────────────────────
-
-
-class TestGeminiPluginSync:
-    """Test Gemini adapter sync_plugins with native + decompose."""
-
-    def test_native_extension_written_to_settings(self, tmp_project):
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(tmp_project)
-        plugins = {
-            "linear": {
-                "enabled": True,
-                "version": "2.0.0",
-                "install_path": None,
-                "has_skills": False,
-                "has_agents": False,
-                "has_commands": False,
-                "has_mcp": False,
-                "has_hooks": False,
-                "manifest": {},
-            }
-        }
-
-        result = adapter.sync_plugins(plugins)
-        assert result.synced == 1
-        assert any("native" in f for f in result.synced_files)
-
-        # Check settings.json was written
-        settings_path = tmp_project / ".gemini" / "settings.json"
-        assert settings_path.exists()
-        data = json.loads(settings_path.read_text())
-        assert "extensions" in data
-        assert "linear-gemini-extension" in data["extensions"]
-
-    def test_decompose_plugin_routes_agents(self, tmp_project, plugin_install_dir):
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(tmp_project)
-        plugins = {
-            "test-plugin": {
-                "enabled": True,
-                "version": "1.2.3",
-                "install_path": plugin_install_dir,
-                "has_skills": False,
-                "has_agents": True,
-                "has_commands": False,
-                "has_mcp": False,
-                "has_hooks": False,
-                "manifest": {},
-            }
-        }
-
-        result = adapter.sync_plugins(plugins)
-        assert result.synced == 1
-
-    def test_sync_all_dispatches_plugins(self, tmp_project):
-        """Gemini sync_all should include 'plugins' in results."""
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(tmp_project)
         source_data = {
             "rules": [],
             "skills": {},
@@ -629,32 +553,6 @@ class TestDecompositionFallback:
         assert config_path.exists()
         content = config_path.read_text()
         assert "test-server" in content
-
-    def test_gemini_decomposes_commands(self, tmp_project, plugin_install_dir):
-        """Commands from a plugin should be routed through sync_commands."""
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(tmp_project)
-        plugins = {
-            "test-plugin": {
-                "enabled": True,
-                "version": "1.2.3",
-                "install_path": plugin_install_dir,
-                "has_skills": False,
-                "has_agents": False,
-                "has_commands": True,
-                "has_mcp": False,
-                "has_hooks": False,
-                "manifest": {},
-            }
-        }
-
-        result = adapter.sync_plugins(plugins)
-        assert result.synced == 1
-
-        # Commands should have been written
-        cmd_path = tmp_project / ".gemini" / "commands" / "my-cmd.toml"
-        assert cmd_path.exists()
 
     def test_opencode_decomposes_skills(self, tmp_project, plugin_install_dir):
         """Skills from a plugin should be routed through sync_skills."""

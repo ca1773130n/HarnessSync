@@ -38,7 +38,6 @@ _CAPABILITIES: list[tuple[str, str, str, dict]] = [
         "Model Context Protocol server configuration",
         {
             "codex":    (FULL,    "config.toml [mcpServers]"),
-            "gemini":   (FULL,    "settings.json mcpServers"),
             "opencode": (FULL,    "opencode.json mcp.servers"),
             "cursor":   (FULL,    ".cursor/mcp.json"),
             "aider":    (NONE,    "No MCP support"),
@@ -51,7 +50,6 @@ _CAPABILITIES: list[tuple[str, str, str, dict]] = [
         "System-level instructions for the AI model",
         {
             "codex":    (FULL,    "AGENTS.md managed section"),
-            "gemini":   (FULL,    "GEMINI.md managed section"),
             "opencode": (FULL,    "AGENTS.md managed section"),
             "cursor":   (FULL,    ".cursor/rules/*.mdc files"),
             "aider":    (PARTIAL, "CONVENTIONS.md (no inline tags)"),
@@ -64,7 +62,6 @@ _CAPABILITIES: list[tuple[str, str, str, dict]] = [
         "Reusable skill and prompt libraries",
         {
             "codex":    (FULL,    "Symlinked into .agents/skills/"),
-            "gemini":   (FULL,    "Native .gemini/skills/ format"),
             "opencode": (FULL,    "Symlinked into .opencode/skills/"),
             "cursor":   (PARTIAL, ".mdc conversion — some frontmatter dropped"),
             "aider":    (PARTIAL, "Added to read_files list (no execution)"),
@@ -77,7 +74,6 @@ _CAPABILITIES: list[tuple[str, str, str, dict]] = [
         "Named AI agent definitions",
         {
             "codex":    (PARTIAL, "Converted to skill files — no subagent dispatch"),
-            "gemini":   (FULL,    "Native .gemini/agents/ format"),
             "opencode": (PARTIAL, "Converted to skill files"),
             "cursor":   (PARTIAL, ".mdc rules — no native agent dispatch"),
             "aider":    (NONE,    "No agent concept"),
@@ -90,7 +86,6 @@ _CAPABILITIES: list[tuple[str, str, str, dict]] = [
         "PreToolUse / PostToolUse event hooks",
         {
             "codex":    (NONE,    "No hook system"),
-            "gemini":   (NONE,    "No hook system"),
             "opencode": (NONE,    "No hook system"),
             "cursor":   (NONE,    "No hook system"),
             "aider":    (NONE,    "No hook system"),
@@ -103,7 +98,6 @@ _CAPABILITIES: list[tuple[str, str, str, dict]] = [
         "SessionStart / SessionEnd hooks",
         {
             "codex":    (NONE,    "No hook system"),
-            "gemini":   (NONE,    "No hook system"),
             "opencode": (NONE,    "No hook system"),
             "cursor":   (NONE,    "No hook system"),
             "aider":    (NONE,    "No hook system"),
@@ -116,7 +110,6 @@ _CAPABILITIES: list[tuple[str, str, str, dict]] = [
         "Custom /command definitions",
         {
             "codex":    (NONE,    "No slash command support"),
-            "gemini":   (NONE,    "No slash command support"),
             "opencode": (NONE,    "No slash command support"),
             "cursor":   (NONE,    "No slash command support"),
             "aider":    (NONE,    "No slash command support"),
@@ -129,7 +122,6 @@ _CAPABILITIES: list[tuple[str, str, str, dict]] = [
         "Tool allow/deny permission lists",
         {
             "codex":    (PARTIAL, "approval_policy field (on-request/on-failure/never)"),
-            "gemini":   (PARTIAL, "tools.allowed / tools.exclude (v2.0+)"),
             "opencode": (PARTIAL, "permission.allow / permission.deny per tool"),
             "cursor":   (NONE,    "No fine-grained tool permissions"),
             "aider":    (NONE,    "No permission model"),
@@ -142,7 +134,6 @@ _CAPABILITIES: list[tuple[str, str, str, dict]] = [
         "Tool-level env var configuration",
         {
             "codex":    (PARTIAL, "env field in config.toml"),
-            "gemini":   (PARTIAL, "env field in settings.json"),
             "opencode": (FULL,    "env in server configs"),
             "cursor":   (PARTIAL, "env field in mcp.json"),
             "aider":    (NONE,    "Env vars must be set in shell"),
@@ -155,7 +146,6 @@ _CAPABILITIES: list[tuple[str, str, str, dict]] = [
         "Per-project vs global config separation",
         {
             "codex":    (PARTIAL, "Single config.toml — no project-local override"),
-            "gemini":   (FULL,    ".gemini/ dir can be project-local"),
             "opencode": (FULL,    "opencode.json can be project-local"),
             "cursor":   (FULL,    ".cursor/ is per-project"),
             "aider":    (FULL,    ".aider.conf.yml is per-project"),
@@ -168,7 +158,6 @@ _CAPABILITIES: list[tuple[str, str, str, dict]] = [
         "@sync:target inline content routing",
         {
             "codex":    (FULL,    "<!-- sync:codex --> tags respected"),
-            "gemini":   (FULL,    "<!-- sync:gemini --> tags respected"),
             "opencode": (FULL,    "<!-- sync:opencode --> tags respected"),
             "cursor":   (FULL,    "<!-- sync:cursor --> tags respected"),
             "aider":    (FULL,    "<!-- sync:aider --> tags respected"),
@@ -181,7 +170,6 @@ _CAPABILITIES: list[tuple[str, str, str, dict]] = [
         "<!-- harness:X --> injection blocks",
         {
             "codex":    (FULL,    "<!-- harness:codex --> blocks injected"),
-            "gemini":   (FULL,    "<!-- harness:gemini --> blocks injected"),
             "opencode": (FULL,    "<!-- harness:opencode --> blocks injected"),
             "cursor":   (FULL,    "<!-- harness:cursor --> blocks injected"),
             "aider":    (FULL,    "<!-- harness:aider --> blocks injected"),
@@ -194,7 +182,6 @@ _CAPABILITIES: list[tuple[str, str, str, dict]] = [
         "Multi-layer base/team/personal config composition",
         {
             "codex":    (FULL,    "Composed before sync"),
-            "gemini":   (FULL,    "Composed before sync"),
             "opencode": (FULL,    "Composed before sync"),
             "cursor":   (FULL,    "Composed before sync"),
             "aider":    (FULL,    "Composed before sync"),
@@ -207,7 +194,6 @@ _CAPABILITIES: list[tuple[str, str, str, dict]] = [
         "${VAR} placeholder expansion from .env.harness",
         {
             "codex":    (FULL,    "Expanded at sync time"),
-            "gemini":   (FULL,    "Expanded at sync time"),
             "opencode": (FULL,    "Expanded at sync time"),
             "cursor":   (FULL,    "Expanded at sync time"),
             "aider":    (FULL,    "Expanded at sync time"),
@@ -217,7 +203,7 @@ _CAPABILITIES: list[tuple[str, str, str, dict]] = [
 ]
 
 # All targets shown in columns
-_DEFAULT_TARGETS = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"]
+_DEFAULT_TARGETS = ["codex", "opencode", "cursor", "aider", "windsurf"]
 
 # Visual symbols per tier
 _SYMBOLS = {FULL: "✓", PARTIAL: "~", NONE: "✗"}
@@ -340,7 +326,7 @@ def main() -> None:
         "--target",
         type=str,
         default=None,
-        help="Show detailed report for a single target (codex, gemini, opencode, cursor, aider, windsurf)",
+        help="Show detailed report for a single target (codex, opencode, cursor, aider, windsurf)",
     )
     parser.add_argument(
         "--category",

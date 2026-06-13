@@ -25,7 +25,7 @@ from dataclasses import dataclass, field as dc_field
 # File format -- one directive per line, blank lines and # comments ignored:
 #
 #   # Exclude the work-slack MCP from all targets except codex
-#   mcp:work-slack-server  skip=gemini,cursor,aider,windsurf
+#   mcp:work-slack-server  skip=cursor,aider,windsurf
 #
 #   # Exclude a skill from a target that doesn't support it well
 #   skill:experimental-debugger  skip=aider,windsurf
@@ -244,7 +244,7 @@ class SyncTriggerMatcher:
         targets_to_sync = matcher.targets_for_changes(
             changed_files=["CLAUDE.md", ".claude/skills/my-skill/SKILL.md"],
             changed_sections=["rules"],
-            all_targets=["codex", "gemini", "opencode"],
+            all_targets=["codex", "opencode"],
         )
     """
 

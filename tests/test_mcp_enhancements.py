@@ -5,8 +5,6 @@ from __future__ import annotations
 Covers:
 - Codex: timeout ms->sec conversion, oauth_scopes->scopes, elicitation passthrough,
   enabled_tools/disabled_tools passthrough, essential dropped, url+bearer_token
-- Gemini: essential->trust:true, cwd passthrough, url passthrough,
-  timeout/oauth_scopes dropped
 - OpenCode: timeout passthrough, env passthrough, type discrimination (local/remote),
   essential/oauth_scopes dropped
 - Cursor: timeout and url passthrough in .cursor/mcp.json
@@ -23,7 +21,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.adapters.codex import CodexAdapter
-from src.adapters.gemini import GeminiAdapter
 from src.adapters.opencode import OpenCodeAdapter
 from src.adapters.cursor import CursorAdapter
 from src.adapters.cline import ClineAdapter
@@ -273,154 +270,6 @@ class TestCodexMcpEnhancements:
         content = config_path.read_text()
         assert "tool_timeout_sec = 20" in content
         assert "essential" not in content
-
-
-# ---------------------------------------------------------------------------
-# Gemini adapter MCP enhancement tests
-# ---------------------------------------------------------------------------
-
-class TestGeminiMcpEnhancements:
-    """Test Gemini adapter MCP field translation."""
-
-    def test_essential_mapped_to_trust(self, tmp_path):
-        """essential: true should map to trust: true."""
-        adapter = GeminiAdapter(tmp_path)
-        servers = {
-            "core-server": {
-                "command": "node",
-                "args": ["server.js"],
-                "essential": True,
-            }
-        }
-        result = adapter.sync_mcp(servers)
-        assert result.synced == 1
-
-        settings = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
-        server_cfg = settings["mcpServers"]["core-server"]
-        assert server_cfg["trust"] is True
-
-    def test_essential_false_no_trust(self, tmp_path):
-        """essential: false should not set trust."""
-        adapter = GeminiAdapter(tmp_path)
-        servers = {
-            "optional-server": {
-                "command": "node",
-                "essential": False,
-            }
-        }
-        result = adapter.sync_mcp(servers)
-        assert result.synced == 1
-
-        settings = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
-        server_cfg = settings["mcpServers"]["optional-server"]
-        assert "trust" not in server_cfg
-
-    def test_explicit_trust_not_overridden_by_essential(self, tmp_path):
-        """If config already has trust field, essential should not override it."""
-        adapter = GeminiAdapter(tmp_path)
-        servers = {
-            "server": {
-                "command": "node",
-                "essential": True,
-                "trust": False,  # Explicit trust=false should win
-            }
-        }
-        result = adapter.sync_mcp(servers)
-        assert result.synced == 1
-
-        settings = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
-        server_cfg = settings["mcpServers"]["server"]
-        # The explicit trust=False from the passthrough block should be present
-        assert server_cfg["trust"] is False
-
-    def test_cwd_passthrough(self, tmp_path):
-        """cwd should pass through directly."""
-        adapter = GeminiAdapter(tmp_path)
-        servers = {
-            "cwd-server": {
-                "command": "node",
-                "cwd": "/home/user/project",
-            }
-        }
-        result = adapter.sync_mcp(servers)
-        assert result.synced == 1
-
-        settings = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
-        server_cfg = settings["mcpServers"]["cwd-server"]
-        assert server_cfg["cwd"] == "/home/user/project"
-
-    def test_url_passthrough_for_remote(self, tmp_path):
-        """url should be available in the output for remote servers."""
-        adapter = GeminiAdapter(tmp_path)
-        servers = {
-            "remote-server": {
-                "url": "https://mcp.example.com/api",
-            }
-        }
-        result = adapter.sync_mcp(servers)
-        assert result.synced == 1
-
-        settings = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
-        server_cfg = settings["mcpServers"]["remote-server"]
-        # URL should be in the config (either as url or httpUrl)
-        has_url = "url" in server_cfg or "httpUrl" in server_cfg
-        assert has_url
-
-    def test_timeout_passed_through(self, tmp_path):
-        """timeout should appear in Gemini output (supported since v0.3.0)."""
-        adapter = GeminiAdapter(tmp_path)
-        servers = {
-            "timeout-server": {
-                "command": "node",
-                "timeout": 30000,
-            }
-        }
-        result = adapter.sync_mcp(servers)
-        assert result.synced == 1
-
-        settings = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
-        server_cfg = settings["mcpServers"]["timeout-server"]
-        assert server_cfg.get("timeout") == 30000
-
-    def test_oauth_scopes_dropped(self, tmp_path):
-        """oauth_scopes should not appear in Gemini output (not supported)."""
-        adapter = GeminiAdapter(tmp_path)
-        servers = {
-            "oauth-server": {
-                "url": "https://mcp.example.com/api",
-                "oauth_scopes": ["read", "write"],
-            }
-        }
-        result = adapter.sync_mcp(servers)
-        assert result.synced == 1
-
-        settings = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
-        server_cfg = settings["mcpServers"]["oauth-server"]
-        assert "oauth_scopes" not in server_cfg
-
-    def test_combined_fields(self, tmp_path):
-        """Test all new Gemini fields together."""
-        adapter = GeminiAdapter(tmp_path)
-        servers = {
-            "full-server": {
-                "command": "node",
-                "args": ["server.js"],
-                "essential": True,
-                "cwd": "/opt/mcp",
-                "timeout": 30000,
-                "oauth_scopes": ["admin"],
-            }
-        }
-        result = adapter.sync_mcp(servers)
-        assert result.synced == 1
-
-        settings = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
-        server_cfg = settings["mcpServers"]["full-server"]
-        assert server_cfg["trust"] is True
-        assert server_cfg["cwd"] == "/opt/mcp"
-        assert server_cfg.get("timeout") == 30000
-        assert "oauth_scopes" not in server_cfg
-        assert "essential" not in server_cfg
 
 
 # ---------------------------------------------------------------------------
@@ -839,30 +688,6 @@ class TestDroppedFields:
         assert result.synced == 1
         content = (tmp_path / ".codex" / "config.toml").read_text()
         assert "essential" not in content
-
-    def test_gemini_passes_timeout(self, tmp_path, full_source_config):
-        """Gemini should pass through timeout (supported since v0.3.0)."""
-        adapter = GeminiAdapter(tmp_path)
-        result = adapter.sync_mcp({"s": full_source_config})
-        assert result.synced == 1
-        settings = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
-        assert settings["mcpServers"]["s"].get("timeout") == full_source_config["timeout"]
-
-    def test_gemini_drops_oauth_scopes(self, tmp_path, full_source_config):
-        """Gemini should drop oauth_scopes."""
-        adapter = GeminiAdapter(tmp_path)
-        result = adapter.sync_mcp({"s": full_source_config})
-        assert result.synced == 1
-        settings = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
-        assert "oauth_scopes" not in settings["mcpServers"]["s"]
-
-    def test_gemini_drops_essential_key(self, tmp_path, full_source_config):
-        """Gemini should not have 'essential' key (only 'trust')."""
-        adapter = GeminiAdapter(tmp_path)
-        result = adapter.sync_mcp({"s": full_source_config})
-        assert result.synced == 1
-        settings = json.loads((tmp_path / ".gemini" / "settings.json").read_text())
-        assert "essential" not in settings["mcpServers"]["s"]
 
     def test_opencode_drops_essential(self, tmp_path, full_source_config):
         """OpenCode should drop essential."""

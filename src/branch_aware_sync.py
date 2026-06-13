@@ -12,7 +12,7 @@ Configuration in .harnesssync:
     {
         "branch_profiles": {
             "main": {
-                "only_targets": ["codex", "gemini"],
+                "only_targets": ["codex", "opencode"],
                 "skip_sections": []
             },
             "feature/*": {

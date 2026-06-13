@@ -40,7 +40,7 @@ def test_format_side_by_side_no_color_baseline():
     """Baseline: no color flag produces plain text output."""
     detector = ConflictDetector(Path("/tmp"))
     three_way = {
-        "file_path": "GEMINI.md",
+        "file_path": "AGENTS.md",
         "source_lines": ["line A\n", "line B\n"],
         "current_lines": ["line A\n", "line X\n"],
         "has_real_conflict": True,
@@ -219,7 +219,7 @@ def test_render_ascii_timeline_basic():
     """Timeline renders date labels and bar characters."""
     entries = [
         "## Sync 2024-03-01T10:00:00Z\ncodex: 3 synced\n",
-        "## Sync 2024-03-01T11:00:00Z\ngemini: 2 synced\n",
+        "## Sync 2024-03-01T11:00:00Z\nopencode: 2 synced\n",
         "## Sync 2024-03-02T09:00:00Z\ncodex: 1 synced\n",
     ]
     result = _render_ascii_timeline(entries)
@@ -360,14 +360,14 @@ def test_generate_capability_gap_report_basic():
             {"feature": "Skills", "status": "unsupported",
              "description": "No skill system", "workaround": "Use AGENTS.md rules"},
         ],
-        "gemini": [
+        "opencode": [
             {"feature": "MCP Servers", "status": "partial",
              "description": "Limited server support", "workaround": "Use stdio only"},
         ],
     }
     html = generate_capability_gap_report(gap_data)
     assert "Codex" in html or "codex" in html
-    assert "Gemini" in html or "gemini" in html
+    assert "Opencode" in html or "opencode" in html
     assert "Skills" in html
     assert "MCP Servers" in html
 
@@ -423,7 +423,7 @@ def test_generate_capability_gap_report_valid_html_structure():
 def test_write_capability_gap_report_creates_file(tmp_path):
     """write_capability_gap_report writes the file to disk."""
     gap_data = {
-        "gemini": [
+        "opencode": [
             {"feature": "Commands", "status": "partial",
              "description": "Summarized only", "workaround": ""},
         ],
@@ -442,7 +442,7 @@ def test_generate_capability_gap_report_total_in_meta():
             {"feature": "A", "status": "unsupported", "description": "x", "workaround": ""},
             {"feature": "B", "status": "partial", "description": "y", "workaround": ""},
         ],
-        "gemini": [
+        "opencode": [
             {"feature": "C", "status": "workaround", "description": "z", "workaround": ""},
         ],
     }

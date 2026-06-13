@@ -27,7 +27,6 @@ from pathlib import Path
 # Grouped by those that are project-specific vs user-global
 _TARGET_PROJECT_FILES: dict[str, list[str]] = {
     "codex": ["AGENTS.md", ".codex/config.toml"],
-    "gemini": ["GEMINI.md", ".gemini/settings.json"],
     "opencode": ["OPENCODE.md", ".opencode/settings.json"],
     "cursor": [".cursor/rules/claude-code-rules.mdc", ".cursor/mcp.json"],
     "aider": ["CONVENTIONS.md", ".aider.conf.yml"],

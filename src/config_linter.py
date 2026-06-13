@@ -74,12 +74,12 @@ _KNOWN_SETTINGS_KEYS = {
 
 # Sync tag pattern (must match sync_filter.py)
 _TAG_RE = re.compile(
-    r"<!--\s*sync:(exclude|codex-only|gemini-only|opencode-only|end)\s*-->",
+    r"<!--\s*sync:(exclude|codex-only|opencode-only|end)\s*-->",
     re.IGNORECASE,
 )
 
 # @harness shorthand annotation recognition (item 28)
-# <!-- @harness:codex-only --> / <!-- @harness:skip-gemini --> / <!-- @harness:cursor,aider -->
+# <!-- @harness:codex-only --> / <!-- @harness:skip-opencode --> / <!-- @harness:cursor,aider -->
 _AT_HARNESS_ANNOTATION_RE = re.compile(
     r"<!--\s*@harness:(?:skip-)?[a-z0-9][-a-z0-9,\s]*(?:-only)?\s*-->",
     re.IGNORECASE,
@@ -107,7 +107,7 @@ _PORTABILITY_PATTERNS: list[tuple[re.Pattern, str, str]] = [
         "'allowed-tools' frontmatter is Claude Code-specific; other harnesses will ignore it",
     ),
     (
-        re.compile(r"<!--\s*sync:(codex|gemini|opencode|cursor|aider|windsurf)-only\s*-->(?![\s\S]*?<!--\s*sync:end\s*-->)"),
+        re.compile(r"<!--\s*sync:(codex|opencode|cursor|aider|windsurf)-only\s*-->(?![\s\S]*?<!--\s*sync:end\s*-->)"),
         "",
         "Harness-specific sync tags without closing <!-- sync:end --> will silently include all content",
     ),
@@ -253,7 +253,7 @@ class ConfigLinter:
         """Detect near-duplicate rules across harness config files.
 
         Uses RuleDeduplicator to find clusters of similar rules in CLAUDE.md,
-        AGENTS.md, GEMINI.md, and other harness config files. Cross-harness
+        AGENTS.md, and other harness config files. Cross-harness
         duplicates indicate rules that should be consolidated in CLAUDE.md as
         the single source of truth.
 
@@ -811,7 +811,7 @@ class ConfigLinter:
 
         Scans the SKILL.md (or the skill file directly if skill_path is a
         file) for patterns that are Claude Code-specific and won't translate
-        to other harnesses (Cursor, Gemini, Aider, etc.).
+        to other harnesses (Cursor, Aider, etc.).
 
         Args:
             skill_name: Human-readable skill name (for issue messages).
@@ -904,7 +904,7 @@ class ConfigLinter:
             f"Skill Portability Report — {total} issue(s) in {len(issues_by_skill)} skill(s)",
             "=" * 60,
             "",
-            "Flagged patterns won't translate well to Cursor, Gemini, Aider, or other harnesses.",
+            "Flagged patterns won't translate well to Cursor, Aider, or other harnesses.",
             "",
         ]
 
@@ -967,7 +967,7 @@ class ConfigLinter:
         # Check deny permissions are not inadvertently included
         denied = permissions.get("deny") or []
         if denied:
-            for adapter in ("codex", "gemini", "cursor"):
+            for adapter in ("codex", "cursor"):
                 warnings.append({
                     "adapter": adapter,
                     "message": f"{len(denied)} 'deny' permission(s) in source config — verify {adapter} honours Claude Code deny semantics.",

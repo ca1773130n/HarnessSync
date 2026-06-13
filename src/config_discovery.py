@@ -276,7 +276,6 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
 
         Supported files (looked up in project_dir, then .claude/):
             CLAUDE.codex.md   -> codex
-            CLAUDE.gemini.md  -> gemini
             CLAUDE.opencode.md -> opencode
             CLAUDE.cursor.md  -> cursor
             CLAUDE.aider.md   -> aider
@@ -310,7 +309,7 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
         Returns:
             Dict mapping target_name -> Path for each existing override file.
         """
-        known_targets = ("codex", "gemini", "opencode", "cursor", "aider", "windsurf")
+        known_targets = ("codex", "opencode", "cursor", "aider", "windsurf")
         result: dict[str, Path] = {}
         if not self.project_dir:
             return result
@@ -342,7 +341,7 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
         unconditionally -- callers should treat the empty string as "no override".
 
         Args:
-            target_name: Target harness name (e.g. "codex", "gemini").
+            target_name: Target harness name (e.g. "codex", "opencode").
 
         Returns:
             Extracted block content (stripped), or empty string if none found.

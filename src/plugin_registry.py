@@ -21,22 +21,18 @@ from pathlib import Path
 PLUGIN_EQUIVALENTS: dict[str, dict[str, str | None]] = {
     "context-mode": {
         "codex": None,
-        "gemini": None,
         "opencode": None,
     },
     "sentry": {
         "codex": "@sentry/codex-plugin",
-        "gemini": None,
         "opencode": "@sentry/opencode-plugin",
     },
     "linear": {
         "codex": None,
-        "gemini": "linear-gemini-extension",
         "opencode": None,
     },
     "github-notifications": {
         "codex": None,
-        "gemini": None,
         "opencode": None,
     },
 }

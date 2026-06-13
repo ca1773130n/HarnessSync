@@ -3,7 +3,7 @@ from __future__ import annotations
 """
 /sync-cost slash command — cross-harness cost optimization advisor.
 
-Analyzes harness configurations across Claude Code, Gemini, OpenCode, Codex,
+Analyzes harness configurations across Claude Code, OpenCode, Codex,
 Cursor, and Aider and surfaces config changes that could reduce API costs.
 
 Usage:

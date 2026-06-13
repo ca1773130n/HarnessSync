@@ -4,14 +4,14 @@ from __future__ import annotations
 
 Installs a post-commit hook that triggers HarnessSync whenever CLAUDE.md,
 .claude/, or .mcp.json changes in a commit, and optionally a pre-commit hook
-that syncs and stages the updated target files (AGENTS.md, GEMINI.md, etc.)
+that syncs and stages the updated target files (AGENTS.md, etc.)
 in the same commit.
 
 Pre-commit hook (item 15):
 When --pre-commit is used, the pre-commit hook:
 1. Detects staged changes to CLAUDE.md / .claude/ / .mcp.json
 2. Runs HarnessSync synchronously (blocking, not in background)
-3. Stages the updated target files (AGENTS.md, GEMINI.md, etc.)
+3. Stages the updated target files (AGENTS.md, etc.)
    so they are included in the same commit automatically.
 """
 
@@ -125,7 +125,7 @@ if ! "$PY" "$HS_ROOT/src/commands/sync.py" --scope all 2>&1; then
 fi
 
 # Stage known target config files if they were updated by sync
-TARGET_FILES="AGENTS.md GEMINI.md opencode.json codex.toml .cursor/mcp.json .windsurf/rules .aider.conf.yml CONVENTIONS.md"
+TARGET_FILES="AGENTS.md opencode.json codex.toml .cursor/mcp.json .windsurf/rules .aider.conf.yml CONVENTIONS.md"
 staged_count=0
 for f in $TARGET_FILES; do
     if [ -f "$f" ]; then
@@ -149,7 +149,7 @@ PRE_COMMIT_MARKER = "# harnesssync-pre-commit-v1"
 DRIFT_CHECK_HOOK_TEMPLATE = """\
 #!/bin/sh
 # HarnessSync drift-check pre-commit hook
-# Fails the commit if harness configs (AGENTS.md, GEMINI.md, etc.) are out of sync
+# Fails the commit if harness configs (AGENTS.md, etc.) are out of sync
 # with CLAUDE.md. Run /sync or harnesssync to update before committing.
 # Installed by: /sync-git-hook install --drift-check
 # Remove with:  /sync-git-hook uninstall --drift-check
@@ -494,7 +494,7 @@ def install_gate_hook(project_dir: Path) -> tuple[bool, str]:
     """Install pre-commit sync gate hook.
 
     The gate hook blocks commits when CLAUDE.md or related config files are
-    staged but the harness target files (AGENTS.md, GEMINI.md, etc.) are out
+    staged but the harness target files (AGENTS.md, etc.) are out
     of sync.  Unlike the auto-stage pre-commit hook, this hook does NOT run
     sync automatically — it instructs the user to run /sync first and then
     commit again.
@@ -873,7 +873,7 @@ def is_drift_check_hook_installed(project_dir: Path) -> bool:
 # This fulfills the item 7 requirement: "sync results included in the commit
 # message".  The annotation looks like:
 #
-#   HarnessSync: synced codex, gemini, opencode (3 targets, 0 errors)
+#   HarnessSync: synced codex, opencode (2 targets, 0 errors)
 #
 # The amend is safe because it is done immediately after the original commit,
 # before the branch is pushed, so it does not affect shared history.
@@ -1084,7 +1084,7 @@ fi
 
 changed=$(git diff --name-only "$BASE" HEAD 2>/dev/null)
 triggers=0
-for pattern in CLAUDE.md AGENTS.md GEMINI.md .mcp.json .harness-sync/ .claude/settings.json; do
+for pattern in CLAUDE.md AGENTS.md .mcp.json .harness-sync/ .claude/settings.json; do
     if echo "$changed" | grep -qF "$pattern"; then
         triggers=1
         break
@@ -1108,7 +1108,7 @@ exit 0
 #
 # Blocks `git push` when any synced harness target is out of date with CLAUDE.md.
 # Teams can enforce that nobody pushes CLAUDE.md changes without also committing
-# the synced AGENTS.md, GEMINI.md, etc., preventing config debt in shared repos.
+# the synced AGENTS.md, etc., preventing config debt in shared repos.
 #
 # The hook only activates when HarnessSync-managed source files (CLAUDE.md,
 # .claude/, .mcp.json) differ between local HEAD and the remote tracking branch,
@@ -1186,11 +1186,11 @@ if echo "$drift_output" | grep -qiE "(would (write|update|create)|drift detected
     echo "╚══════════════════════════════════════════════════════════════╝" >&2
     echo "" >&2
     echo "  Your push includes CLAUDE.md changes but target harness files" >&2
-    echo "  (AGENTS.md, GEMINI.md, etc.) are not yet synced." >&2
+    echo "  (AGENTS.md, etc.) are not yet synced." >&2
     echo "" >&2
     echo "  Fix: run /sync, commit the updated harness files, then push again." >&2
     echo "    1) /sync" >&2
-    echo "    2) git add AGENTS.md GEMINI.md opencode.json codex.toml" >&2
+    echo "    2) git add AGENTS.md opencode.json codex.toml" >&2
     echo "    3) git commit -m 'sync: update harness configs'" >&2
     echo "    4) git push" >&2
     echo "" >&2
@@ -1217,7 +1217,7 @@ def install_pre_push_hook(project_dir: Path) -> tuple[bool, str]:
     message and instructions to sync and commit first.
 
     This closes the gap where developers push CLAUDE.md changes without
-    also committing the synced AGENTS.md, GEMINI.md, etc., accumulating
+    also committing the synced AGENTS.md, etc., accumulating
     config debt that diverges teammates' harnesses.
 
     If a pre-push hook already exists, the HarnessSync block is appended

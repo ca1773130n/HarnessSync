@@ -38,7 +38,7 @@ class UsageTracker:
     Usage::
 
         tracker = UsageTracker()
-        tracker.record("skill", "commit", harness="gemini")
+        tracker.record("skill", "commit", harness="codex")
         stale = tracker.find_stale(days=30)
     """
 
@@ -65,7 +65,7 @@ class UsageTracker:
         Args:
             category: "skill" | "agent" | "command" | "rule"
             name:     Item name (e.g. skill directory name, agent stem).
-            harness:  Which harness invoked it (e.g. "gemini", "cursor").
+            harness:  Which harness invoked it (e.g. "codex", "cursor").
         """
         data = self._load()
         key = self._key(category, name)
@@ -189,7 +189,6 @@ class UsageTracker:
 # Known synced output file patterns per target (relative to project_dir)
 _TARGET_OUTPUT_FILES: dict[str, list[str]] = {
     "codex": ["AGENTS.md", ".codex/config.toml"],
-    "gemini": ["GEMINI.md", ".gemini/settings.json"],
     "opencode": ["OPENCODE.md", ".opencode/settings.json"],
     "cursor": [".cursor/rules/claude-code-rules.mdc", ".cursor/mcp.json"],
     "aider": ["CONVENTIONS.md", ".aider.conf.yml"],
@@ -401,7 +400,7 @@ class DeadConfigDetector:
         mcp_servers = source_data.get("mcp_servers", source_data.get("mcp", {}))
         if mcp_servers and active_targets:
             # Targets that support MCP output
-            mcp_capable = {"codex", "gemini", "opencode", "cursor", "cline", "continue", "zed", "neovim"}
+            mcp_capable = {"codex", "opencode", "cursor", "cline", "continue", "zed", "neovim"}
             if not any(t in mcp_capable for t in active_targets):
                 for server_name in mcp_servers:
                     report.source_no_target.append(DeadConfigItem(
@@ -414,7 +413,7 @@ class DeadConfigDetector:
         # Skills: check if any active target syncs skills
         skills = source_data.get("skills", {})
         if skills and active_targets:
-            skill_capable = {"codex", "gemini", "opencode", "cursor", "cline", "continue", "zed", "neovim"}
+            skill_capable = {"codex", "opencode", "cursor", "cline", "continue", "zed", "neovim"}
             if not any(t in skill_capable for t in active_targets):
                 for skill_name in skills:
                     report.source_no_target.append(DeadConfigItem(

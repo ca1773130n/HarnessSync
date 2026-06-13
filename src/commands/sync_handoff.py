@@ -4,12 +4,12 @@ from __future__ import annotations
 /sync-handoff slash command — cross-harness session handoff (item 23).
 
 Generates a context-rich prompt that lets the user continue their Claude Code
-session in another AI harness (Gemini CLI, Codex, OpenCode, Cursor, Aider,
+session in another AI harness (Codex, OpenCode, Cursor, Aider,
 Windsurf) without losing context.
 
 Usage examples:
 
-    /sync-handoff --target gemini --task "Refactoring auth middleware"
+    /sync-handoff --target codex --task "Refactoring auth middleware"
 
     /sync-handoff --target codex \\
         --task "Add JWT refresh-token endpoint" \\
@@ -52,7 +52,7 @@ def main() -> None:
         "--target",
         type=str,
         default="default",
-        help="Target harness to hand off to (gemini, codex, opencode, cursor, aider, windsurf).",
+        help="Target harness to hand off to (codex, opencode, cursor, aider, windsurf).",
     )
     parser.add_argument(
         "--task",

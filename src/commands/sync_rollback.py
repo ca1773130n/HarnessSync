@@ -43,7 +43,7 @@ def main() -> None:
         description="Restore a target to a previous backed-up state",
     )
     parser.add_argument("--list", action="store_true", help="List available backups (with labels)")
-    parser.add_argument("--target", type=str, help="Target to rollback (codex, gemini, etc.)")
+    parser.add_argument("--target", type=str, help="Target to rollback (codex, opencode, etc.)")
     parser.add_argument("--backup", type=str, default=None,
                         help="Backup name to restore (from --list output). Omit to restore most recent.")
     parser.add_argument("--project-dir", type=str, default=None)

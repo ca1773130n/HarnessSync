@@ -24,8 +24,7 @@ categories each harness receives:
     {
         "cursor":  {"include_tags": ["security", "style", "workflow"]},
         "aider":   {"include_tags": ["security"]},
-        "codex":   {"exclude_tags": ["style"]},
-        "gemini":  {}
+        "codex":   {"exclude_tags": ["style"]}
     }
 
 Omitting a harness (or providing an empty dict) means "pass all tags".
@@ -341,8 +340,7 @@ def create_default_tag_config(project_dir: Path) -> Path:
         },
         "codex": {
             "exclude_tags": []
-        },
-        "gemini": {}
+        }
     }
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return path

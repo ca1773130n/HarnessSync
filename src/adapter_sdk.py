@@ -97,7 +97,7 @@ def community_adapter(name: str):
             ...
     """
     _BUILTIN_NAMES = frozenset({
-        "codex", "gemini", "opencode", "cursor", "aider",
+        "codex", "opencode", "cursor", "aider",
         "windsurf", "cline", "neovim", "vscode", "zed", "continue_dev",
     })
 
@@ -354,7 +354,7 @@ def discover_community_adapters(adapters_dir: Path) -> list[str]:
     """
     _SKIP_FILES = frozenset({
         "__init__.py", "base.py", "registry.py", "result.py",
-        "codex.py", "gemini.py", "opencode.py", "cursor.py",
+        "codex.py", "opencode.py", "cursor.py",
         "aider.py", "windsurf.py", "cline.py", "neovim.py",
         "vscode.py", "zed.py", "continue_dev.py",
     })

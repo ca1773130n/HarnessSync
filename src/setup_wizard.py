@@ -19,7 +19,7 @@ class SetupWizard:
     """Interactive setup wizard for multi-account configuration."""
 
     # Supported target CLIs
-    TARGET_CLIS = ['codex', 'gemini', 'opencode']
+    TARGET_CLIS = ['codex', 'opencode']
 
     def __init__(self, account_manager: AccountManager = None, config_dir: Path = None):
         """Initialize SetupWizard.
@@ -320,7 +320,7 @@ class SetupWizard:
 
         # Step 1: Detect installed harnesses
         print("[1/4] Detecting installed AI harnesses...")
-        all_targets = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf",
+        all_targets = ["codex", "opencode", "cursor", "aider", "windsurf",
                        "cline", "continue", "zed", "neovim"]
         installed_map = self.detect_installed_harnesses(include_versions=True)
         detected: list[str] = []
@@ -486,7 +486,6 @@ class SetupWizard:
 
         _CLI_BINARIES: dict[str, str] = {
             "codex":    "codex",
-            "gemini":   "gemini",
             "opencode": "opencode",
             "aider":    "aider",
             "cursor":   "cursor",
@@ -498,7 +497,6 @@ class SetupWizard:
         }
         _CONFIG_DIR_FALLBACKS: dict[str, Path] = {
             "codex":    Path.home() / ".codex",
-            "gemini":   Path.home() / ".gemini",
             "opencode": Path.home() / ".config" / "opencode",
             "cursor":   Path.home() / ".cursor",
             "aider":    Path.home() / ".aider",

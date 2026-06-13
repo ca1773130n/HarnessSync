@@ -25,7 +25,6 @@ from pathlib import Path
 # Known AI coding CLI executables mapped to their canonical names
 _KNOWN_AI_CLIS: dict[str, str] = {
     "codex": "codex",
-    "gemini": "gemini",
     "opencode": "opencode",
     "opencode-cli": "opencode",
     "cursor": "cursor",
@@ -46,7 +45,6 @@ _KNOWN_AI_CLIS: dict[str, str] = {
 # Paths are relative to $HOME. Multiple candidates per harness (tried in order).
 _CONFIG_DIR_PATTERNS: dict[str, list[str]] = {
     "codex": [".codex", ".config/codex"],
-    "gemini": [".gemini", ".config/gemini-cli"],
     "opencode": [".config/opencode", ".opencode"],
     "cursor": [".cursor", ".config/Cursor", "Library/Application Support/Cursor"],
     "windsurf": [".windsurf", ".config/windsurf", "Library/Application Support/windsurf"],
@@ -75,7 +73,7 @@ def detect_new_harnesses(already_configured: list[str]) -> list[str]:
 
     Args:
         already_configured: List of target names already configured in
-                            HarnessSync (e.g. ["codex", "gemini", "opencode"]).
+                            HarnessSync (e.g. ["codex", "opencode"]).
 
     Returns:
         Sorted list of canonical harness names found but not yet configured.
@@ -109,7 +107,6 @@ def detect_new_harnesses(already_configured: list[str]) -> list[str]:
 # Homebrew formula / cask names per canonical harness name
 _HOMEBREW_FORMULAS: dict[str, list[str]] = {
     "aider": ["aider"],
-    "gemini": ["gemini-cli", "google-gemini-cli"],
     "codex": ["openai-codex"],
     "cursor": ["cursor"],
     "windsurf": ["windsurf"],
@@ -120,7 +117,6 @@ _HOMEBREW_FORMULAS: dict[str, list[str]] = {
 
 # npm package names per canonical harness name
 _NPM_PACKAGES: dict[str, list[str]] = {
-    "gemini": ["@google/gemini-cli", "gemini-cli"],
     "codex": ["@openai/codex"],
     "opencode": ["opencode"],
     "cline": ["cline"],
@@ -132,7 +128,6 @@ _NPM_PACKAGES: dict[str, list[str]] = {
 _PIP_PACKAGES: dict[str, list[str]] = {
     "aider": ["aider-chat"],
     "opencode": ["opencode"],
-    "gemini": ["google-genai-cli"],
 }
 
 
@@ -283,7 +278,6 @@ def scan_all() -> dict[str, dict]:
 # Per-harness version flag overrides (default is --version)
 _VERSION_FLAGS: dict[str, list[str]] = {
     "aider": ["--version"],
-    "gemini": ["--version"],
     "codex": ["--version"],
     "opencode": ["--version"],
     "cursor": ["--version"],
@@ -689,12 +683,11 @@ def generate_bootstrap_script(
     project_dir_str = str(project_dir) if project_dir else "$(pwd)"
     detected = scan_all()
     if harnesses is None:
-        harnesses = sorted(detected.keys()) or ["codex", "gemini", "cursor", "aider"]
+        harnesses = sorted(detected.keys()) or ["codex", "opencode", "cursor", "aider"]
 
     # Install hints per harness
     _install_hints: dict[str, str] = {
         "codex":    "npm install -g @openai/codex",
-        "gemini":   "npm install -g @google/gemini-cli",
         "opencode": "npm install -g opencode-ai",
         "cursor":   "# Download Cursor from https://cursor.sh — GUI installer required",
         "aider":    "pip install aider-chat",
@@ -827,7 +820,7 @@ def generate_auto_config(
 
     # Harnesses that HarnessSync has adapters for (conservative allow-list)
     _SUPPORTED: set[str] = {
-        "codex", "gemini", "opencode", "cursor", "aider",
+        "codex", "opencode", "cursor", "aider",
         "windsurf", "cline", "continue", "zed", "vscode", "neovim",
     }
     supported_new = [t for t in new_targets if t in _SUPPORTED]

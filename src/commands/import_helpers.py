@@ -24,7 +24,6 @@ DEFAULT_FILES: dict[str, list[str]] = {
                   ".cursorrules"],
     "aider":     ["CONVENTIONS.md", ".aider.conf.yml"],
     "codex":     ["AGENTS.md"],
-    "gemini":    ["GEMINI.md"],
     "windsurf":  [".windsurfrules"],
     "opencode":  ["AGENTS.md"],
     "cline":     [".cline/rules.md", ".clinerules"],

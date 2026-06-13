@@ -110,14 +110,6 @@ _SKIP_REASONS: dict[str, dict[str, str | None]] = {
         "mcp":      None,
         "settings": None,
     },
-    "gemini": {
-        "rules":    None,
-        "skills":   None,
-        "agents":   None,
-        "commands": None,
-        "mcp":      None,
-        "settings": None,
-    },
     "opencode": {
         "rules":    None,
         "skills":   None,

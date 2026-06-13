@@ -28,7 +28,6 @@ from pathlib import Path
 # MCP tools that are unavailable in specific harnesses
 _HARNESS_UNAVAILABLE_MCP: dict[str, set[str]] = {
     "codex": {"playwright", "github", "context7", "context-mode", "slack", "jira"},
-    "gemini": {"playwright", "context-mode"},
     "cursor": set(),
     "aider": {"playwright", "github", "context7", "context-mode"},
     "windsurf": set(),

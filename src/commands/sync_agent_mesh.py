@@ -4,7 +4,7 @@ from __future__ import annotations
 /sync-agent-mesh slash command — sync Claude Code multi-agent config to other harnesses.
 
 Reads agent definitions from .claude/agents/ and command .md files, then
-writes translated agent configurations to Gemini, OpenCode, Codex, Cursor,
+writes translated agent configurations to OpenCode, Codex, Cursor,
 Aider, and Windsurf target formats.
 
 Usage:
@@ -42,7 +42,7 @@ def main():
         description="Sync Claude Code multi-agent configuration to other harnesses.",
     )
     parser.add_argument("--targets", default=None,
-                        help="Comma-separated targets (codex,gemini,opencode,...)")
+                        help="Comma-separated targets (codex,opencode,...)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Compute output without writing files")
     parser.add_argument("--json", dest="output_json", action="store_true",

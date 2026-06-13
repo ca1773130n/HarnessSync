@@ -823,25 +823,25 @@ class TargetConfigHistory:
 
     After each sync, call ``snapshot_file()`` for every file written.  The
     history stores the last N versions with timestamps so users can answer
-    "what did my Gemini config look like last Tuesday?" and restore any version.
+    "what did my Codex config look like last Tuesday?" and restore any version.
 
     Storage layout::
 
         ~/.harnesssync/target-history/
-            gemini/GEMINI.md/
+            codex/AGENTS.md/
                 2026-03-13T12:00:00Z.txt
                 2026-03-12T09:15:00Z.txt
                 ...
-            codex/AGENTS.md/
+            opencode/AGENTS.md/
                 ...
 
     Usage::
 
         history = TargetConfigHistory()
-        history.snapshot_file("gemini", Path("/project/GEMINI.md"))
-        versions = history.list_versions("gemini", "GEMINI.md")
-        content = history.get_version("gemini", "GEMINI.md", versions[0]["timestamp"])
-        history.restore_version("gemini", "GEMINI.md", versions[1]["timestamp"])
+        history.snapshot_file("codex", Path("/project/AGENTS.md"))
+        versions = history.list_versions("codex", "AGENTS.md")
+        content = history.get_version("codex", "AGENTS.md", versions[0]["timestamp"])
+        history.restore_version("codex", "AGENTS.md", versions[1]["timestamp"])
     """
 
     def __init__(
@@ -869,7 +869,7 @@ class TargetConfigHistory:
         No-ops silently if the file doesn't exist.
 
         Args:
-            target: Harness target name (e.g. "gemini", "codex").
+            target: Harness target name (e.g. "opencode", "codex").
             file_path: Absolute path to the target config file.
             timestamp: ISO-8601 UTC timestamp. Defaults to now.
 
@@ -901,7 +901,7 @@ class TargetConfigHistory:
 
         Args:
             target: Harness target name.
-            filename: Config file basename (e.g. "GEMINI.md").
+            filename: Config file basename (e.g. "AGENTS.md").
 
         Returns:
             List of dicts with ``timestamp`` and ``size_bytes`` keys,
@@ -1225,7 +1225,7 @@ class NamedSnapshotStore:
 #
 # Pinning a target freezes it at the current config snapshot. Subsequent
 # syncs skip pinned targets entirely until explicitly unpinned. Useful for
-# keeping Gemini on a stable skill set while experimenting in Claude Code.
+# keeping Codex on a stable skill set while experimenting in Claude Code.
 
 _PINS_FILE = Path.home() / ".harnesssync" / "pinned_targets.json"
 
@@ -1242,10 +1242,10 @@ class PinnedTargetManager:
     Usage::
 
         mgr = PinnedTargetManager()
-        mgr.pin("gemini", checkpoint_tag="stable-2026-03")
-        mgr.is_pinned("gemini")   # True
-        mgr.unpin("gemini")
-        mgr.is_pinned("gemini")   # False
+        mgr.pin("codex", checkpoint_tag="stable-2026-03")
+        mgr.is_pinned("codex")   # True
+        mgr.unpin("codex")
+        mgr.is_pinned("codex")   # False
     """
 
     def __init__(self, pins_file: Path | None = None) -> None:
@@ -1270,7 +1270,7 @@ class PinnedTargetManager:
         """Pin *target* at the current config snapshot.
 
         Args:
-            target: Harness name to pin (e.g. "gemini").
+            target: Harness name to pin (e.g. "codex").
             checkpoint_tag: Optional tag of the CheckpointManager snapshot
                             this pin is associated with.
             reason: Human-readable reason for pinning (e.g. "stable release").

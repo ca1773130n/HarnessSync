@@ -48,9 +48,9 @@ class TestParseSkillSyncTag:
         assert result["mode"] == "all"
 
     def test_sync_only_list(self, tmp_path):
-        """sync: [codex, gemini] restricts to only those targets."""
+        """sync: [codex, cursor] restricts to only those targets."""
         skill_md = tmp_path / "SKILL.md"
-        skill_md.write_text("---\nsync: [codex, gemini]\n---\n# Skill\n")
+        skill_md.write_text("---\nsync: [codex, cursor]\n---\n# Skill\n")
         result = parse_skill_sync_tag(skill_md)
         # Without PyYAML, the fallback parser may not handle list syntax.
         # With PyYAML it should parse correctly.
@@ -111,9 +111,9 @@ class TestNormaliseSyncValue:
         assert _normalise_sync_value("all")["mode"] == "all"
 
     def test_list_of_targets(self):
-        result = _normalise_sync_value(["codex", "gemini"])
+        result = _normalise_sync_value(["codex", "cursor"])
         assert result["mode"] == "only"
-        assert result["targets"] == frozenset({"codex", "gemini"})
+        assert result["targets"] == frozenset({"codex", "cursor"})
 
     def test_dict_only(self):
         result = _normalise_sync_value({"only": ["codex", "cursor"]})
@@ -144,9 +144,9 @@ class TestSkillAllowedForTarget:
         assert skill_allowed_for_target(tag, "aider") is True
 
     def test_mode_only_allows_listed(self):
-        tag = {"mode": "only", "targets": frozenset({"codex", "gemini"})}
+        tag = {"mode": "only", "targets": frozenset({"codex", "windsurf"})}
         assert skill_allowed_for_target(tag, "codex") is True
-        assert skill_allowed_for_target(tag, "gemini") is True
+        assert skill_allowed_for_target(tag, "windsurf") is True
         assert skill_allowed_for_target(tag, "aider") is False
         assert skill_allowed_for_target(tag, "cursor") is False
 

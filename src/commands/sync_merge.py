@@ -13,7 +13,7 @@ Usage:
     /sync-merge [TARGET] [--auto-ours] [--auto-theirs] [--dry-run] [--3way] [--project-dir PATH]
 
 Options:
-    TARGET            Target to check and merge (codex, gemini, opencode, ...).
+    TARGET            Target to check and merge (codex, opencode, ...).
                       If omitted, checks all targets with conflicts.
     --auto-ours       Automatically keep the HarnessSync (source) version for all conflicts
     --auto-theirs     Automatically keep the manually-edited (target) version for all conflicts
@@ -153,7 +153,7 @@ def main():
     )
     parser.add_argument(
         "target", nargs="?", default=None,
-        help="Specific target to check (e.g. codex, gemini). Default: check all.",
+        help="Specific target to check (e.g. codex, opencode). Default: check all.",
     )
     parser.add_argument("--auto-ours", action="store_true",
                         help="Auto-keep HarnessSync (source) version for all conflicts")
@@ -187,7 +187,7 @@ def main():
         targets_to_check = [args.target]
     else:
         # Check all known targets
-        targets_to_check = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"]
+        targets_to_check = ["codex", "opencode", "cursor", "aider", "windsurf"]
 
     all_conflicts: dict[str, list[dict]] = {}
     for target in targets_to_check:

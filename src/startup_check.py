@@ -10,7 +10,7 @@ Designed to be fast (no subprocess calls, no network I/O) and silent on success
 so it doesn't interrupt the normal workflow.
 
 Example output (when drift detected):
-    [HarnessSync] 2 target(s) out of sync (codex, gemini) — run /sync to update
+    [HarnessSync] 2 target(s) out of sync (codex, opencode) — run /sync to update
 """
 
 from datetime import datetime, timedelta, timezone

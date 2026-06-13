@@ -14,8 +14,8 @@ or on its own line):
     <!-- skip:aider -->
         Skip this rule when syncing to Aider.
 
-    <!-- only:codex,gemini -->
-        Include only in Codex and Gemini.
+    <!-- only:codex,opencode -->
+        Include only in Codex and OpenCode.
 
     <!-- skip:all --> or <!-- skip -->
         Skip this rule for every harness (suppress globally).
@@ -46,16 +46,16 @@ _WHITESPACE_COLLAPSE_RE = re.compile(r"[ \t]{2,}")
 # Regex: matches annotation comments in various forms
 #   <!-- cursor-only -->
 #   <!-- skip:aider -->
-#   <!-- skip:aider,gemini -->
-#   <!-- only:codex,gemini -->
+#   <!-- skip:aider,opencode -->
+#   <!-- only:codex,opencode -->
 #   <!-- skip --> / <!-- skip:all -->
 # ---------------------------------------------------------------------------
 _ANN_RE = re.compile(
     r"<!--\s*"
     r"(?:"
     r"(?P<only_single>(?P<only_harness>[a-zA-Z0-9_-]+)-only)"       # cursor-only
-    r"|(?P<skip_specific>skip:(?P<skip_list>[a-zA-Z0-9_,\s-]+))"    # skip:aider[,gemini]
-    r"|(?P<only_specific>only:(?P<only_list>[a-zA-Z0-9_,\s-]+))"    # only:codex[,gemini]
+    r"|(?P<skip_specific>skip:(?P<skip_list>[a-zA-Z0-9_,\s-]+))"    # skip:aider[,opencode]
+    r"|(?P<only_specific>only:(?P<only_list>[a-zA-Z0-9_,\s-]+))"    # only:codex[,opencode]
     r"|(?P<skip_all>skip(?::all)?)"                                   # skip / skip:all
     r")"
     r"\s*-->",

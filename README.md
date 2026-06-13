@@ -2,7 +2,7 @@
 
 **Configure Claude Code once, sync everywhere.**
 
-HarnessSync automatically synchronizes your Claude Code configuration — rules, skills, agents, commands, MCP servers, and settings — to 12 AI harnesses. No manual duplication. No format translation.
+HarnessSync automatically synchronizes your Claude Code configuration — rules, skills, agents, commands, MCP servers, and settings — to 10 AI harnesses. No manual duplication. No format translation.
 
 ```
          ┌──────────────────┐
@@ -16,12 +16,12 @@ HarnessSync automatically synchronizes your Claude Code configuration — rules,
             │  │  │  │  │
      ┌──────┘  │  │  │  └──────┐
      ▼         ▼  ▼  ▼         ▼
-  Codex    Gemini  Cursor  Windsurf  ... 7 more
+  Codex   OpenCode  Cursor  Windsurf  ... 6 more
 ```
 
 ## Supported Targets
 
-Aider, Cline, Codex, Continue, Cursor, Gemini, Neovim, OpenCode, VS Code, Windsurf, Zed
+Aider, Cline, Codex, Continue, Cursor, Neovim, OpenCode, VS Code, Windsurf, Zed
 
 ## Quickstart
 
@@ -42,7 +42,7 @@ After this, syncing happens automatically via PostToolUse hooks whenever Claude 
 
 | Claude Code | Target |
 |---|---|
-| `CLAUDE.md` (rules) | `AGENTS.md` / `GEMINI.md` / format-specific equivalent |
+| `CLAUDE.md` (rules) | `AGENTS.md` / format-specific equivalent |
 | `.claude/skills/` | Symlinked or inlined per target capability |
 | `.claude/agents/` | Symlinked or inlined per target capability |
 | `.claude/commands/` | Symlinked or summarized per target capability |
@@ -54,7 +54,7 @@ Both **user scope** (`~/.claude/`) and **project scope** (`.claude/`, `CLAUDE.md
 ## How It Works
 
 1. **PostToolUse Hook** — fires on Edit/Write/MultiEdit of config files, syncs immediately
-2. **Shell Wrappers** — `codex`, `gemini`, `opencode` auto-sync before launch (5-min cooldown)
+2. **Shell Wrappers** — `codex`, `opencode` auto-sync before launch (5-min cooldown)
 3. **Manual** — `/sync` inside Claude Code, or `harnesssync` in terminal
 
 ## Commands

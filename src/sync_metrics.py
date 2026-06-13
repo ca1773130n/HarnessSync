@@ -14,7 +14,7 @@ Usage — Prometheus text format (write to a file for node_exporter textfile):
     from src.sync_metrics import SyncMetricsExporter
     exporter = SyncMetricsExporter(backend="prometheus")
     exporter.record_sync("codex", success=True, files_written=3)
-    exporter.record_drift("gemini", drift_count=2)
+    exporter.record_drift("opencode", drift_count=2)
     print(exporter.render())   # Prometheus text format
 
 Usage — StatsD UDP:
@@ -136,7 +136,7 @@ class SyncMetricsExporter:
         """Record a completed sync operation.
 
         Args:
-            target: Target harness name (e.g. "codex", "gemini").
+            target: Target harness name (e.g. "codex", "opencode").
             success: True if sync completed without errors.
             files_written: Number of config files written.
             duration_ms: Sync duration in milliseconds (optional).

@@ -7,11 +7,11 @@ Renders a table of every Claude Code feature (MCP servers, skills, rules,
 env vars, permissions) against every target harness, showing:
   ✓ Full sync   ~ Approximated   ✗ Not synced
 
-Answers instantly: "Does Gemini support the MCP server I just added?"
+Answers instantly: "Does Codex support the MCP server I just added?"
 
 Usage:
     /sync-compare
-    /sync-compare --targets codex,gemini,cursor
+    /sync-compare --targets codex,opencode,cursor
     /sync-compare --detail
     /sync-compare --category mcp
     /sync-compare --json

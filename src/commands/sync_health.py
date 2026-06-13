@@ -27,11 +27,6 @@ _HARNESS_CLI_INFO: dict[str, dict] = {
         "version_flag": "--version",
         "capabilities": ["rules", "skills", "agents", "commands", "mcp", "settings"],
     },
-    "gemini": {
-        "executables": ["gemini"],
-        "version_flag": "--version",
-        "capabilities": ["rules", "skills", "agents", "commands", "mcp", "settings"],
-    },
     "opencode": {
         "executables": ["opencode", "opencode-cli"],
         "version_flag": "--version",
@@ -77,10 +72,6 @@ def _check_config_files(target: str, project_dir: Path) -> list[str]:
         "codex": [
             project_dir / "AGENTS.md",
             project_dir / ".codex" / "config.toml",
-        ],
-        "gemini": [
-            project_dir / "GEMINI.md",
-            project_dir / ".gemini" / "settings.json",
         ],
         "opencode": [
             project_dir / "AGENTS.md",

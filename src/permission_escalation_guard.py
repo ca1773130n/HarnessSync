@@ -24,7 +24,7 @@ Usage::
         print(f"[ESCALATION] {w}")
 
     # Or check all targets at once:
-    report = guard.check_all(source_settings, targets=["codex", "gemini", "cursor"])
+    report = guard.check_all(source_settings, targets=["codex", "opencode", "cursor"])
     if report.has_escalations:
         print(report.format())
 """
@@ -49,7 +49,6 @@ _PERMISSIVENESS_RANK: dict[str, int] = {
 # "auto" means the harness runs all tools without confirmation by default.
 _HARNESS_DEFAULT_APPROVAL: dict[str, str] = {
     "codex":     "on-request",   # Codex defaults to asking before shell ops
-    "gemini":    "default",      # Gemini has no explicit approval concept
     "opencode":  "review",       # OpenCode defaults to review mode
     "cursor":    "auto",         # Cursor executes tools automatically
     "aider":     "auto",         # Aider's --yes flag bypasses confirmation
@@ -67,11 +66,6 @@ _CC_TO_HARNESS_APPROVAL: dict[str, dict[str, str]] = {
         "auto":    "full-auto",
         "suggest": "on-request",
         "manual":  "on-request",
-    },
-    "gemini": {
-        "auto":    "default",
-        "suggest": "default",
-        "manual":  "default",
     },
     "opencode": {
         "auto":    "auto",

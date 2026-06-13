@@ -4,15 +4,15 @@ from __future__ import annotations
 
 Ensures the target harness is fully synced, then launches it in a new terminal
 window pre-configured with the same project context. One command to go from
-Claude Code to Gemini CLI (or Codex, OpenCode, etc.) without manual setup.
+Claude Code to Codex CLI (or OpenCode, Cursor, etc.) without manual setup.
 
 Usage:
-    /sync-hotswap --to gemini
+    /sync-hotswap --to codex
     /sync-hotswap --to codex [--no-sync]
     /sync-hotswap --to opencode [--project-dir PATH]
 
 Options:
-    --to HARNESS      Target harness to open (gemini | codex | opencode | cursor | aider)
+    --to HARNESS      Target harness to open (codex | opencode | cursor | aider)
     --no-sync         Skip sync step; just launch the harness
     --project-dir     Project directory (default: cwd)
     --dry-run         Show what would be launched without opening terminal
@@ -33,11 +33,6 @@ sys.path.insert(0, PLUGIN_ROOT)
 
 # Harness CLI executables and default launch arguments
 _HARNESS_LAUNCH: dict[str, dict] = {
-    "gemini": {
-        "executables": ["gemini"],
-        "launch_args": [],
-        "description": "Gemini CLI",
-    },
     "codex": {
         "executables": ["codex"],
         "launch_args": [],

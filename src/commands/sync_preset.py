@@ -72,7 +72,7 @@ def main() -> None:
     save_parser.add_argument("--skip", type=str, default=None,
                              help="Comma-separated sections to skip")
     save_parser.add_argument("--targets", type=str, default=None,
-                             help="Comma-separated harness targets (cursor,gemini,...)")
+                             help="Comma-separated harness targets (cursor,codex,...)")
     save_parser.add_argument("--description", type=str, default="",
                              help="Human-readable description for this profile")
 
@@ -98,7 +98,7 @@ def main() -> None:
         "set", help="Set env var overrides for a harness target in a profile"
     )
     env_set_parser.add_argument("name", help="Profile name")
-    env_set_parser.add_argument("target", help="Harness target (e.g. codex, gemini)")
+    env_set_parser.add_argument("target", help="Harness target (e.g. codex, opencode)")
     env_set_parser.add_argument(
         "assignments", nargs="+", metavar="KEY=VALUE",
         help="Environment variable assignments (e.g. OPENAI_API_KEY=sk-...)",

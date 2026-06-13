@@ -4,8 +4,8 @@ from __future__ import annotations
 /sync-import slash command — Pull config FROM a target harness INTO Claude Code.
 
 HarnessSync normally pushes Claude Code config out to other harnesses. This
-command reverses the flow: it reads an existing harness config (Gemini, Codex,
-Cursor, etc.) and converts it to Claude Code format, staging the result under
+command reverses the flow: it reads an existing harness config (Codex, Cursor,
+etc.) and converts it to Claude Code format, staging the result under
 ``.claude/imported/`` for review before merging.
 
 Each adapter exposes an ``import_to_claude(target_path) -> dict`` method that
@@ -13,10 +13,10 @@ does the actual conversion. The command writes staged files and asks for
 confirmation before merging them into the live Claude Code config.
 
 Usage:
-    /sync-import gemini                     # import from Gemini (auto-detect path)
+    /sync-import codex                      # import from Codex (auto-detect path)
     /sync-import codex --path ~/myproject   # import from specific path
-    /sync-import gemini --merge             # import and merge without staging
-    /sync-import gemini --dry-run           # preview what would be imported
+    /sync-import codex --merge              # import and merge without staging
+    /sync-import codex --dry-run            # preview what would be imported
 """
 
 import json
@@ -35,7 +35,6 @@ from src.utils.paths import default_cc_home, ensure_dir, write_json_atomic
 
 # Default target config paths keyed by target name
 _DEFAULT_TARGET_PATHS: dict[str, str] = {
-    "gemini": ".",
     "codex": ".",
     "cursor": ".",
     "aider": ".",
@@ -180,7 +179,7 @@ def main() -> None:
     )
     parser.add_argument(
         "target",
-        help="Target harness to import from (e.g. gemini, codex, cursor)",
+        help="Target harness to import from (e.g. codex, cursor)",
     )
     parser.add_argument(
         "--path",

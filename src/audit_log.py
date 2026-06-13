@@ -16,8 +16,8 @@ Usage::
     log = AuditLog(project_dir=Path("."))
     log.record(
         event="sync",
-        targets=["codex", "gemini"],
-        files_changed=["AGENTS.md", ".gemini/GEMINI.md"],
+        targets=["codex", "opencode"],
+        files_changed=["AGENTS.md", ".opencode/opencode.json"],
         source_hash="abc123",
         user="alice",
     )

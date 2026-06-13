@@ -12,12 +12,12 @@ Supported annotation forms in CLAUDE.md:
   This rule is for Codex and Cursor only.
   <!-- /harness:codex,cursor -->
 
-  <!-- harness:!gemini -->
-  This rule is synced everywhere EXCEPT Gemini.
-  <!-- /harness:!gemini -->
+  <!-- harness:!cursor -->
+  This rule is synced everywhere EXCEPT Cursor.
+  <!-- /harness:!cursor -->
 
-  <!-- sync:only:cursor,gemini -->
-  Power-user form: only land in cursor and gemini.
+  <!-- sync:only:cursor,opencode -->
+  Power-user form: only land in cursor and opencode.
   <!-- /sync:only -->
 
   <!-- sync:skip:codex -->
@@ -58,10 +58,10 @@ def filter_rules_for_harness(content: str, target: str) -> str:
       Keep only when syncing to codex.
     * ``<!-- harness:codex,cursor --> ... <!-- /harness:codex,cursor -->``
       Keep only when syncing to codex or cursor.
-    * ``<!-- harness:!gemini --> ... <!-- /harness:!gemini -->``
-      Exclude when syncing to gemini.
-    * ``<!-- sync:only:cursor,gemini --> ... <!-- /sync:only -->``
-      Power-user alias: include only in cursor and gemini.
+    * ``<!-- harness:!cursor --> ... <!-- /harness:!cursor -->``
+      Exclude when syncing to cursor.
+    * ``<!-- sync:only:cursor,opencode --> ... <!-- /sync:only -->``
+      Power-user alias: include only in cursor and opencode.
     * ``<!-- sync:skip:codex --> ... <!-- /sync:skip -->``
       Power-user alias: include everywhere except codex.
 

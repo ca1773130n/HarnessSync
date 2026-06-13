@@ -198,7 +198,7 @@ class PolicyEnforcer:
 
         Args:
             source_data: Config dict from SourceReader.discover_all().
-            target: Harness name (e.g. "codex", "gemini").
+            target: Harness name (e.g. "codex", "opencode").
 
         Returns:
             PolicyReport with any violations found.

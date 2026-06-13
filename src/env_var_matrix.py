@@ -58,7 +58,6 @@ ENV_VAR_REGISTRY: list[EnvVarSpec] = [
         category="api",
         targets={
             "codex":    (EnvSupport.NONE,    "Codex uses OPENAI_API_KEY; no Anthropic key support"),
-            "gemini":   (EnvSupport.NONE,    "Gemini uses GEMINI_API_KEY / GOOGLE_API_KEY"),
             "opencode": (EnvSupport.NATIVE,  "ANTHROPIC_API_KEY — OpenCode uses same var"),
             "cursor":   (EnvSupport.NONE,    "Cursor uses its own API key management via settings"),
             "aider":    (EnvSupport.NATIVE,  "ANTHROPIC_API_KEY — Aider passes through to Anthropic"),
@@ -71,7 +70,6 @@ ENV_VAR_REGISTRY: list[EnvVarSpec] = [
         category="model",
         targets={
             "codex":    (EnvSupport.NONE,    "No direct equivalent; model is set in config.toml [model]"),
-            "gemini":   (EnvSupport.NONE,    "Gemini uses GOOGLE_GENAI_MODEL or gemini.json model field"),
             "opencode": (EnvSupport.MAPPED,  "ANTHROPIC_MODEL via opencode.json model field"),
             "cursor":   (EnvSupport.NONE,    "Model selected in Cursor UI settings, not env vars"),
             "aider":    (EnvSupport.MAPPED,  "AIDER_MODEL — e.g. AIDER_MODEL=claude-3-5-sonnet-20241022"),
@@ -84,7 +82,6 @@ ENV_VAR_REGISTRY: list[EnvVarSpec] = [
         category="api",
         targets={
             "codex":    (EnvSupport.NONE,    "No proxy URL support via env"),
-            "gemini":   (EnvSupport.NONE,    "GOOGLE_API_BASE_URL for Gemini; no Anthropic proxy"),
             "opencode": (EnvSupport.NATIVE,  "ANTHROPIC_BASE_URL passed through"),
             "cursor":   (EnvSupport.NONE,    "No env-based proxy override"),
             "aider":    (EnvSupport.NATIVE,  "ANTHROPIC_BASE_URL — Aider respects this"),
@@ -97,7 +94,6 @@ ENV_VAR_REGISTRY: list[EnvVarSpec] = [
         category="context",
         targets={
             "codex":    (EnvSupport.NONE,    "No token limit env var; limited by model default"),
-            "gemini":   (EnvSupport.NONE,    "Gemini uses maxOutputTokens in config, not env"),
             "opencode": (EnvSupport.PARTIAL, "opencode.json maxTokens field; not env-driven"),
             "cursor":   (EnvSupport.NONE,    "Not configurable via env vars"),
             "aider":    (EnvSupport.MAPPED,  "AIDER_MAX_TOKENS — partial; only output tokens"),
@@ -110,7 +106,6 @@ ENV_VAR_REGISTRY: list[EnvVarSpec] = [
         category="sync",
         targets={
             "codex":    (EnvSupport.NONE,    "No auto-updater; N/A"),
-            "gemini":   (EnvSupport.NONE,    "Gemini CLI handles updates separately; N/A"),
             "opencode": (EnvSupport.NONE,    "No auto-updater env var"),
             "cursor":   (EnvSupport.NONE,    "Cursor updates are managed by the app"),
             "aider":    (EnvSupport.NONE,    "pip manages aider updates; N/A"),
@@ -123,7 +118,6 @@ ENV_VAR_REGISTRY: list[EnvVarSpec] = [
         category="api",
         targets={
             "codex":    (EnvSupport.NONE,    "No Bedrock support"),
-            "gemini":   (EnvSupport.NONE,    "No Bedrock support"),
             "opencode": (EnvSupport.PARTIAL, "Bedrock via custom base URL; not native env flag"),
             "cursor":   (EnvSupport.NONE,    "No Bedrock env flag"),
             "aider":    (EnvSupport.MAPPED,  "Set ANTHROPIC_BASE_URL to Bedrock endpoint"),
@@ -136,7 +130,6 @@ ENV_VAR_REGISTRY: list[EnvVarSpec] = [
         category="api",
         targets={
             "codex":    (EnvSupport.NONE,    "No Vertex support"),
-            "gemini":   (EnvSupport.INFERRED,"Gemini natively uses Vertex; GOOGLE_APPLICATION_CREDENTIALS"),
             "opencode": (EnvSupport.PARTIAL, "Vertex via custom base URL; not native env flag"),
             "cursor":   (EnvSupport.NONE,    "No Vertex env flag"),
             "aider":    (EnvSupport.NONE,    "No Vertex env flag"),
@@ -149,24 +142,10 @@ ENV_VAR_REGISTRY: list[EnvVarSpec] = [
         category="api",
         targets={
             "codex":    (EnvSupport.NATIVE,  "HTTP_PROXY — standard Node.js env var"),
-            "gemini":   (EnvSupport.NATIVE,  "HTTP_PROXY — standard env var"),
             "opencode": (EnvSupport.NATIVE,  "HTTP_PROXY — standard env var"),
             "cursor":   (EnvSupport.PARTIAL, "Cursor uses system proxy settings; env may work"),
             "aider":    (EnvSupport.NATIVE,  "HTTP_PROXY — standard Python env var"),
             "windsurf": (EnvSupport.PARTIAL, "Windsurf uses system proxy settings"),
-        },
-    ),
-    EnvVarSpec(
-        name="GEMINI_API_KEY",
-        description="Google Gemini API key (used when Gemini is a target)",
-        category="api",
-        targets={
-            "codex":    (EnvSupport.NONE,    "Codex uses OpenAI-compatible keys"),
-            "gemini":   (EnvSupport.NATIVE,  "GEMINI_API_KEY — Gemini's primary key var"),
-            "opencode": (EnvSupport.NONE,    "OpenCode doesn't use Gemini keys natively"),
-            "cursor":   (EnvSupport.NONE,    "Cursor manages API keys via settings UI"),
-            "aider":    (EnvSupport.MAPPED,  "GEMINI_API_KEY — Aider supports Gemini models"),
-            "windsurf": (EnvSupport.NONE,    "Windsurf manages keys via settings UI"),
         },
     ),
     EnvVarSpec(
@@ -175,7 +154,6 @@ ENV_VAR_REGISTRY: list[EnvVarSpec] = [
         category="api",
         targets={
             "codex":    (EnvSupport.NATIVE,  "NODE_EXTRA_CA_CERTS — Node.js standard"),
-            "gemini":   (EnvSupport.NATIVE,  "NODE_EXTRA_CA_CERTS — Gemini CLI is Node-based"),
             "opencode": (EnvSupport.NATIVE,  "NODE_EXTRA_CA_CERTS — OpenCode is Node-based"),
             "cursor":   (EnvSupport.PARTIAL, "Cursor uses Electron's cert handling; may honour this"),
             "aider":    (EnvSupport.MAPPED,  "REQUESTS_CA_BUNDLE — Python requests standard"),
@@ -435,7 +413,7 @@ def check_env_portability(
         EnvPortabilityReport with per-variable portability issues.
     """
     if targets is None:
-        targets = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"]
+        targets = ["codex", "opencode", "cursor", "aider", "windsurf"]
 
     # Build a lookup: var_name -> EnvVarSpec (for vars we know about)
     known: dict[str, EnvVarSpec] = {spec.name: spec for spec in ENV_VAR_REGISTRY}
@@ -585,7 +563,7 @@ def translate_env_var(source_name: str, target: str) -> tuple[str | None, EnvSup
 
     Args:
         source_name: The Claude Code / Anthropic environment variable name.
-        target: Target harness name (e.g. "aider", "gemini", "codex").
+        target: Target harness name (e.g. "aider", "codex").
 
     Returns:
         (target_var_name_or_None, support_level). Returns (None, EnvSupport.NONE)
@@ -616,7 +594,7 @@ def list_translatable_env_vars(target: str) -> list[tuple[str, str, EnvSupport]]
     for vars with support level NATIVE, MAPPED, or PARTIAL in the given target.
 
     Args:
-        target: Harness name (e.g. "aider", "gemini").
+        target: Harness name (e.g. "aider", "codex").
 
     Returns:
         List of (claude_code_var, target_var, support_level) sorted by source name.
@@ -802,7 +780,7 @@ class SecretsManagerIntegration:
 
         integration = SecretsManagerIntegration(MacOSKeychainBackend())
         env_map = integration.resolve_env_vars(["ANTHROPIC_API_KEY", "OPENAI_API_KEY"])
-        harness_envs = integration.build_harness_env_configs(env_map, ["codex", "gemini"])
+        harness_envs = integration.build_harness_env_configs(env_map, ["codex", "opencode"])
     """
 
     def __init__(self, backend: SecretsManagerBackend):

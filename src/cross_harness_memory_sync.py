@@ -9,7 +9,6 @@ this module ensures that knowledge is available when they switch to another
 harness mid-session.
 
 Target harness memory equivalents:
-  gemini:    ~/.gemini/context.md (appended as a named section)
   codex:     ~/.codex/memory.md (appended as a named section)
   opencode:  ~/.opencode/memory.md (appended as a named section)
   windsurf:  .windsurf/memories/<name>.md (one file per memory)
@@ -344,14 +343,6 @@ class CrossHarnessMemorySync:
         pd = self.project_dir
         dry = self.dry_run
 
-        def _gemini(memories: list[MemoryFile]) -> MemorySyncResult:
-            path = Path.home() / ".gemini" / "context.md"
-            try:
-                _write_appended_section(path, memories, "Shared Memory from Claude Code", dry)
-                return MemorySyncResult("gemini", len(memories), 0, str(path), dry_run=dry)
-            except Exception as e:
-                return MemorySyncResult("gemini", 0, len(memories), str(path), error=str(e), dry_run=dry)
-
         def _codex(memories: list[MemoryFile]) -> MemorySyncResult:
             path = Path.home() / ".codex" / "memory.md"
             try:
@@ -431,7 +422,6 @@ class CrossHarnessMemorySync:
                 return MemorySyncResult("neovim", 0, len(memories), str(path), error=str(e), dry_run=dry)
 
         return {
-            "gemini": _gemini,
             "codex": _codex,
             "opencode": _opencode,
             "windsurf": _windsurf,
@@ -467,7 +457,7 @@ class CrossHarnessMemorySync:
         be overwritten before running a full memory sync.
 
         Args:
-            target: Target harness name (e.g. "gemini").
+            target: Target harness name (e.g. "codex").
             target_path: Path to the target harness's memory file/directory.
 
         Returns:

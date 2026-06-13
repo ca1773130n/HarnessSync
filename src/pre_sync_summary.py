@@ -9,14 +9,14 @@ or modified per harness, and which harnesses are affected.
 Unlike SyncImpactPredictor (which provides full per-item predictions),
 PreSyncSummary focuses on a brief executive summary:
 
-    "3 rules added to Codex • 1 MCP server added to Gemini and OpenCode
+    "3 rules added to Codex • 1 MCP server added to OpenCode
      • 2 skills removed from Aider"
 
 Usage::
 
     from src.pre_sync_summary import PreSyncSummary
     summary = PreSyncSummary()
-    text = summary.build(current_source, previous_source, targets=["codex", "gemini"])
+    text = summary.build(current_source, previous_source, targets=["codex", "opencode"])
     print(text)
 """
 
@@ -69,7 +69,7 @@ class PreSyncSummaryReport:
 
         Returns:
             A concise description like:
-            "3 rules added to Codex and Gemini • 1 MCP server added (all targets)"
+            "3 rules added to Codex and OpenCode • 1 MCP server added (all targets)"
             or "No changes detected." if nothing will change.
         """
         if not self.has_changes:
@@ -141,7 +141,6 @@ _SECTION_LABELS: dict[str, str] = {
 # Per-target section support — determines which targets receive each section
 _TARGET_SECTION_SUPPORT: dict[str, frozenset[str]] = {
     "codex":     frozenset({"rules", "skills", "agents", "commands", "mcp", "settings"}),
-    "gemini":    frozenset({"rules", "skills", "agents", "commands", "mcp", "settings"}),
     "opencode":  frozenset({"rules", "skills", "agents", "commands", "mcp", "settings"}),
     "cursor":    frozenset({"rules", "skills", "agents", "commands", "mcp", "settings"}),
     "aider":     frozenset({"rules", "settings"}),
@@ -165,7 +164,7 @@ def _format_targets(targets: list[str]) -> str:
     """Format a target list for display.
 
     Returns:
-        "all targets" | "Codex" | "Codex and Gemini" | "Codex, Gemini, and OpenCode"
+        "all targets" | "Codex" | "Codex and OpenCode" | "Codex, OpenCode, and Cursor"
     """
     if not targets:
         return "no targets"

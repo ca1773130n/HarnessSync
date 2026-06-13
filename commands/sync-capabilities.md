@@ -9,7 +9,7 @@ Different from /sync-matrix (which shows config section support): /sync-capabili
 Usage: /sync-capabilities [--target TARGET] [--category CATEGORY] [--detail] [--targets a,b,c]
 
 Options:
-- --target TARGET: Show detailed feature report for a single target (codex, gemini, opencode, cursor, aider, windsurf)
+- --target TARGET: Show detailed feature report for a single target (codex, opencode, cursor, aider, windsurf)
 - --category CATEGORY: Filter by category (instructions, integrations, lifecycle, security, settings, harnesssync, commands)
 - --detail: Show per-cell implementation notes for each target
 - --targets a,b,c: Comma-separated list of targets to include in the matrix

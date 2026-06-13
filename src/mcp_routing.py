@@ -7,7 +7,7 @@ specialized MCP servers only appear in harnesses that should use them.
 
 Example use case: a ``database-mcp`` server with broad file/network access
 should only appear in Claude Code and Cursor — not in lightweight Aider
-sessions or Gemini.
+sessions.
 
 Configuration file: ``.harnesssync/mcp_routing.json``
 
@@ -16,7 +16,7 @@ Configuration file: ``.harnesssync/mcp_routing.json``
             "database-mcp":   ["cursor", "codex"],
             "context7":       "all",
             "heavy-indexer":  ["cursor"],
-            "lightweight-mcp": ["aider", "gemini", "codex"]
+            "lightweight-mcp": ["aider", "opencode", "codex"]
         },
         "default": "all"
     }

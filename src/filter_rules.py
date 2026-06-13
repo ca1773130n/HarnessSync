@@ -7,14 +7,14 @@ frontmatter-based @target:/@skip: directive parsing.
 
 Tag families supported:
   Classic:     <!-- sync:exclude --> / <!-- sync:codex-only --> / <!-- sync:end -->
-  Multi:       <!-- sync:codex,gemini --> / <!-- no-sync -->
+  Multi:       <!-- sync:codex,opencode --> / <!-- no-sync -->
   Harness:     <!-- harness:X --> / <!-- /harness:X -->
   Inline skip: <!-- harness:skip=X,Y --> / <!-- harness:only=X,Y -->
-  @harness:    <!-- @harness:codex-only --> / <!-- @harness:skip-gemini -->
+  @harness:    <!-- @harness:codex-only --> / <!-- @harness:skip-opencode -->
   Exclude:     <!-- harness:exclude:X --> / <!-- /harness:exclude:X -->
   Compliance:  <!-- compliance:pinned --> / <!-- /compliance:pinned -->
   Env:         @env:production / <!-- env:X --> / <!-- /env:X -->
-  Python/shell: # @codex: skip / # @gemini: replace with <text>
+  Python/shell: # @codex: skip / # @opencode: replace with <text>
 """
 
 import re
@@ -26,11 +26,11 @@ KNOWN_TARGETS = CORE_TARGETS
 
 # Classic tag pattern (backward compat)
 _CLASSIC_TAG_RE = re.compile(
-    r"<!--\s*sync:(exclude|codex-only|gemini-only|opencode-only|cursor-only|aider-only|windsurf-only|end)\s*-->",
+    r"<!--\s*sync:(exclude|codex-only|opencode-only|cursor-only|aider-only|windsurf-only|end)\s*-->",
     re.IGNORECASE,
 )
 
-# New multi-target tag: <!-- sync:codex,gemini --> or <!-- no-sync -->
+# New multi-target tag: <!-- sync:codex,opencode --> or <!-- no-sync -->
 _MULTI_TARGET_TAG_RE = re.compile(
     r"<!--\s*(?:sync:([a-z0-9,\s]+)|no-sync)\s*-->",
     re.IGNORECASE,
@@ -47,7 +47,7 @@ _HARNESS_CLOSE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Inline skip annotation: <!-- harness:skip=gemini,aider --> on a single line
+# Inline skip annotation: <!-- harness:skip=opencode,aider --> on a single line
 # Skips (drops) the line for any target in the list.
 _HARNESS_SKIP_RE = re.compile(
     r"<!--\s*harness:skip=([a-z0-9,\s_-]+)\s*-->",
@@ -73,8 +73,8 @@ _HARNESS_ONLY_RE = re.compile(
 # Examples:
 #   <!-- @harness:codex-only -->             -> only in codex
 #   <!-- @harness:cursor,aider -->           -> only in cursor and aider
-#   <!-- @harness:skip-gemini -->            -> skip for gemini
-#   <!-- @harness:skip-gemini,aider -->      -> skip for gemini and aider
+#   <!-- @harness:skip-opencode -->          -> skip for opencode
+#   <!-- @harness:skip-opencode,aider -->    -> skip for opencode and aider
 #
 # These are normalised to the same semantics as harness:only= / harness:skip=.
 
@@ -110,9 +110,9 @@ def _parse_at_harness_targets(raw: str) -> set[str]:
 
 
 # Block-level exclude tag (item 30 -- Harness-Specific Section Tagging):
-#   <!-- harness:exclude:gemini -->   -- open; section dropped for gemini only
-#   <!-- /harness:exclude:gemini -->  -- close
-# This is a semantic alias for the <!-- harness:skip=gemini --> inline form but
+#   <!-- harness:exclude:opencode -->   -- open; section dropped for opencode only
+#   <!-- /harness:exclude:opencode -->  -- close
+# This is a semantic alias for the <!-- harness:skip=opencode --> inline form but
 # works as a block-level open/close pair for multi-line exclusions.
 # Unlike harness:skip (which drops just one line), this drops everything between
 # the open and close tags for the named target while keeping it for all others.
@@ -150,8 +150,8 @@ _ENV_CLOSE_COMMENT_RE = re.compile(r"<!--\s*/env:([a-z0-9_-]+)\s*-->", re.IGNORE
 # Python/shell comment-style inline harness annotations (item 1 -- per-harness override layer):
 #
 #   <content>  # @codex: skip
-#   <content>  # @gemini,aider: skip
-#   <content>  # @gemini: replace with <replacement text>
+#   <content>  # @opencode,aider: skip
+#   <content>  # @opencode: replace with <replacement text>
 #   <content>  # @codex,cursor: replace with <replacement text>
 #
 # The annotation must appear at the END of the line (after the content).
@@ -178,7 +178,7 @@ def _parse_target_list(targets_str: str) -> set[str]:
 # --------------------------------------------------------------------------- #
 # Users can place directive lines at the top of a CLAUDE.md rule block:
 #
-#   @target:codex,gemini   -- include this block ONLY in codex and gemini
+#   @target:codex,opencode   -- include this block ONLY in codex and opencode
 #   @skip:cursor,aider     -- exclude this block from cursor and aider
 #
 # These are standalone lines (not HTML comments) making them easy to type.
@@ -240,7 +240,7 @@ def is_content_allowed_for_target(content: str, target_name: str) -> bool:
 
     Args:
         content: Raw content that may contain @target:/@skip: directives.
-        target_name: Target harness identifier (e.g. "codex", "gemini").
+        target_name: Target harness identifier (e.g. "codex", "opencode").
 
     Returns:
         True if the content should be included for this target, False otherwise.
@@ -292,7 +292,7 @@ def filter_content_with_frontmatter(content: str, target_name: str) -> str:
 # Matches a Markdown heading line (H1-H4) that is IMMEDIATELY followed on the
 # same line by a harness annotation comment:
 #   ## My Section <!-- harness:codex-only -->
-#   ### Rules <!-- skip:gemini -->
+#   ### Rules <!-- skip:opencode -->
 #   # Context <!-- harness:only=codex,cursor -->
 _SECTION_ANNOTATION_RE = re.compile(
     r"^(#{1,4}\s+.+?)\s+"
@@ -300,8 +300,8 @@ _SECTION_ANNOTATION_RE = re.compile(
     r"(?:"
     r"harness:(?P<only_a>[a-z0-9,_-]+-only)"       # harness:codex-only
     r"|harness:only=(?P<only_b>[a-z0-9,_-]+)"       # harness:only=codex,cursor
-    r"|harness:skip=(?P<skip_a>[a-z0-9,_-]+)"       # harness:skip=gemini
-    r"|skip:(?P<skip_b>[a-z0-9,_-]+)"               # skip:gemini
+    r"|harness:skip=(?P<skip_a>[a-z0-9,_-]+)"       # harness:skip=opencode
+    r"|skip:(?P<skip_b>[a-z0-9,_-]+)"               # skip:opencode
     r")"
     r"\s*-->",
     re.IGNORECASE | re.MULTILINE,

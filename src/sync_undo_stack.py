@@ -85,7 +85,7 @@ class HarnessUndoStack:
     """Per-harness undo/redo stack backed by JSON files on disk.
 
     Args:
-        harness:    Target harness name (e.g. "codex", "gemini").
+        harness:    Target harness name (e.g. "codex", "opencode").
         root_dir:   Base directory for stack storage (default: ~/.harnesssync/undo_stacks/).
         project_dir: Project root for resolving relative file paths on restore.
     """

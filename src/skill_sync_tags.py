@@ -13,7 +13,7 @@ Supported frontmatter forms:
     ---
 
     ---
-    sync: [codex, gemini]              # only these harnesses
+    sync: [codex, opencode]            # only these harnesses
     ---
 
     ---
@@ -27,7 +27,7 @@ Supported frontmatter forms:
 
     ---
     sync:
-      only: [codex, gemini, cursor]    # include list (dict form)
+      only: [codex, opencode, cursor]  # include list (dict form)
     ---
 
 The field is read from the YAML frontmatter block at the top of the skill's
@@ -114,7 +114,7 @@ def parse_skill_sync_tag(skill_path: str | Path) -> dict:
 
         Examples:
           {"mode": "all",     "targets": frozenset()}
-          {"mode": "only",    "targets": frozenset({"codex", "gemini"})}
+          {"mode": "only",    "targets": frozenset({"codex", "opencode"})}
           {"mode": "exclude", "targets": frozenset({"aider"})}
     """
     path = Path(skill_path)
@@ -148,7 +148,7 @@ def _normalise_sync_value(value) -> dict:
       - "none" / "exclude-all"  → mode=exclude, targets=all
       - "exclude-aider"         → mode=exclude, targets={aider}
       - "exclude-a,b"           → mode=exclude, targets={a,b}
-      - ["codex","gemini"]       → mode=only
+      - ["codex","opencode"]     → mode=only
       - {"only": [...]}          → mode=only
       - {"exclude": [...]}       → mode=exclude
     """
@@ -169,7 +169,7 @@ def _normalise_sync_value(value) -> dict:
             return {"mode": "only", "targets": frozenset({val_lower})}
         return {"mode": "all", "targets": frozenset()}
 
-    # List of target names: sync: [codex, gemini]
+    # List of target names: sync: [codex, opencode]
     if isinstance(value, list):
         targets = frozenset(str(t).lower().strip() for t in value if t)
         return {"mode": "only", "targets": targets}
@@ -225,7 +225,7 @@ def filter_skills_for_target(
 
     Args:
         skills: Dict mapping skill_name -> skill directory/file path.
-        target: Canonical target name (e.g. "gemini").
+        target: Canonical target name (e.g. "opencode").
 
     Returns:
         Filtered dict containing only skills that should be synced to target.
@@ -274,7 +274,7 @@ def filter_agents_for_target(
 
     Args:
         agents: Dict mapping agent_name -> path to agent .md file.
-        target: Canonical target name (e.g. "gemini").
+        target: Canonical target name (e.g. "opencode").
 
     Returns:
         Filtered dict containing only agents that should be synced to target.

@@ -47,12 +47,6 @@ _HARNESS_SIGNALS: dict[str, list[tuple[re.Pattern, str]]] = {
         (re.compile(r"\\.codex[\\/]", re.I), "references .codex/ directory"),
         (re.compile(r"\bapproval_policy\b", re.I), "uses Codex approval_policy setting"),
     ],
-    "gemini": [
-        (re.compile(r"\bgemini\b(?!\s+api)", re.I), "mentions Gemini CLI"),
-        (re.compile(r"\bGEMINI\.md\b"), "references GEMINI.md"),
-        (re.compile(r"\\.gemini[\\/]", re.I), "references .gemini/ directory"),
-        (re.compile(r"\bgemini\s+cli\b", re.I), "references Gemini CLI"),
-    ],
     "cursor": [
         (re.compile(r"\bcursor\b(?!\s+position)", re.I), "mentions Cursor IDE"),
         (re.compile(r"\\.cursor[\\/]", re.I), "references .cursor/ directory"),

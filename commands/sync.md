@@ -1,5 +1,5 @@
 ---
-description: Sync Claude Code config to all targets (Codex, Gemini, OpenCode, Cursor, Aider, Windsurf)
+description: Sync Claude Code config to all targets (Codex, OpenCode, Cursor, Aider, Windsurf)
 ---
 
 Sync your Claude Code configuration to all configured targets.

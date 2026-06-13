@@ -76,7 +76,7 @@ class TestPersistence:
 
     def test_atomic_write_creates_valid_json(self, tmp_path):
         sm = StateManager(state_dir=tmp_path)
-        sm.record_sync("gemini", "project", {}, {}, 0, 0, 0)
+        sm.record_sync("codex", "project", {}, {}, 0, 0, 0)
 
         raw = json.loads((tmp_path / "state.json").read_text())
         assert raw["version"] == 2
@@ -219,8 +219,8 @@ class TestRecordSync:
     def test_records_file_hashes(self, tmp_path):
         hashes = {"/a.md": "abc123", "/b.md": "def456"}
         sm = StateManager(state_dir=tmp_path)
-        sm.record_sync("gemini", "all", hashes, {}, 2, 0, 0)
-        assert sm.get_target_status("gemini")["file_hashes"] == hashes
+        sm.record_sync("codex", "all", hashes, {}, 2, 0, 0)
+        assert sm.get_target_status("codex")["file_hashes"] == hashes
 
     def test_updates_last_sync(self, tmp_path):
         sm = StateManager(state_dir=tmp_path)
@@ -240,16 +240,16 @@ class TestRecordSync:
 
     def test_account_last_sync_updated(self, tmp_path):
         sm = StateManager(state_dir=tmp_path)
-        sm.record_sync("gemini", "all", {}, {}, 1, 0, 0, account="personal")
+        sm.record_sync("codex", "all", {}, {}, 1, 0, 0, account="personal")
         acct = sm.get_account_status("personal")
         assert "last_sync" in acct
 
     def test_multiple_targets_independent(self, tmp_path):
         sm = StateManager(state_dir=tmp_path)
         sm.record_sync("codex", "all", {}, {}, 1, 0, 0)
-        sm.record_sync("gemini", "all", {}, {}, 0, 0, 1)
+        sm.record_sync("opencode", "all", {}, {}, 0, 0, 1)
         assert sm.get_target_status("codex")["status"] == "success"
-        assert sm.get_target_status("gemini")["status"] == "failed"
+        assert sm.get_target_status("opencode")["status"] == "failed"
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +320,7 @@ class TestStatusQueries:
     def test_get_account_target_status_missing_target(self, tmp_path):
         sm = StateManager(state_dir=tmp_path)
         sm.record_sync("codex", "all", {}, {}, 1, 0, 0, account="work")
-        assert sm.get_account_target_status("work", "gemini") is None
+        assert sm.get_account_target_status("work", "opencode") is None
 
     def test_get_account_status_missing(self, tmp_path):
         sm = StateManager(state_dir=tmp_path)

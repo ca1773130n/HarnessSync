@@ -4,7 +4,7 @@ from __future__ import annotations
 
 Claude Code supports multi-agent setups: named subagents with roles, trigger
 conditions, tool permissions, and orchestration logic defined in agent .md files
-and plugin manifests. Other harnesses (Gemini, OpenCode) have their own agent
+and plugin manifests. Other harnesses (OpenCode) have their own agent
 orchestration formats.
 
 This module reads the Claude Code agent mesh and translates it into target-specific
@@ -12,7 +12,6 @@ agent configuration so teams don't have to rebuild pipelines from scratch when
 switching harnesses.
 
 Supported targets:
-- gemini: GEMINI.md agent sections + gemini_agents.json
 - opencode: opencode.json agents array
 - codex: AGENTS.md subagent descriptions (partial — no trigger conditions)
 
@@ -20,7 +19,7 @@ Usage:
     from src.agent_mesh_sync import AgentMeshSync
 
     mesh = AgentMeshSync(cc_home=Path.home() / ".claude", project_dir=Path("."))
-    report = mesh.sync_to_targets(["gemini", "opencode"])
+    report = mesh.sync_to_targets(["codex", "opencode"])
     print(mesh.format_report(report))
 """
 
@@ -32,7 +31,6 @@ from pathlib import Path
 
 # Translation fidelity per target.  Higher = more faithful.
 _FIDELITY: dict[str, float] = {
-    "gemini":   0.75,  # Supports named agents + roles; loses tool-permission detail
     "opencode": 0.70,  # JSON agents array; loses trigger conditions
     "codex":    0.45,  # AGENTS.md prose only; no structured trigger/tool support
     "cursor":   0.30,  # .cursor/rules only; minimal agent concept
@@ -42,13 +40,6 @@ _FIDELITY: dict[str, float] = {
 
 # Features each target supports from the agent mesh
 _FEATURE_SUPPORT: dict[str, dict[str, bool]] = {
-    "gemini": {
-        "roles": True,
-        "trigger_conditions": False,
-        "tool_permissions": False,
-        "orchestration_logic": False,
-        "subagent_descriptions": True,
-    },
     "opencode": {
         "roles": True,
         "trigger_conditions": False,
@@ -240,9 +231,7 @@ class AgentMeshSync:
         errors: list[str] = []
 
         try:
-            if target == "gemini":
-                files = self._write_gemini(agents)
-            elif target == "opencode":
+            if target == "opencode":
                 files = self._write_opencode(agents)
             elif target == "codex":
                 files = self._write_codex(agents)
@@ -269,26 +258,6 @@ class AgentMeshSync:
         )
 
     # ── Target writers ─────────────────────────────────────────────────────
-
-    def _write_gemini(self, agents: list[AgentDefinition]) -> list[str]:
-        """Append agent sections to GEMINI.md."""
-        lines = ["\n## Agent Mesh (synced from Claude Code)\n"]
-        for a in agents:
-            lines.append(f"### {a.name}")
-            if a.role:
-                lines.append(f"**Role:** {a.role}")
-            if a.description:
-                lines.append(f"\n{a.description}\n")
-        content = "\n".join(lines)
-        out = self.project_dir / "GEMINI.md"
-        if not self.dry_run:
-            existing = out.read_text(encoding="utf-8") if out.exists() else ""
-            # Replace existing agent mesh block if present
-            marker = "## Agent Mesh (synced from Claude Code)"
-            if marker in existing:
-                existing = existing[: existing.index(marker)]
-            out.write_text(existing + content, encoding="utf-8")
-        return [str(out)]
 
     def _write_opencode(self, agents: list[AgentDefinition]) -> list[str]:
         """Write agents array to opencode.json."""

@@ -12,7 +12,7 @@ different shell session).
 Pause file schema:
     {
         "paused": true,
-        "reason": "debugging Gemini config",
+        "reason": "debugging Codex config",
         "paused_at": "2026-03-12T10:00:00Z",
         "resume_at": "2026-03-12T11:00:00Z"   // optional auto-resume timestamp
     }

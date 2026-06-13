@@ -4,7 +4,7 @@ from __future__ import annotations
 
 Reads per-task model preferences from Claude Code's settings and translates
 them into equivalent config for each target harness that supports model
-selection (Gemini CLI, OpenCode, Codex, Cursor, Aider).
+selection (OpenCode, Codex, Cursor, Aider).
 
 Problem: Users configure 'use a fast model for linting, a powerful model for
 architecture' in Claude Code but lose those preferences when switching to other
@@ -21,7 +21,6 @@ Source format (Claude Code ~/.claude/settings.json or project settings):
     }
 
 Translation targets:
-    gemini:   model field in settings.json  (best-match Gemini model)
     opencode: model field in opencode.json
     codex:    model field in config.toml
     aider:    --model flag in .aider.conf.yml
@@ -33,7 +32,7 @@ Usage::
 
     adapter = ModelRoutingAdapter()
     hints = adapter.read_from_settings(settings_dict)
-    translated = adapter.translate_for_target(hints, "gemini")
+    translated = adapter.translate_for_target(hints, "opencode")
     print(translated)
 """
 
@@ -44,12 +43,6 @@ from dataclasses import dataclass, field
 
 # Maps Claude model IDs to best-fit equivalents in other harnesses.
 # Uses prefix matching: the longest matching prefix wins.
-_CLAUDE_TO_GEMINI: list[tuple[str, str]] = [
-    ("claude-opus",   "gemini-1.5-pro"),
-    ("claude-sonnet", "gemini-1.5-flash"),
-    ("claude-haiku",  "gemini-2.0-flash"),
-]
-
 _CLAUDE_TO_GPT: list[tuple[str, str]] = [
     ("claude-opus",   "gpt-4o"),
     ("claude-sonnet", "gpt-4o-mini"),
@@ -140,7 +133,7 @@ class TranslatedModelConfig:
 class ModelRoutingAdapter:
     """Reads Claude Code model routing hints and translates to target harnesses.
 
-    Supported targets: gemini, opencode, codex, aider, cursor.
+    Supported targets: opencode, codex, aider, cursor.
     """
 
     def read_from_settings(self, settings: dict) -> ModelRoutingHints:
@@ -176,7 +169,7 @@ class ModelRoutingAdapter:
 
         Args:
             hints: Parsed routing hints from Claude Code settings.
-            target: Target harness name (gemini, opencode, codex, aider, cursor).
+            target: Target harness name (opencode, codex, aider, cursor).
 
         Returns:
             TranslatedModelConfig or None if target doesn't support model selection.
@@ -186,9 +179,7 @@ class ModelRoutingAdapter:
 
         target = target.lower()
 
-        if target == "gemini":
-            return self._translate_gemini(hints)
-        elif target == "opencode":
+        if target == "opencode":
             return self._translate_opencode(hints)
         elif target == "codex":
             return self._translate_codex(hints)
@@ -206,41 +197,13 @@ class ModelRoutingAdapter:
             Dict mapping target name to translated config (only supported targets).
         """
         result: dict[str, TranslatedModelConfig] = {}
-        for target in ("gemini", "opencode", "codex", "aider", "cursor"):
+        for target in ("opencode", "codex", "aider", "cursor"):
             translated = self.translate_for_target(hints, target)
             if translated:
                 result[target] = translated
         return result
 
     # ── Target-specific translators ────────────────────────────────────────
-
-    def _translate_gemini(self, hints: ModelRoutingHints) -> TranslatedModelConfig:
-        default = _best_match(
-            hints.default_model or "claude-opus",
-            _CLAUDE_TO_GEMINI,
-            "gemini-1.5-pro",
-        )
-        # Gemini CLI doesn't support per-task model routing; use most capable
-        # among mentioned models as the single default
-        task_models = list(hints.task_routing.values())
-        all_models = ([hints.default_model] if hints.default_model else []) + task_models
-        # Use the most capable (longest prefix match favoring opus)
-        best_claude = self._most_capable(all_models)
-        if best_claude:
-            default = _best_match(best_claude, _CLAUDE_TO_GEMINI, default)
-
-        notes = []
-        if hints.task_routing:
-            notes.append(
-                "Gemini CLI does not support per-task model routing; "
-                "using most capable model as default."
-            )
-
-        return TranslatedModelConfig(
-            target="gemini",
-            default_model=default,
-            notes=notes,
-        )
 
     def _translate_opencode(self, hints: ModelRoutingHints) -> TranslatedModelConfig:
         # OpenCode supports a model field; per-task routing is not standard.
@@ -349,9 +312,9 @@ import re as _re
 
 # Markers used inside CLAUDE.md rule text to embed model-specific variants.
 # Format:
-#   <!-- model:gemini-2.0-flash -->
+#   <!-- model:gpt-4o -->
 #   <shorter variant of the rule>
-#   <!-- /model:gemini-2.0-flash -->
+#   <!-- /model:gpt-4o -->
 _MODEL_BLOCK_RE = _re.compile(
     r"<!--\s*model:(?P<model>[^\s>]+)\s*-->(?P<content>.*?)<!--\s*/model:[^\s>]+\s*-->",
     _re.DOTALL | _re.IGNORECASE,
@@ -359,7 +322,6 @@ _MODEL_BLOCK_RE = _re.compile(
 
 # Maps target harness → primary model identifier (used to select the right variant)
 _HARNESS_PRIMARY_MODEL: dict[str, str] = {
-    "gemini":   "gemini-2.0-flash",
     "codex":    "claude-sonnet-4-6",
     "opencode": "claude-sonnet-4-6",
     "cursor":   "claude-sonnet-4-6",
@@ -385,7 +347,7 @@ def extract_model_variant(rule_text: str, target: str) -> str:
 
     Args:
         rule_text: Rule content potentially containing model-specific blocks.
-        target: Target harness name (e.g. "gemini", "codex").
+        target: Target harness name (e.g. "opencode", "codex").
 
     Returns:
         Rule text with the best-matching model variant selected.
@@ -422,7 +384,7 @@ def inject_model_variant(
 
     Args:
         rule_text: Original rule content.
-        model_id: Model identifier for the variant (e.g. "gemini-2.0-flash").
+        model_id: Model identifier for the variant (e.g. "gpt-4o").
         variant_text: Shorter or adapted instruction text for this model.
 
     Returns:

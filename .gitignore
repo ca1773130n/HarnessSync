@@ -5,3 +5,4 @@ __pycache__/
 .agents/
 .opencode/
 .worktrees/
+pytest-of-neo/

@@ -3,17 +3,14 @@ from __future__ import annotations
 """Reverse Sync — Import configs from target harnesses back into Claude Code.
 
 Pulls useful configs, skills, rules, and MCP servers from target harnesses
-(Codex, Gemini, OpenCode, Cursor, Aider, Windsurf) back into Claude Code's
-canonical format.  Users who started on Gemini or Codex before adopting
+(Codex, OpenCode, Cursor, Aider, Windsurf) back into Claude Code's
+canonical format.  Users who started on OpenCode or Codex before adopting
 Claude Code can consolidate their existing configs without manual translation.
 
 Supported import sources and what they map to:
     codex:    AGENTS.md rules → CLAUDE.md additions
               config.toml mcp_servers → .mcp.json additions
               config.toml env → settings.json env additions
-    gemini:   GEMINI.md rules → CLAUDE.md additions
-              settings.json mcp → .mcp.json additions
-              .gemini/.env → settings.json env additions
     opencode: AGENTS.md rules → CLAUDE.md additions
               opencode.json mcp → .mcp.json additions
               opencode.json env → settings.json env additions
@@ -33,12 +30,12 @@ Usage:
     from src.reverse_sync import ReverseSync
 
     rs = ReverseSync(cc_home=Path("~/.claude"), project_dir=Path("."))
-    plan = rs.plan(source="gemini")         # preview what would be imported
+    plan = rs.plan(source="codex")          # preview what would be imported
     print(rs.format_plan(plan))
     result = rs.execute(plan, dry_run=False) # apply
 
 Or from CLI:
-    /sync-reverse --from gemini [--merge append] [--dry-run]
+    /sync-reverse --from codex [--merge append] [--dry-run]
 """
 
 import json
@@ -90,7 +87,7 @@ class ImportedEnvVar:
 @dataclass
 class ReverseSyncPlan:
     """Full import plan for one target harness."""
-    source: str                                 # e.g. "gemini"
+    source: str                                 # e.g. "codex"
     rules: list[ImportedRule] = field(default_factory=list)
     mcp_servers: list[ImportedMcpServer] = field(default_factory=list)
     env_vars: list[ImportedEnvVar] = field(default_factory=list)
@@ -239,52 +236,6 @@ class _CodexImporter:
                         key=kv.group(1), value=kv.group(2),
                         source_file=str(config_toml),
                     ))
-        return env_vars
-
-
-class _GeminiImporter:
-    """Import from a Gemini CLI home directory."""
-
-    def __init__(self, gemini_home: Path):
-        self.gemini_home = gemini_home
-
-    def collect_rules(self) -> list[ImportedRule]:
-        gemini_md = self.gemini_home / "GEMINI.md"
-        if not gemini_md.exists():
-            return []
-        raw = gemini_md.read_text(encoding="utf-8", errors="replace")
-        clean = _strip_managed_block(raw).strip()
-        if not clean:
-            return []
-        return [ImportedRule(source_file="GEMINI.md", content=clean)]
-
-    def collect_mcp(self) -> list[ImportedMcpServer]:
-        settings_json = self.gemini_home / "settings.json"
-        if not settings_json.exists():
-            return []
-        try:
-            data = json.loads(settings_json.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return []
-        mcp_raw = data.get("mcpServers") or data.get("mcp_servers") or {}
-        return [
-            ImportedMcpServer(name=name, config=cfg, source_file="settings.json")
-            for name, cfg in mcp_raw.items()
-        ]
-
-    def collect_env(self) -> list[ImportedEnvVar]:
-        env_file = self.gemini_home / ".env"
-        if not env_file.exists():
-            return []
-        env_vars: list[ImportedEnvVar] = []
-        for line in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, val = line.partition("=")
-                env_vars.append(ImportedEnvVar(
-                    key=key.strip(), value=val.strip().strip('"'),
-                    source_file=".gemini/.env",
-                ))
         return env_vars
 
 
@@ -446,7 +397,6 @@ class ReverseSync:
 
     _SOURCE_DIRS: dict[str, str] = {
         "codex":    "~",          # project_dir or home
-        "gemini":   "~/.gemini",
         "opencode": "~/.config/opencode",
         "cursor":   "~",          # project_dir
         "aider":    "~",          # project_dir
@@ -471,7 +421,7 @@ class ReverseSync:
         """Build an import plan for the given source harness.
 
         Args:
-            source:         Source harness name (e.g. "gemini").
+            source:         Source harness name (e.g. "codex").
             merge_strategy: How to merge rules into CLAUDE.md.
 
         Returns:
@@ -605,13 +555,10 @@ class ReverseSync:
 
     def _build_importer(self, source: str):
         """Return the appropriate importer for *source*, or None if unsupported."""
-        gemini_home = Path.home() / ".gemini"
         opencode_config = Path.home() / ".config" / "opencode"
 
         if source == "codex":
             return _CodexImporter(self.project_dir)
-        if source == "gemini":
-            return _GeminiImporter(gemini_home)
         if source == "opencode":
             return _OpenCodeImporter(opencode_config)
         if source == "cursor":

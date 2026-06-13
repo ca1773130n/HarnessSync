@@ -9,7 +9,7 @@ For each conflicted file it shows a numbered hunk diff between the backup snapsh
 Usage: /sync-resolve [TARGET] [--list] [--no-interactive]
 
 Options:
-- TARGET: Resolve conflicts for a specific harness only (e.g. codex, gemini)
+- TARGET: Resolve conflicts for a specific harness only (e.g. codex, opencode)
 - --list: List all targets with active conflicts and exit
 - --no-interactive: Auto-choose 'mine' for every hunk (keep your edits everywhere)
 

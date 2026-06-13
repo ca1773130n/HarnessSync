@@ -236,7 +236,7 @@ class CIPipelineConfig:
     secret_env_vars: dict[str, str] = field(default_factory=dict)
     extra_packages: list[str] = field(default_factory=list)
     # For "matrix" trigger: list of target harness names
-    targets: list[str] = field(default_factory=lambda: ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"])
+    targets: list[str] = field(default_factory=lambda: ["codex", "opencode", "cursor", "aider", "windsurf"])
     # For "pr" trigger: base branch to watch PRs against
     base_branch: str = "main"
 
@@ -466,7 +466,7 @@ class CIPipelineGenerator:
         Each harness target gets its own parallel job, so failures are isolated
         and visible per-target in the GitHub Actions UI.
         """
-        default_targets = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"]
+        default_targets = ["codex", "opencode", "cursor", "aider", "windsurf"]
         return cls(
             project_dir=project_dir,
             config=CIPipelineConfig(

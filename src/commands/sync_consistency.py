@@ -9,7 +9,7 @@ without modifying any files (read-only analysis).
 
 Usage:
     /sync-consistency
-    /sync-consistency --targets codex,gemini,cursor
+    /sync-consistency --targets codex,opencode,cursor
     /sync-consistency --format json
 
 Flags:

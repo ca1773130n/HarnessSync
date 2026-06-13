@@ -223,7 +223,7 @@ def main() -> None:
         ),
     )
     parser.add_argument("--target", "-t", metavar="TARGET",
-                        help="Test only this harness (e.g. codex, gemini).")
+                        help="Test only this harness (e.g. codex, opencode).")
     parser.add_argument("--verbose", "-v", action="store_true", default=False,
                         help="Show all probe results, not just failures.")
     parser.add_argument("--format", choices=["text", "json"], default="text",

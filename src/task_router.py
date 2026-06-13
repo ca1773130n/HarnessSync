@@ -112,14 +112,12 @@ _HARNESS_SCORES: dict[str, dict[str, int]] = {
         "claude-code": 10,
         "cursor":      9,
         "opencode":    8,
-        "gemini":      7,
         "aider":       8,
         "codex":       7,
         "windsurf":    7,
     },
     "code_review": {
         "claude-code": 10,
-        "gemini":      8,
         "cursor":      7,
         "opencode":    7,
         "codex":       6,
@@ -130,14 +128,12 @@ _HARNESS_SCORES: dict[str, dict[str, int]] = {
         "claude-code": 10,
         "cursor":      8,
         "opencode":    8,
-        "gemini":      7,
         "aider":       6,
         "codex":       7,
         "windsurf":    7,
     },
     "data_science": {
         "claude-code": 8,
-        "gemini":      9,   # Strong notebook/Python support
         "cursor":      7,
         "opencode":    6,
         "aider":       9,   # Excellent for notebook workflows
@@ -148,14 +144,12 @@ _HARNESS_SCORES: dict[str, dict[str, int]] = {
         "claude-code": 9,
         "opencode":    8,
         "cursor":      7,
-        "gemini":      7,
         "aider":       7,
         "codex":       8,
         "windsurf":    6,
     },
     "writing_docs": {
         "claude-code": 10,
-        "gemini":      9,
         "cursor":      7,
         "opencode":    7,
         "aider":       6,
@@ -167,13 +161,11 @@ _HARNESS_SCORES: dict[str, dict[str, int]] = {
         "aider":       10,  # Excellent for large-scale refactors
         "cursor":      8,
         "opencode":    8,
-        "gemini":      7,
         "codex":       7,
         "windsurf":    7,
     },
     "web_search": {
         "claude-code": 8,   # MCP brave/tavily
-        "gemini":      10,  # Native Google Search grounding
         "cursor":      6,
         "opencode":    6,
         "aider":       5,
@@ -182,7 +174,6 @@ _HARNESS_SCORES: dict[str, dict[str, int]] = {
     },
     "multi_agent": {
         "claude-code": 10,  # Native multi-agent SDK
-        "gemini":      8,
         "opencode":    7,
         "cursor":      4,
         "aider":       3,
@@ -193,7 +184,6 @@ _HARNESS_SCORES: dict[str, dict[str, int]] = {
         "claude-code": 9,
         "cursor":      8,
         "opencode":    8,
-        "gemini":      8,
         "aider":       7,
         "codex":       7,
         "windsurf":    7,
@@ -206,18 +196,15 @@ _RATIONALE: dict[str, dict[str, str]] = {
         "claude-code": "Best tool-use depth and project context via CLAUDE.md",
         "cursor":      "Strong inline completion and project-wide context",
         "aider":       "Excellent git-integrated generation with whole-repo context",
-        "gemini":      "Fast model with good code generation for many languages",
     },
     "code_review": {
         "claude-code": "Full project context + agent pipeline for multi-file review",
-        "gemini":      "Fast, capable reviewer with native search grounding",
     },
     "debugging": {
         "claude-code": "Deep tool-use for log reading, running tests, tracing errors",
         "opencode":    "Good interactive debugging flow with shell integration",
     },
     "data_science": {
-        "gemini":      "Native Jupyter kernel integration and Python data analysis",
         "aider":       "Great for notebook editing with git tracking of changes",
     },
     "infra_ops": {
@@ -226,19 +213,16 @@ _RATIONALE: dict[str, dict[str, str]] = {
     },
     "writing_docs": {
         "claude-code": "Best long-form writing with project context from CLAUDE.md",
-        "gemini":      "Fast drafting with search grounding for accuracy",
     },
     "refactoring": {
         "aider":       "Whole-repository refactoring with git-tracked incremental changes",
         "claude-code": "Multi-file refactoring with full project understanding",
     },
     "web_search": {
-        "gemini":      "Native Google Search grounding — no MCP plugin required",
         "claude-code": "Use with brave-search or tavily MCP server for live search",
     },
     "multi_agent": {
         "claude-code": "Native Claude Agent SDK for subagent orchestration",
-        "gemini":      "Multi-agent support via Gemini API agent framework",
     },
     "general": {
         "claude-code": "Best general-purpose harness with deepest tool integration",
@@ -274,7 +258,6 @@ def _detect_installed_harnesses(project_dir: Path, cc_home: Path) -> set[str]:
     checks = {
         "claude-code": cc_home / ".claude.json",
         "cursor":      project_dir / ".cursor",
-        "gemini":      project_dir / "GEMINI.md",
         "opencode":    project_dir / "opencode.json",
         "codex":       project_dir / "AGENTS.md",
         "aider":       project_dir / "CONVENTIONS.md",

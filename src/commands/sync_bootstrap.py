@@ -98,7 +98,7 @@ def _detect_harnesses(logger: Logger) -> list[str]:
         print(f"  Found {len(installed)} harness(es): {', '.join(installed)}")
     else:
         print("  No harnesses detected in PATH or common install locations.")
-        print("  Install Codex, Gemini CLI, or another supported harness, then re-run.")
+        print("  Install Codex, OpenCode, or another supported harness, then re-run.")
     return installed
 
 

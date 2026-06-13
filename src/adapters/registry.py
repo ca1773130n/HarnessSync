@@ -41,7 +41,7 @@ class AdapterRegistry:
         """Decorator to register an adapter class.
 
         Args:
-            target_name: Target CLI identifier (e.g., 'codex', 'gemini')
+            target_name: Target CLI identifier (e.g., 'codex', 'opencode')
 
         Returns:
             Decorator function that validates and registers the adapter

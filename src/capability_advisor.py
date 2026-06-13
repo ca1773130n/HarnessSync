@@ -43,23 +43,23 @@ from src.utils.constants import EXTENDED_TARGETS
 # ---------------------------------------------------------------------------
 
 _MCP_CAPABLE: set[str] = {
-    "codex", "gemini", "opencode", "cursor", "windsurf", "cline", "continue", "zed"
+    "codex", "opencode", "cursor", "windsurf", "cline", "continue", "zed"
 }
 _MCP_NONE: set[str] = {"aider", "neovim"}
 
 _SKILLS_CAPABLE: set[str] = {
-    "codex", "gemini", "opencode", "cursor", "windsurf", "cline", "continue", "zed", "neovim"
+    "codex", "opencode", "cursor", "windsurf", "cline", "continue", "zed", "neovim"
 }
 _SKILLS_APPROX: set[str] = {"codex", "cursor"}  # folded into rules
 
-_AGENTS_CAPABLE: set[str] = {"codex", "gemini", "opencode", "cursor", "cline"}
+_AGENTS_CAPABLE: set[str] = {"codex", "opencode", "cursor", "cline"}
 
 _COMMANDS_CAPABLE: set[str] = {
-    "codex", "gemini", "opencode", "cursor", "windsurf", "cline", "continue"
+    "codex", "opencode", "cursor", "windsurf", "cline", "continue"
 }
 
 _ENV_VAR_CAPABLE: set[str] = {
-    "codex", "gemini", "opencode", "cursor", "aider", "windsurf", "cline"
+    "codex", "opencode", "cursor", "aider", "windsurf", "cline"
 }
 
 # Patterns that signal MCP usage in a rule or skill body

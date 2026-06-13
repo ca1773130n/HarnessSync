@@ -361,11 +361,11 @@ def test_format_upgrade_requirements_with_old_version(tmp_path):
     """format_upgrade_requirements includes upgrade commands for old versions."""
     versions_file = tmp_path / ".harnesssync"
     versions_file.write_text(
-        json.dumps({"harness_versions": {"gemini": "0.5"}}),
+        json.dumps({"harness_versions": {"cursor": "0.30"}}),
         encoding="utf-8",
     )
     text = format_upgrade_requirements(project_dir=tmp_path)
-    assert "gemini" in text.lower()
+    assert "cursor" in text.lower()
 
 
 # ── GistCloudSync / parse_gist_id_from_url / build_shareable_bundle ──────────
@@ -463,11 +463,11 @@ def test_ci_pipeline_pr_trigger_no_commit_step():
 
 def test_ci_pipeline_matrix_trigger_yaml_contains_matrix():
     """Matrix trigger workflow has strategy matrix."""
-    gen = CIPipelineGenerator.for_matrix_trigger(targets=["codex", "gemini"])
+    gen = CIPipelineGenerator.for_matrix_trigger(targets=["codex", "cursor"])
     yaml = gen.generate()
     assert "matrix" in yaml
     assert "codex" in yaml
-    assert "gemini" in yaml
+    assert "cursor" in yaml
 
 
 def test_ci_pipeline_matrix_trigger_targets_serialized():

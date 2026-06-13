@@ -3,14 +3,14 @@ from __future__ import annotations
 """
 /sync-migrate slash command — migrate an existing harness configuration into Claude Code.
 
-Scans a source harness (Cursor, Aider, Gemini, Codex, OpenCode, or Windsurf)
+Scans a source harness (Cursor, Aider, Codex, OpenCode, or Windsurf)
 and imports its rules, MCP servers, and settings into Claude Code equivalents.
 
 Usage:
     /sync-migrate [--from HARNESS] [--apply] [--dry-run] [--project-dir PATH]
 
 Options:
-    --from HARNESS     Source harness to migrate from (cursor|aider|gemini|codex|opencode|windsurf).
+    --from HARNESS     Source harness to migrate from (cursor|aider|codex|opencode|windsurf).
                        If omitted, auto-detects the first harness with config.
     --apply            Write the migration to disk (default: dry-run / show plan only)
     --dry-run          Explicitly show plan without writing (default behaviour)

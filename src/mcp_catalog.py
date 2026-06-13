@@ -149,7 +149,6 @@ MCP_EQUIVALENTS: dict[str, dict[str, str]] = {
     },
     "brave-search": {
         "cursor":    "Extension: Use Perplexity or web-search VSCode extensions.",
-        "gemini":    "Built-in: Gemini CLI has @google-search grounding (no MCP needed).",
         "aider":     "Workaround: Pipe search results into context manually.",
     },
     "postgres": {
@@ -162,7 +161,6 @@ MCP_EQUIVALENTS: dict[str, dict[str, str]] = {
     },
     "context7": {
         "cursor":    "Built-in: Cursor has @docs context provider. Add library URLs in settings.",
-        "gemini":    "Workaround: Use /add-context with documentation URLs in Gemini CLI.",
         "aider":     "Workaround: Pass documentation files as read-only context with --read.",
     },
     "slack": {

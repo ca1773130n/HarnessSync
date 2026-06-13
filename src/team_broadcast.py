@@ -40,7 +40,6 @@ _BUNDLE_PATH = ".harness-sync/broadcast.json"
 _BROADCAST_FILES: list[str] = [
     "CLAUDE.md",
     "AGENTS.md",
-    "GEMINI.md",
     "CONVENTIONS.md",
     ".windsurfrules",
     ".cursor/rules/claude-code-rules.mdc",

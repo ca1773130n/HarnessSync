@@ -341,11 +341,6 @@ _VERSION_IMPROVEMENTS: dict[str, list[tuple[str, str, str]]] = {
         ("0.42", "mdc_glob_scoping", "glob-based scoping in rules — use globs to target rules to specific file patterns"),
         ("0.43", "mcp_json", "native .cursor/mcp.json — MCP servers now sync directly without manual setup"),
     ],
-    "gemini": [
-        ("1.5", "tools_exclude", "tools.exclude permission field — tool restrictions now sync cleanly"),
-        ("2.0", "tools_allowed", "tools.allowed allowlist — precise tool allowlists now supported"),
-        ("2.0", "mcp_servers", "native MCP server support — all configured MCP servers sync to Gemini"),
-    ],
     "codex": [
         ("1.0", "mcp_servers", "MCP server config in config.toml — MCP servers now sync to Codex"),
         ("1.1", "sandbox_mode", "sandbox_mode field — execution safety settings sync correctly"),
@@ -364,8 +359,8 @@ _VERSION_IMPROVEMENTS: dict[str, list[tuple[str, str, str]]] = {
 class HarnessUpdateFeed:
     """Monitor harness versions and surface sync-relevant improvements.
 
-    When a harness update unlocks better sync fidelity (e.g. Gemini CLI
-    1.5 now supports native MCP), this feed notifies users so they know
+    When a harness update unlocks better sync fidelity (e.g. Codex
+    1.0 now supports native MCP), this feed notifies users so they know
     upgrading is worthwhile.
     """
 
