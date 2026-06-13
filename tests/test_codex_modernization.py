@@ -141,6 +141,70 @@ class TestCodexEnvAndApprovalGranular:
         assert isinstance(ap, str)  # intent-based string form unchanged by default
 
 
+class TestCodexPreservesUserConfig:
+    """Regression (Codex review P2): user-owned config must not be silently dropped."""
+
+    def _seed(self, tmp_path):
+        cdir = tmp_path / ".codex"
+        cdir.mkdir()
+        (cdir / "config.toml").write_text(
+            'model_verbosity = "high"\n'
+            'sandbox_mode = "workspace-write"\n'
+            '\n[sandbox_workspace_write]\nexclude_slash_tmp = true\n'
+            '\n[shell_environment_policy]\ninherit = "all"\n',
+            encoding="utf-8",
+        )
+        return cdir / "config.toml"
+
+    def test_sync_settings_preserves_user_owned_fields(self, tmp_path):
+        cfg = self._seed(tmp_path)
+        CodexAdapter(tmp_path).sync_settings({
+            "effort": "high", "env": {"K": "v"},
+            "permissions": {"allow": ["Write"], "additionalDirectories": ["/extra"]},
+            "sandbox": {"filesystem": {"allowWrite": ["/w"]}},
+        })
+        p = read_toml_safe(cfg)
+        # managed key we don't generate -> preserved
+        assert p.get("model_verbosity") == "high"
+        # table siblings -> preserved alongside the keys we do generate
+        assert p["sandbox_workspace_write"]["exclude_slash_tmp"] is True
+        assert set(p["sandbox_workspace_write"]["writable_roots"]) == {"/w", "/extra"}
+        assert p["shell_environment_policy"]["inherit"] == "all"
+        assert p["shell_environment_policy"]["set"]["K"] == "v"
+        assert p["model_reasoning_effort"] == "high"
+
+    def test_preservation_survives_later_sync_mcp(self, tmp_path):
+        cfg = self._seed(tmp_path)
+        a = CodexAdapter(tmp_path)
+        a.sync_settings({"env": {"K": "v"}, "sandbox": {"filesystem": {"allowWrite": ["/w"]}},
+                         "permissions": {"allow": ["Write"]}})
+        a.sync_mcp({"srv": {"command": "x"}})
+        p = read_toml_safe(cfg)
+        assert p.get("model_verbosity") == "high"
+        assert p["sandbox_workspace_write"]["exclude_slash_tmp"] is True
+        assert p["shell_environment_policy"]["inherit"] == "all"
+        assert "srv" in p.get("mcp_servers", {})
+
+    def test_existing_model_not_clobbered_by_anthropic_alias(self, tmp_path):
+        cdir = tmp_path / ".codex"; cdir.mkdir()
+        (cdir / "config.toml").write_text('model = "gpt-5.5"\nsandbox_mode = "workspace-write"\n')
+        CodexAdapter(tmp_path).sync_settings({"model": "opusplan"})  # alias not propagated
+        # existing codex model preserved (not erased)
+        assert read_toml_safe(cdir / "config.toml").get("model") == "gpt-5.5"
+
+
+def test_output_style_file_tracked_in_source_paths(tmp_path):
+    """Regression (Codex review P2): active output-style file must be hashed for incremental sync."""
+    import json
+    from src.source_reader import SourceReader
+    proj = tmp_path / "proj"; (proj / ".claude" / "output-styles").mkdir(parents=True)
+    (proj / ".claude" / "settings.json").write_text(json.dumps({"outputStyle": "terse"}))
+    sf = proj / ".claude" / "output-styles" / "terse.md"
+    sf.write_text("---\nname: T\n---\nBe terse.")
+    paths = SourceReader(scope="all", project_dir=proj, cc_home=tmp_path / "cc").get_source_paths()
+    assert sf in paths["rules"]
+
+
 class TestInlineTableRoundTrip:
     def test_parse_and_format(self):
         from src.utils.toml_writer import parse_toml_simple, format_inline_table

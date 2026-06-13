@@ -475,6 +475,14 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
             if p.exists():
                 paths["rules"].append(p)
 
+        # Active custom output-style file: injected into rules at sync time, so it
+        # must be hashed for incremental drift detection (changes to it change output).
+        out_styles = self.get_output_styles()
+        active_style = out_styles.get("active")
+        styles = out_styles.get("styles", {})
+        if active_style and isinstance(styles, dict) and active_style in styles:
+            paths["rules"].append(styles[active_style])
+
         # Skills sources (directories)
         skills = self.get_skills()
         paths["skills"] = list(skills.values())

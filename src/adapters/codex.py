@@ -1009,18 +1009,7 @@ class CodexAdapter(AdapterBase):
             mcp_toml = format_mcp_servers_toml(merged_mcp_servers)
 
             # Re-emit all managed top-level keys from existing config (at the top)
-            settings_lines = []
-            for key in self._MANAGED_TOP_LEVEL_KEYS:
-                if key in existing_config:
-                    val = existing_config[key]
-                    formatted = format_toml_value(val)
-                    if not formatted and isinstance(val, dict):
-                        # e.g. granular approval_policy = { granular = { ... } }
-                        formatted = format_inline_table(val)
-                    if formatted:
-                        settings_lines.append(f'{key} = {formatted}')
-
-            settings_section = '\n'.join(settings_lines) if settings_lines else ''
+            settings_section = self._format_top_level_keys(existing_config)
 
             # Preserve managed tables ([sandbox_workspace_write],
             # [shell_environment_policy.set]) from the existing parsed config.
@@ -1103,63 +1092,61 @@ class CodexAdapter(AdapterBase):
             ):
                 sandbox_mode = 'workspace-write'
 
-            # approval_policy: granular object form (opt-in via codexApprovalGranular)
-            # else the intent-based string mapping.
             granular = self._approval_policy_granular(settings)
-            if granular is not None:
-                approval_line = (
-                    f'approval_policy = {format_inline_table({"granular": granular})}'
-                )
-            else:
-                approval_policy = self._map_approval_policy(
-                    allow_list, deny_list, ask_list, settings
-                )
-                approval_line = f'approval_policy = "{approval_policy}"'
 
-            # Read existing config to preserve MCP servers
+            # Read existing config to preserve MCP servers + user-owned config.
             existing_config = self._read_existing_config()
 
-            # Build settings section
-            settings_lines = [
-                f'sandbox_mode = "{sandbox_mode}"',
-                approval_line,
-            ]
+            # Managed top-level keys: start from any existing managed keys (so keys
+            # HarnessSync recognizes but does NOT generate, e.g. model_verbosity, are
+            # preserved at the document root), then overlay values derived from source.
+            top_values: dict = {
+                k: existing_config[k]
+                for k in self._MANAGED_TOP_LEVEL_KEYS if k in existing_config
+            }
+            top_values['sandbox_mode'] = sandbox_mode
+            top_values['approval_policy'] = (
+                {'granular': granular} if granular is not None
+                else self._map_approval_policy(allow_list, deny_list, ask_list, settings)
+            )
+            top_values['project_doc_fallback_filenames'] = ['CLAUDE.md']
 
-            # model: only propagate ids meaningful to Codex (OpenAI/Codex providers).
+            # model: only propagate ids meaningful to Codex; otherwise leave any
+            # existing user-set model untouched (do not clobber with nothing).
             model = settings.get('model')
             if isinstance(model, str) and model.strip().lower().startswith(CODEX_MODEL_PREFIXES):
-                settings_lines.append(f'model = {format_toml_value(model.strip())}')
+                top_values['model'] = model.strip()
 
-            # effort -> model_reasoning_effort (low/medium/high/xhigh, validated)
             effort = settings.get('effort')
             if isinstance(effort, str) and effort.strip().lower() in CODEX_REASONING_EFFORTS:
-                settings_lines.append(f'model_reasoning_effort = "{effort.strip().lower()}"')
+                top_values['model_reasoning_effort'] = effort.strip().lower()
 
-            # Let Codex fall back to CLAUDE.md when AGENTS.md is missing at a level.
-            settings_lines.append('project_doc_fallback_filenames = ["CLAUDE.md"]')
-
-            # Map attribution -> command_attribution
             attribution = settings.get('attribution')
             if attribution is not None:
                 attr_value = self._map_attribution(attribution)
                 if attr_value is not None:
-                    settings_lines.append(
-                        f'command_attribution = {format_toml_value(attr_value)}'
-                    )
+                    top_values['command_attribution'] = attr_value
 
-            settings_section = '\n'.join(settings_lines)
+            settings_section = self._format_top_level_keys(top_values)
 
-            # Managed table sections: [sandbox_workspace_write] and, from
-            # settings.env, [shell_environment_policy.set].
-            table_values: dict = {}
-            sbw = self._sandbox_workspace_write_values(settings, sandbox_mode)
-            if sbw:
-                table_values['sandbox_workspace_write'] = sbw
+            # Managed tables, merged with existing user keys so siblings HarnessSync
+            # does not own (e.g. [shell_environment_policy].inherit,
+            # [sandbox_workspace_write].exclude_slash_tmp) are preserved.
+            sbw_existing = existing_config.get('sandbox_workspace_write')
+            sbw_existing = sbw_existing if isinstance(sbw_existing, dict) else {}
+            sbw = {**sbw_existing, **self._sandbox_workspace_write_values(settings, sandbox_mode)}
+
+            sep = existing_config.get('shell_environment_policy')
+            sep = dict(sep) if isinstance(sep, dict) else {}
             env = settings.get('env')
             if isinstance(env, dict) and env:
-                table_values['shell_environment_policy'] = {
-                    'set': {str(k): str(v) for k, v in env.items()}
-                }
+                sep['set'] = {str(k): str(v) for k, v in env.items()}
+
+            table_values: dict = {}
+            if sbw:
+                table_values['sandbox_workspace_write'] = sbw
+            if sep:
+                table_values['shell_environment_policy'] = sep
             tables_section = self._format_managed_tables(table_values)
 
             # Build profiles section from modelOverrides
@@ -1313,12 +1300,32 @@ class CodexAdapter(AdapterBase):
         return values
 
     @staticmethod
-    def _format_managed_tables(values: dict) -> str:
+    def _scalar_toml(value) -> str:
+        """Format a scalar/list/dict as a TOML value (inline table for dicts)."""
+        fv = format_toml_value(value)
+        if not fv and isinstance(value, dict):
+            fv = format_inline_table(value)
+        return fv
+
+    @classmethod
+    def _format_top_level_keys(cls, values: dict) -> str:
+        """Format managed bare top-level keys in canonical order."""
+        lines = []
+        for key in cls._MANAGED_TOP_LEVEL_KEYS:
+            if key in values:
+                fv = cls._scalar_toml(values[key])
+                if fv:
+                    lines.append(f"{key} = {fv}")
+        return "\n".join(lines)
+
+    @classmethod
+    def _format_managed_tables(cls, values: dict) -> str:
         """Format the managed config.toml table sections from a values dict.
 
         Handles ``[sandbox_workspace_write]`` (flat) and
-        ``[shell_environment_policy.set]`` (env var map). The same formatter is
-        used both when emitting from source settings and when re-emitting from an
+        ``[shell_environment_policy]`` (sibling keys + nested ``set`` table). All
+        keys present are emitted so user-owned siblings survive. The same formatter
+        is used both when emitting from source settings and when re-emitting from an
         existing parsed config (so tables survive a later sync_mcp rebuild).
         """
         sections: list[str] = []
@@ -1327,20 +1334,33 @@ class CodexAdapter(AdapterBase):
         if isinstance(sbw, dict) and sbw:
             lines = ["[sandbox_workspace_write]"]
             for k, v in sbw.items():
-                fv = format_toml_value(v)
+                fv = cls._scalar_toml(v)
                 if fv:
                     lines.append(f"{k} = {fv}")
             if len(lines) > 1:
                 sections.append("\n".join(lines))
 
         sep = values.get("shell_environment_policy")
-        if isinstance(sep, dict):
-            setmap = sep.get("set")
-            if isinstance(setmap, dict) and setmap:
-                lines = ["[shell_environment_policy.set]"]
-                for k, v in setmap.items():
-                    lines.append(f"{k} = {format_toml_value(str(v))}")
-                sections.append("\n".join(lines))
+        if isinstance(sep, dict) and sep:
+            top_lines: list[str] = []
+            set_map = None
+            for k, v in sep.items():
+                if k == "set" and isinstance(v, dict):
+                    set_map = v
+                else:
+                    fv = cls._scalar_toml(v)
+                    if fv:
+                        top_lines.append(f"{k} = {fv}")
+            sec: list[str] = []
+            if top_lines:
+                sec.append("[shell_environment_policy]")
+                sec.extend(top_lines)
+            if isinstance(set_map, dict) and set_map:
+                sec.append("[shell_environment_policy.set]")
+                for k, v in set_map.items():
+                    sec.append(f"{k} = {format_toml_value(str(v))}")
+            if sec:
+                sections.append("\n".join(sec))
 
         return "\n\n".join(sections)
 
