@@ -214,3 +214,30 @@ Ordered. Each item: **effort (S/M/L)** and **risk**. Groups: **(A) Gemini remova
 - `grep -rin gemini src/ commands/ scripts/` → 0 (excluding intentional history) after Group A.
 - After A7, run `python3 src/commands/sync.py --dry-run` and confirm no `gemini`/`GEMINI.md` targets appear and `list_targets()` returns 10.
 - For Codex (B): round-trip a sample CC config through the adapter and diff emitted `config.toml` against the latest schema keys.
+
+---
+
+## Status — 2026-06-14 (implemented)
+
+Delivered across four commits (branch `modernize-2026-06`); suite 1055 passed,
+1 pre-existing env failure (`test_drift_check_hook_not_git_repo`).
+
+- **Group A — Gemini removal: DONE.** Adapter + ~200 files scrubbed; 12 → 10 targets;
+  registry exposes 10 adapters; `GEMINI.md` + 3 gemini-only test files deleted.
+- **Group C — Claude Code surfaces: DONE.** `env`, `model`/`effort`, `sandbox`,
+  `permission_mode`, `output_styles`, MCP enable/disable gates (`mcp_disabled`),
+  namespaced agents/commands (rglob), transport normalization, `cc_mcp_global`
+  cleanup. New: `tests/test_modernization_surfaces.py`.
+- **Group B — Codex modernization: DONE.** MCP `http_headers`/`env_http_headers`,
+  `model`(guarded)/`model_reasoning_effort`/`project_doc_fallback_filenames`,
+  `[sandbox_workspace_write]`, stable hooks with corrected events + nested TOML,
+  managed-top-level-key ordering fix. B1 confirmed (`.agents/skills` is correct).
+  New: `tests/test_codex_modernization.py`.
+- **Group D — docs/counts: DONE.** Counts → 10 everywhere; `CHANGELOG.md` added;
+  README "What Gets Synced" updated.
+
+### Remaining follow-ups (surfaced, not yet consumed everywhere)
+- Wire `outputStyle` / output-style bodies into system-prompt adapters (zed, neovim/avante, continue).
+- Propagate `settings.env` into Codex `[shell_environment_policy]` + other env-aware adapters.
+- Optional: granular Codex `approval_policy` object form (string form retained).
+- C8 (deferred, low ROI): `statusLine`, user-scope `hooks/hooks.json`, ancestor/monorepo CLAUDE.md, enterprise managed-settings.

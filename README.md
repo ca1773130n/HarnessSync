@@ -45,9 +45,9 @@ After this, syncing happens automatically via PostToolUse hooks whenever Claude 
 | `CLAUDE.md` (rules) | `AGENTS.md` / format-specific equivalent |
 | `.claude/skills/` | Symlinked or inlined per target capability |
 | `.claude/agents/` | Symlinked or inlined per target capability |
-| `.claude/commands/` | Symlinked or summarized per target capability |
-| `.mcp.json` | `config.toml`, `settings.json`, or equivalent |
-| `settings.json` (env) | Target-specific env format |
+| `.claude/commands/` | Symlinked or summarized per target capability (namespaced/nested supported) |
+| `.mcp.json` (honors `disabledMcpjsonServers`) | `config.toml`, `settings.json`, or equivalent |
+| `settings.json` (env, model, effort, sandbox, permissions) | Target-specific env / model / reasoning-effort / sandbox config |
 
 Both **user scope** (`~/.claude/`) and **project scope** (`.claude/`, `CLAUDE.md`) are supported.
 
