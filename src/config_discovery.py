@@ -55,7 +55,6 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
         self.cc_skills = self.cc_home / "skills"
         self.cc_agents = self.cc_home / "agents"
         self.cc_commands = self.cc_home / "commands"
-        self.cc_mcp_global = Path.home() / ".mcp.json"  # Global MCP is always at ~
         self.cc_mcp_claude = self.cc_home / ".mcp.json"
 
     def _parse_rules_frontmatter(self, content: str) -> tuple[dict, str]:
@@ -405,8 +404,10 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
             Dictionary with keys: rules (fully resolved with includes inlined),
             include_refs (raw @include paths for adapters that prefer native imports),
             rules_files, skills, agents, commands,
-            mcp_servers (flat), mcp_servers_scoped (with metadata), settings,
-            permissions, hooks, plugins
+            mcp_servers (flat), mcp_servers_scoped (with metadata),
+            mcp_disabled (project servers skipped via disabledMcpjsonServers),
+            settings, env, model_config, sandbox, permissions, permission_mode,
+            output_styles, harness_overrides, hooks, plugins
         """
         scoped = self.get_mcp_servers_with_scope()
         flat = {name: entry["config"] for name, entry in scoped.items()}
@@ -421,8 +422,14 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
             "commands": self.get_commands(),
             "mcp_servers": flat,
             "mcp_servers_scoped": scoped,
+            "mcp_disabled": self.get_skipped_mcp_servers(),
             "settings": self.get_settings(),
+            "env": self.get_env(),
+            "model_config": self.get_model_config(),
+            "sandbox": self.get_sandbox(),
             "permissions": self.get_permissions(),
+            "permission_mode": self.get_permission_mode(),
+            "output_styles": self.get_output_styles(),
             "harness_overrides": self.get_harness_override_paths(),
             "hooks": self.get_hooks(),
             "plugins": self.get_plugins(),

@@ -167,7 +167,23 @@ def detect_transport_type(config: dict) -> str:
 
     Returns:
         Transport type: "stdio", "sse", "http", or "unknown"
+
+    Notes:
+        - An explicit ``type`` field (Claude Code ``.mcp.json``) takes precedence.
+        - ``streamable-http`` (and variants) is normalized to ``http`` — it is the
+          modern streamable HTTP transport, of which ``http`` is the canonical name.
+        - ``sse`` is recognized but deprecated (see ``transport_deprecation``).
     """
+    explicit = config.get('type')
+    if isinstance(explicit, str):
+        t = explicit.strip().lower().replace('_', '-')
+        if t in ('streamable-http', 'streamablehttp', 'http'):
+            return 'http'
+        if t == 'sse':
+            return 'sse'
+        if t == 'stdio':
+            return 'stdio'
+
     if 'command' in config:
         return 'stdio'
     elif 'url' in config:
@@ -176,6 +192,21 @@ def detect_transport_type(config: dict) -> str:
             return 'sse'
         return 'http'
     return 'unknown'
+
+
+def transport_deprecation(server_name: str, config: dict) -> str:
+    """Return a deprecation warning if a server uses the deprecated SSE transport.
+
+    Claude Code deprecated the standalone ``sse`` MCP transport in favor of the
+    streamable ``http`` transport. This returns a non-empty advisory string for
+    SSE servers so callers can surface it; empty string otherwise.
+    """
+    if detect_transport_type(config) == 'sse':
+        return (
+            f"MCP server '{server_name}': SSE transport is deprecated; "
+            f"prefer the streamable 'http' transport."
+        )
+    return ""
 
 
 def check_transport_support(server_name: str, config: dict, target: str) -> tuple[bool, str]:
