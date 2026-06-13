@@ -108,6 +108,55 @@ class PreSyncPipeline:
                 'scope': rf.get('scope', 'project'),
             })
 
+    def inject_output_styles(self, source_data: dict) -> None:
+        """Append the active custom output-style body to rules (in-place).
+
+        A Claude Code output style is system-prompt persona content. When the
+        active ``outputStyle`` resolves to a *custom* output-style file (built-in
+        styles carry no body to sync), its markdown body is appended as a synthetic
+        rule so it flows through the normal rules -> system-prompt machinery of
+        every target (Zed, neovim/avante, Continue, and others).
+
+        Must run after :meth:`normalize_rules` (rules are list[dict]) and before
+        :meth:`annotate_rules` so the injected content is also annotated.
+        """
+        out = source_data.get('output_styles', {})
+        if not isinstance(out, dict):
+            return
+        active = out.get('active')
+        styles = out.get('styles', {})
+        if not active or not isinstance(styles, dict) or active not in styles:
+            return  # built-in styles carry no custom body to sync
+
+        try:
+            raw = Path(styles[active]).read_text(encoding='utf-8', errors='replace')
+        except (OSError, TypeError, ValueError):
+            return
+
+        body = self._strip_frontmatter(raw).strip()
+        if not body:
+            return
+
+        rules = source_data.setdefault('rules', [])
+        if isinstance(rules, list):
+            rules.append({
+                # hyphen (not ':') so the path is a safe filename on all platforms
+                'path': f'output-style-{active}',
+                'content': f'# Output style: {active}\n\n{body}',
+                'scope': 'user',
+            })
+
+    @staticmethod
+    def _strip_frontmatter(text: str) -> str:
+        """Drop a leading YAML frontmatter block (--- ... ---) if present."""
+        if text.startswith('---'):
+            end = text.find('\n---', 3)
+            if end != -1:
+                rest = text[end + 4:]
+                nl = rest.find('\n')
+                return rest[nl + 1:] if nl != -1 else ''
+        return text
+
     def annotate_rules(self, source_data: dict) -> None:
         """Add provenance annotation markers to each rule's content (in-place).
 

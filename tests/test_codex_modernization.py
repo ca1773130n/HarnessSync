@@ -90,6 +90,66 @@ class TestCodexConfigTomlOrdering:
         assert set(sbw.get("writable_roots", [])) == {"/w", "/d"}
 
 
+class TestCodexEnvAndApprovalGranular:
+    """Follow-ups: settings.env -> [shell_environment_policy.set]; granular approval_policy."""
+
+    def test_env_emitted_as_shell_environment_policy(self, tmp_path):
+        CodexAdapter(tmp_path).sync_settings({"env": {"ANTHROPIC_MODEL": "x", "MCP_TIMEOUT": 30000}})
+        parsed = read_toml_safe(tmp_path / ".codex" / "config.toml")
+        setmap = parsed.get("shell_environment_policy", {}).get("set", {})
+        assert setmap.get("ANTHROPIC_MODEL") == "x"
+        assert setmap.get("MCP_TIMEOUT") == "30000"  # coerced to string
+
+    def test_env_preserved_when_mcp_synced_after(self, tmp_path):
+        a = CodexAdapter(tmp_path)
+        a.sync_settings({"env": {"K": "v"}})
+        a.sync_mcp({"srv": {"command": "x"}})
+        parsed = read_toml_safe(tmp_path / ".codex" / "config.toml")
+        assert parsed.get("shell_environment_policy", {}).get("set", {}).get("K") == "v"
+        assert "srv" in parsed.get("mcp_servers", {})
+
+    def test_no_env_no_shell_policy(self, tmp_path):
+        CodexAdapter(tmp_path).sync_settings({"effort": "high"})
+        assert "[shell_environment_policy" not in (tmp_path / ".codex" / "config.toml").read_text()
+
+    def test_granular_approval_policy_opt_in(self, tmp_path):
+        CodexAdapter(tmp_path).sync_settings(
+            {"codexApprovalGranular": {"sandbox_approval": True, "rules": False}}
+        )
+        parsed = read_toml_safe(tmp_path / ".codex" / "config.toml")
+        ap = parsed.get("approval_policy")
+        assert isinstance(ap, dict)
+        assert ap["granular"]["sandbox_approval"] is True
+        assert ap["granular"]["rules"] is False
+
+    def test_granular_approval_true_enables_all(self, tmp_path):
+        CodexAdapter(tmp_path).sync_settings({"codexApprovalGranular": True})
+        ap = read_toml_safe(tmp_path / ".codex" / "config.toml").get("approval_policy")
+        assert isinstance(ap, dict) and all(ap["granular"].values())
+        assert len(ap["granular"]) == 5
+
+    def test_granular_survives_mcp_resync(self, tmp_path):
+        a = CodexAdapter(tmp_path)
+        a.sync_settings({"codexApprovalGranular": {"skill_approval": True}})
+        a.sync_mcp({"srv": {"command": "x"}})
+        ap = read_toml_safe(tmp_path / ".codex" / "config.toml").get("approval_policy")
+        assert isinstance(ap, dict) and ap["granular"]["skill_approval"] is True
+
+    def test_default_approval_policy_stays_string(self, tmp_path):
+        CodexAdapter(tmp_path).sync_settings({"permissions": {"allow": ["Read"]}})
+        ap = read_toml_safe(tmp_path / ".codex" / "config.toml").get("approval_policy")
+        assert isinstance(ap, str)  # intent-based string form unchanged by default
+
+
+class TestInlineTableRoundTrip:
+    def test_parse_and_format(self):
+        from src.utils.toml_writer import parse_toml_simple, format_inline_table
+        d = parse_toml_simple('approval_policy = { granular = { rules = true, sandbox_approval = false } }')
+        assert d["approval_policy"]["granular"]["rules"] is True
+        assert d["approval_policy"]["granular"]["sandbox_approval"] is False
+        assert format_inline_table({"granular": {"rules": True}}) == "{ granular = { rules = true } }"
+
+
 class TestCodexMcpHttpTransport:
     def test_headers_mapped_to_http_headers(self):
         out = CodexAdapter._translate_mcp_fields({"url": "https://h/mcp", "headers": {"X-Region": "us"}})

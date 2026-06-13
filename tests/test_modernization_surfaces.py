@@ -17,8 +17,18 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.source_reader import SourceReader
+from src.sync_pipeline import PreSyncPipeline
+from src.utils.logger import Logger
 from src.utils.permissions import extract_permission_mode
 from src.utils.env_translator import detect_transport_type, transport_deprecation
+
+
+def _pipeline(tmp_path):
+    return PreSyncPipeline(
+        project_dir=tmp_path, cc_home=tmp_path / "cc", scope="project",
+        dry_run=True, allow_secrets=False, scrub_secrets=False, minimal=False,
+        logger=Logger(),
+    )
 
 
 def _reader(tmp_path, settings=None, project_files=None):
@@ -194,6 +204,36 @@ def test_transport_deprecation():
 # --------------------------------------------------------------------------- #
 # discover_all exposes the new keys
 # --------------------------------------------------------------------------- #
+
+# --------------------------------------------------------------------------- #
+# Follow-up #1 — outputStyle injected into the rules pipeline
+# --------------------------------------------------------------------------- #
+
+def test_inject_active_custom_output_style(tmp_path):
+    osfile = tmp_path / "terse.md"
+    osfile.write_text("---\nname: Terse\ndescription: x\n---\n# Persona\nBe terse.\n", encoding="utf-8")
+    sd = {
+        "rules": [{"path": "CLAUDE.md", "content": "base"}],
+        "output_styles": {"active": "terse", "styles": {"terse": osfile}},
+    }
+    _pipeline(tmp_path).inject_output_styles(sd)
+    injected = [r for r in sd["rules"] if r["path"] == "output-style-terse"]
+    assert injected, "active custom output style should be injected as a rule"
+    assert "Be terse." in injected[0]["content"]
+    assert "name: Terse" not in injected[0]["content"]  # frontmatter stripped
+
+
+def test_builtin_output_style_not_injected(tmp_path):
+    sd = {"rules": [], "output_styles": {"active": "Explanatory", "styles": {}}}
+    _pipeline(tmp_path).inject_output_styles(sd)
+    assert sd["rules"] == []  # built-in styles carry no body to sync
+
+
+def test_no_output_style_is_noop(tmp_path):
+    sd = {"rules": [{"path": "CLAUDE.md", "content": "x"}]}
+    _pipeline(tmp_path).inject_output_styles(sd)
+    assert len(sd["rules"]) == 1
+
 
 def test_discover_all_has_new_keys(tmp_path):
     data = _reader(tmp_path, settings={"env": {"A": "1"}, "model": "fable"}).discover_all()

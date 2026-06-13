@@ -17,6 +17,12 @@ Gemini target.
   VS Code, Windsurf, Zed). Historical `.planning/` records and runtime logs
   intentionally retain their references.
 
+### Added — cross-target output styles
+- The active **custom** `outputStyle` body is now injected into the rules
+  pipeline, so it flows into every target's system-prompt content (Zed,
+  neovim/avante, Continue, Codex/OpenCode AGENTS.md, Cursor, …). Built-in styles
+  (no body) are skipped. Frontmatter is stripped before injection.
+
 ### Added — Claude Code source surfaces (`SourceReader.discover_all()`)
 - `settings.env` → `get_env()` — session environment variables for adapters
   with env maps.
@@ -49,6 +55,12 @@ Gemini target.
   `PostToolUse` — no legacy `AfterToolUse`; `PreToolUse` and `UserPromptSubmit`
   are now supported) and corrected nested `[[hooks.Event]]` /
   `[[hooks.Event.hooks]]` TOML.
+- `settings.env` → `[shell_environment_policy.set]` (session env vars).
+- Opt-in granular `approval_policy` object form via `settings.codexApprovalGranular`
+  (`true` for all categories, or a dict of any of `sandbox_approval`, `rules`,
+  `mcp_elicitations`, `request_permissions`, `skill_approval`); the intent-based
+  string form remains the default. The minimal TOML reader/writer gained inline-
+  table support so the object form round-trips across re-syncs.
 
 ### Fixed
 - Codex `config.toml`: managed bare top-level keys are preserved at the document
@@ -57,9 +69,8 @@ Gemini target.
 - Removed the dead `cc_mcp_global` SourceReader attribute (hardcoded
   `Path.home()`, never read).
 
-### Follow-ups (surfaced but not yet consumed by every adapter)
-- Route `outputStyle` / custom output styles into system-prompt adapters
-  (Zed, neovim/avante, Continue).
-- Propagate `settings.env` into Codex `[shell_environment_policy]` and other
-  env-aware adapters.
-- Optional granular Codex `approval_policy` object form (kept the string form).
+### Remaining follow-ups
+- Propagate `settings.env` into the *non-Codex* env-aware adapters (Continue,
+  Zed, Windsurf) — Codex is done; those adapters don't yet emit session env.
+- C8 (deferred, low ROI): `statusLine`, user-scope `hooks/hooks.json`,
+  ancestor/monorepo `CLAUDE.md`, enterprise managed-settings.

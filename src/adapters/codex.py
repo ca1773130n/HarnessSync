@@ -26,6 +26,7 @@ from src.utils.toml_writer import (
     format_mcp_servers_toml,
     format_mcp_server_toml,
     format_toml_value,
+    format_inline_table,
     write_toml_atomic,
     escape_toml_string,
     read_toml_safe,
@@ -1011,22 +1012,19 @@ class CodexAdapter(AdapterBase):
             settings_lines = []
             for key in self._MANAGED_TOP_LEVEL_KEYS:
                 if key in existing_config:
-                    formatted = format_toml_value(existing_config[key])
+                    val = existing_config[key]
+                    formatted = format_toml_value(val)
+                    if not formatted and isinstance(val, dict):
+                        # e.g. granular approval_policy = { granular = { ... } }
+                        formatted = format_inline_table(val)
                     if formatted:
                         settings_lines.append(f'{key} = {formatted}')
 
             settings_section = '\n'.join(settings_lines) if settings_lines else ''
 
-            # Preserve the [sandbox_workspace_write] table if present
-            sandbox_section = ''
-            sbw = existing_config.get('sandbox_workspace_write')
-            if isinstance(sbw, dict) and sbw:
-                sb_lines = ['[sandbox_workspace_write]']
-                for k, v in sbw.items():
-                    fv = format_toml_value(v)
-                    if fv:
-                        sb_lines.append(f'{k} = {fv}')
-                sandbox_section = '\n'.join(sb_lines)
+            # Preserve managed tables ([sandbox_workspace_write],
+            # [shell_environment_policy.set]) from the existing parsed config.
+            tables_section = self._format_managed_tables(existing_config)
 
             # Extract non-managed sections for preservation
             preserved = self._extract_unmanaged_toml(config_path)
@@ -1034,7 +1032,7 @@ class CodexAdapter(AdapterBase):
             # Build complete config.toml
             final_toml = self._build_config_toml(
                 settings_section, mcp_toml, preserved,
-                sandbox_section=sandbox_section,
+                tables_section=tables_section,
             )
 
             # Write atomically
@@ -1105,10 +1103,18 @@ class CodexAdapter(AdapterBase):
             ):
                 sandbox_mode = 'workspace-write'
 
-            # Determine approval_policy using intent-based mapping
-            approval_policy = self._map_approval_policy(
-                allow_list, deny_list, ask_list, settings
-            )
+            # approval_policy: granular object form (opt-in via codexApprovalGranular)
+            # else the intent-based string mapping.
+            granular = self._approval_policy_granular(settings)
+            if granular is not None:
+                approval_line = (
+                    f'approval_policy = {format_inline_table({"granular": granular})}'
+                )
+            else:
+                approval_policy = self._map_approval_policy(
+                    allow_list, deny_list, ask_list, settings
+                )
+                approval_line = f'approval_policy = "{approval_policy}"'
 
             # Read existing config to preserve MCP servers
             existing_config = self._read_existing_config()
@@ -1116,7 +1122,7 @@ class CodexAdapter(AdapterBase):
             # Build settings section
             settings_lines = [
                 f'sandbox_mode = "{sandbox_mode}"',
-                f'approval_policy = "{approval_policy}"',
+                approval_line,
             ]
 
             # model: only propagate ids meaningful to Codex (OpenAI/Codex providers).
@@ -1143,8 +1149,18 @@ class CodexAdapter(AdapterBase):
 
             settings_section = '\n'.join(settings_lines)
 
-            # [sandbox_workspace_write] table (writable_roots, network_access)
-            sandbox_section = self._build_sandbox_workspace_write(settings, sandbox_mode)
+            # Managed table sections: [sandbox_workspace_write] and, from
+            # settings.env, [shell_environment_policy.set].
+            table_values: dict = {}
+            sbw = self._sandbox_workspace_write_values(settings, sandbox_mode)
+            if sbw:
+                table_values['sandbox_workspace_write'] = sbw
+            env = settings.get('env')
+            if isinstance(env, dict) and env:
+                table_values['shell_environment_policy'] = {
+                    'set': {str(k): str(v) for k, v in env.items()}
+                }
+            tables_section = self._format_managed_tables(table_values)
 
             # Build profiles section from modelOverrides
             profiles_section = ''
@@ -1165,7 +1181,7 @@ class CodexAdapter(AdapterBase):
             final_toml = self._build_config_toml(
                 settings_section, mcp_section, preserved,
                 profiles_section=profiles_section,
-                sandbox_section=sandbox_section,
+                tables_section=tables_section,
             )
 
             # Write atomically
@@ -1259,24 +1275,16 @@ class CodexAdapter(AdapterBase):
             lines.append(f'model = {format_toml_value(model_name)}')
         return '\n'.join(lines)
 
-    def _build_sandbox_workspace_write(self, settings: dict, sandbox_mode: str) -> str:
-        """Build the ``[sandbox_workspace_write]`` table from CC sandbox + permissions.
+    def _sandbox_workspace_write_values(self, settings: dict, sandbox_mode: str) -> dict:
+        """Derive ``[sandbox_workspace_write]`` values from CC sandbox + permissions.
 
-        Maps Claude Code's ``sandbox.filesystem.allowWrite`` and
-        ``permissions.additionalDirectories`` to Codex ``writable_roots``, and a
-        boolean network flag to ``network_access``. Only meaningful when
-        ``sandbox_mode = "workspace-write"``; returns ``''`` when there is nothing
-        to express.
-
-        Args:
-            settings: Claude Code settings dict.
-            sandbox_mode: The computed Codex sandbox_mode.
-
-        Returns:
-            TOML ``[sandbox_workspace_write]`` section string, or ``''``.
+        Maps ``sandbox.filesystem.allowWrite`` + ``permissions.additionalDirectories``
+        to ``writable_roots`` and a boolean network flag to ``network_access``. Only
+        meaningful when ``sandbox_mode = "workspace-write"``; returns ``{}`` otherwise
+        or when there is nothing to express.
         """
         if sandbox_mode != "workspace-write":
-            return ''
+            return {}
 
         sandbox = settings.get("sandbox", {})
         sandbox = sandbox if isinstance(sandbox, dict) else {}
@@ -1290,7 +1298,6 @@ class CodexAdapter(AdapterBase):
                     if isinstance(d, str) and d and d not in roots:
                         roots.append(d)
 
-        # Network access: accept either an explicit bool or a CC sandbox flag.
         network = None
         for key in ("allowNetwork", "network_access"):
             v = sandbox.get(key)
@@ -1298,15 +1305,71 @@ class CodexAdapter(AdapterBase):
                 network = v
                 break
 
-        if not roots and network is None:
-            return ''
-
-        lines = ["[sandbox_workspace_write]"]
+        values: dict = {}
         if roots:
-            lines.append(f'writable_roots = {format_toml_value(roots)}')
+            values["writable_roots"] = roots
         if network is not None:
-            lines.append(f'network_access = {format_toml_value(network)}')
-        return '\n'.join(lines)
+            values["network_access"] = network
+        return values
+
+    @staticmethod
+    def _format_managed_tables(values: dict) -> str:
+        """Format the managed config.toml table sections from a values dict.
+
+        Handles ``[sandbox_workspace_write]`` (flat) and
+        ``[shell_environment_policy.set]`` (env var map). The same formatter is
+        used both when emitting from source settings and when re-emitting from an
+        existing parsed config (so tables survive a later sync_mcp rebuild).
+        """
+        sections: list[str] = []
+
+        sbw = values.get("sandbox_workspace_write")
+        if isinstance(sbw, dict) and sbw:
+            lines = ["[sandbox_workspace_write]"]
+            for k, v in sbw.items():
+                fv = format_toml_value(v)
+                if fv:
+                    lines.append(f"{k} = {fv}")
+            if len(lines) > 1:
+                sections.append("\n".join(lines))
+
+        sep = values.get("shell_environment_policy")
+        if isinstance(sep, dict):
+            setmap = sep.get("set")
+            if isinstance(setmap, dict) and setmap:
+                lines = ["[shell_environment_policy.set]"]
+                for k, v in setmap.items():
+                    lines.append(f"{k} = {format_toml_value(str(v))}")
+                sections.append("\n".join(lines))
+
+        return "\n\n".join(sections)
+
+    # Granular approval_policy categories (Codex object form).
+    _GRANULAR_KEYS: tuple[str, ...] = (
+        "sandbox_approval", "rules", "mcp_elicitations",
+        "request_permissions", "skill_approval",
+    )
+
+    @classmethod
+    def _approval_policy_granular(cls, settings: dict):
+        """Return the granular approval_policy booleans, or None for string form.
+
+        Opt-in: ``settings["codexApprovalGranular"]`` may be ``True`` (all
+        categories auto-approved) or a dict of any of the five category booleans
+        (sandbox_approval, rules, mcp_elicitations, request_permissions,
+        skill_approval). Absent/invalid -> None (keep the intent-based string form).
+        """
+        spec = settings.get("codexApprovalGranular")
+        if spec is True:
+            return {k: True for k in cls._GRANULAR_KEYS}
+        if isinstance(spec, dict):
+            out = {
+                k: bool(spec[k])
+                for k in cls._GRANULAR_KEYS
+                if isinstance(spec.get(k), bool)
+            }
+            return out or None
+        return None
 
     def _map_approval_policy(
         self,
@@ -1460,7 +1523,7 @@ description: {quoted_desc}
         Managed content (will be regenerated):
         - Header comments (# ... HarnessSync ..., # Do not edit ...)
         - All managed top-level keys (see _MANAGED_TOP_LEVEL_KEYS)
-        - The [sandbox_workspace_write] table
+        - The [sandbox_workspace_write] and [shell_environment_policy.*] tables
         - All [mcp_servers.*] sections
         - All [profiles.*] sections
 
@@ -1498,7 +1561,8 @@ description: {quoted_desc}
             if stripped.startswith('['):
                 if (stripped.startswith('[mcp_servers')
                         or stripped.startswith('[profiles.')
-                        or stripped.startswith('[sandbox_workspace_write')):
+                        or stripped.startswith('[sandbox_workspace_write')
+                        or stripped.startswith('[shell_environment_policy')):
                     in_mcp_section = True
                     continue
                 else:
@@ -1520,23 +1584,24 @@ description: {quoted_desc}
         mcp_section: str,
         preserved_sections: str = '',
         profiles_section: str = '',
-        sandbox_section: str = '',
+        tables_section: str = '',
     ) -> str:
-        """Combine settings, sandbox, profiles, and MCP sections into config.toml.
+        """Combine settings, managed tables, profiles, and MCP into config.toml.
 
         Args:
             settings_section: Settings TOML content (sandbox_mode, approval_policy, etc.)
             mcp_section: MCP servers TOML content
             preserved_sections: Non-managed TOML sections to preserve
             profiles_section: [profiles.*] TOML sections from modelOverrides
-            sandbox_section: [sandbox_workspace_write] TOML table
+            tables_section: Managed [table] sections ([sandbox_workspace_write],
+                [shell_environment_policy.set])
 
         Returns:
             Complete config.toml string with header comment
 
         Note:
             Bare top-level keys (settings_section) MUST precede any [table]
-            sections per TOML, so the sandbox/profiles/mcp tables follow it.
+            sections per TOML, so the managed/profiles/mcp tables follow it.
         """
         lines = [
             '# Codex configuration managed by HarnessSync',
@@ -1548,8 +1613,8 @@ description: {quoted_desc}
             lines.append(settings_section)
             lines.append('')
 
-        if sandbox_section:
-            lines.append(sandbox_section)
+        if tables_section:
+            lines.append(tables_section)
             lines.append('')
 
         if profiles_section:
