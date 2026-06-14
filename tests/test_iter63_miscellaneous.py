@@ -154,8 +154,14 @@ def test_drift_check_hook_installs_in_git_repo(tmp_path):
     assert "COMMIT BLOCKED" in content
 
 
-def test_drift_check_hook_not_git_repo(tmp_path):
-    """install_drift_check_hook fails gracefully outside a git repo."""
+def test_drift_check_hook_not_git_repo(tmp_path, monkeypatch):
+    """install_drift_check_hook fails gracefully outside a git repo.
+
+    Stub find_git_dir so the result doesn't depend on whether the pytest tmp dir
+    happens to sit inside a git repo (it does when TMPDIR resolves under the repo).
+    """
+    import src.git_hook_installer as ghi
+    monkeypatch.setattr(ghi, "find_git_dir", lambda *a, **k: None)
     success, msg = install_drift_check_hook(tmp_path)
     assert not success
     assert "git" in msg.lower()

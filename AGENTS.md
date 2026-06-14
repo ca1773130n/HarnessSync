@@ -1,6 +1,7 @@
 <!-- Managed by HarnessSync -->
 # Rules synced from Claude Code
 
+<!-- [harness-sync:start source=CLAUDE.md line=1-68] -->
 # [Project rules from CLAUDE.md]
 
 # HarnessSync
@@ -19,14 +20,22 @@ python3 src/commands/sync.py --dry-run   # preview without writing
 ## Architecture
 
 - `src/orchestrator.py` — central sync coordinator; reads source, runs adapters, writes targets
-- `src/source_reader.py` — discovers and reads Claude Code config (CLAUDE.md, .mcp.json, settings.json, skills/, agents/, commands/)
+- `src/source_reader.py` — re-export facade for `SourceReader`, implemented across `src/config_discovery.py` (rules, `discover_all`), `src/modular_reader.py` (skills/agents/commands/settings/env/model/sandbox/output-styles/permissions), and `src/mcp_reader.py` (MCP servers + enable/disable gates). `discover_all()` is the canonical source dict.
+- `src/sync_pipeline.py` — pre-sync pipeline run by the orchestrator before adapters: normalize/annotate rules, inject the active custom output style into rules, secret detection, config linting
 - `src/adapters/` — one adapter per target harness, all extend `src/adapters/base.py`
-  - Targets: aider, cline, codex, continue, cursor, neovim, opencode, vscode, windsurf, zed
-- `src/commands/` — slash command implementations (27 commands: sync, sync-status, sync-diff, sync-health, sync-lint, sync-scope, etc.)
+  - Targets (10): aider, cline, codex, continue, cursor, neovim, opencode, vscode, windsurf, zed (Gemini was removed — its CLI is deprecated)
+- `src/commands/` — slash command implementations (33 commands: sync, sync-status, sync-diff, sync-health, sync-lint, sync-scope, sync-tutorial, etc.)
 - `commands/` — slash command markdown definitions that Claude Code discovers
 - `hooks/hooks.json` — PostToolUse hook triggers sync on Edit/Write/MultiEdit; SessionStart hook runs startup checks
 - `src/mcp/` — MCP server (JSON-RPC over stdio) exposing sync_all, sync_target, get_status tools
-- `src/utils/` — shared helpers (logging, hashing, paths)
+- `src/analysis/` — skill linting and portability analysis
+- `src/ui/` — interactive diff rendering
+- `src/notifiers/` — desktop notifications for sync events
+- `src/override_manager.py` — per-harness config overrides
+- `src/config_linter.py` — pre-sync config validation
+- `src/rule_annotator.py` — rule provenance tracking
+- `src/profile_manager.py` — named sync profiles
+- `src/utils/` — shared helpers (logging, hashing, paths, harness binary validation)
 - `.planning/` — project roadmap, milestones, and evolve state (not runtime code)
 
 ## Key Patterns
@@ -62,7 +71,8 @@ Prefer these over Bash for file reads and large output operations:
 - Backup manager snapshots target files before overwriting; automatic rollback on failure
 - Claude Code `"deny"` permissions are never downgraded in targets
 
+<!-- [harness-sync:end] -->
 
 ---
-*Last synced by HarnessSync: 2026-03-18 04:38:11 UTC*
+*Last synced by HarnessSync: 2026-06-14 02:58:44 UTC*
 <!-- End HarnessSync managed content -->
