@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Sync Claude Code configuration to Codex, OpenCode, Cursor, and 7 more AI coding harnesses. Configure once, sync everywhere.",
-    "version": "0.2.0"
+    "version": "0.2.1"
   },
   "plugins": [
     {
@@ -15,7 +15,7 @@
         "repo": "ca1773130n/HarnessSync"
       },
       "description": "Sync Claude Code configuration to Codex, OpenCode, Cursor, and 7 more AI coding harnesses. Configure once, sync everywhere.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "author": {
         "name": "HarnessSync Contributors"
       },

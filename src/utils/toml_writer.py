@@ -513,17 +513,6 @@ def _parse_inline_table(val: str) -> dict:
     return result
 
 
-def format_inline_table(data: dict) -> str:
-    """Format a dict as a TOML inline table ``{ k = v, ... }`` (recursive)."""
-    parts = []
-    for key, value in data.items():
-        if isinstance(value, dict):
-            parts.append(f'{key} = {format_inline_table(value)}')
-        else:
-            parts.append(f'{key} = {format_toml_value(value)}')
-    return '{ ' + ', '.join(parts) + ' }'
-
-
 def read_toml_safe(path: Path) -> dict:
     """Read and parse TOML file, returning empty dict on error.
 
