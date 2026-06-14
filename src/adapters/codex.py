@@ -26,7 +26,6 @@ from src.utils.toml_writer import (
     format_mcp_servers_toml,
     format_mcp_server_toml,
     format_toml_value,
-    format_inline_table,
     write_toml_atomic,
     escape_toml_string,
     read_toml_safe,
@@ -1301,11 +1300,16 @@ class CodexAdapter(AdapterBase):
 
     @staticmethod
     def _scalar_toml(value) -> str:
-        """Format a scalar/list/dict as a TOML value (inline table for dicts)."""
-        fv = format_toml_value(value)
-        if not fv and isinstance(value, dict):
-            fv = format_inline_table(value)
-        return fv
+        """Format a scalar/list as a TOML value; dict values are intentionally
+        dropped (return '').
+
+        The only managed key that could be a dict is ``approval_policy``, and the
+        object/inline-table form is rejected by the Codex CLI (it fails to load the
+        whole config). Returning '' means such a value is omitted on re-emit, so a
+        stale granular ``approval_policy`` left over from an upgraded config is
+        healed (dropped) on the next sync of any kind — not just a settings sync.
+        """
+        return format_toml_value(value)
 
     @classmethod
     def _format_top_level_keys(cls, values: dict) -> str:

@@ -193,13 +193,34 @@ def test_output_style_file_tracked_in_source_paths(tmp_path):
     assert sf in paths["rules"]
 
 
-class TestInlineTableRoundTrip:
-    def test_parse_and_format(self):
-        from src.utils.toml_writer import parse_toml_simple, format_inline_table
+class TestInlineTableParsing:
+    def test_parse_inline_table(self):
+        # The reader must parse inline tables so a stale granular approval_policy in
+        # an upgraded config can be recognized (and then dropped on re-emit).
+        from src.utils.toml_writer import parse_toml_simple
         d = parse_toml_simple('approval_policy = { granular = { rules = true, sandbox_approval = false } }')
         assert d["approval_policy"]["granular"]["rules"] is True
         assert d["approval_policy"]["granular"]["sandbox_approval"] is False
-        assert format_inline_table({"granular": {"rules": True}}) == "{ granular = { rules = true } }"
+
+
+class TestStaleGranularHealed:
+    """Regression (Codex review of the hotfix): a stale granular approval_policy in
+    an existing config.toml must be dropped on ANY re-emit, not just settings sync."""
+
+    def test_mcp_sync_drops_stale_granular_approval(self, tmp_path):
+        cdir = tmp_path / ".codex"; cdir.mkdir()
+        cdir.joinpath("config.toml").write_text(
+            'approval_policy = { granular = { sandbox_approval = true } }\n'
+            'sandbox_mode = "workspace-write"\n',
+            encoding="utf-8",
+        )
+        # An MCP-only sync (no settings sync) must heal the broken approval_policy.
+        CodexAdapter(tmp_path).sync_mcp({"srv": {"command": "x"}})
+        text = cdir.joinpath("config.toml").read_text(encoding="utf-8")
+        assert "granular" not in text, "stale granular object form must be dropped"
+        ap = read_toml_safe(cdir / "config.toml").get("approval_policy")
+        assert ap is None or isinstance(ap, str)
+        assert "srv" in read_toml_safe(cdir / "config.toml").get("mcp_servers", {})
 
 
 class TestCodexMcpHttpTransport:
