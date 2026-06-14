@@ -14,7 +14,7 @@ python3 src/commands/sync.py --dry-run   # preview without writing
 ## Architecture
 
 - `src/orchestrator.py` — central sync coordinator; reads source, runs adapters, writes targets
-- `src/source_reader.py` — re-export facade for `SourceReader`, implemented across `src/config_discovery.py` (rules, `discover_all`), `src/modular_reader.py` (skills/agents/commands/settings/env/model/sandbox/output-styles/permissions), and `src/mcp_reader.py` (MCP servers + enable/disable gates). `discover_all()` is the canonical source dict.
+- `src/source_reader.py` — re-export facade for `SourceReader`, implemented across `src/config_discovery.py` (rules incl. ancestor/monorepo CLAUDE.md, `discover_all`), `src/modular_reader.py` (skills/agents/commands/settings/env/model/sandbox/output-styles/statusLine/permissions, plus enterprise managed-settings.json), and `src/mcp_reader.py` (MCP servers + enable/disable gates). `discover_all()` is the canonical source dict.
 - `src/sync_pipeline.py` — pre-sync pipeline run by the orchestrator before adapters: normalize/annotate rules, inject the active custom output style into rules, secret detection, config linting
 - `src/adapters/` — one adapter per target harness, all extend `src/adapters/base.py`
   - Targets (10): aider, cline, codex, continue, cursor, neovim, opencode, vscode, windsurf, zed (Gemini was removed — its CLI is deprecated)
