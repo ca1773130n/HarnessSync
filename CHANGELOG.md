@@ -2,6 +2,18 @@
 
 All notable changes to HarnessSync are documented here.
 
+## [0.2.1] — 2026-06-14 — Hotfix: Codex approval_policy
+
+### Fixed
+- **Codex `config.toml` could fail to load entirely.** The opt-in granular
+  `approval_policy` object form (`approval_policy = { granular = {...} }`,
+  triggered by `settings.codexApprovalGranular`) is rejected by the Codex CLI —
+  it makes the *whole* `config.toml` unloadable, not just the approval line.
+  Verified against `codex doctor` (`✗ config could not be loaded`). The granular
+  emission is removed; `approval_policy` is now always the supported string form
+  (`untrusted` / `on-request` / `never`). Found via end-to-end validation of the
+  generated config against the real Codex CLI.
+
 ## [0.2.0] — 2026-06-14 — Modernization (Claude Code + Codex)
 
 Brings the source reader and the Codex adapter up to the mid-2026 Claude Code and

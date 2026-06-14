@@ -1092,8 +1092,6 @@ class CodexAdapter(AdapterBase):
             ):
                 sandbox_mode = 'workspace-write'
 
-            granular = self._approval_policy_granular(settings)
-
             # Read existing config to preserve MCP servers + user-owned config.
             existing_config = self._read_existing_config()
 
@@ -1105,9 +1103,11 @@ class CodexAdapter(AdapterBase):
                 for k in self._MANAGED_TOP_LEVEL_KEYS if k in existing_config
             }
             top_values['sandbox_mode'] = sandbox_mode
-            top_values['approval_policy'] = (
-                {'granular': granular} if granular is not None
-                else self._map_approval_policy(allow_list, deny_list, ask_list, settings)
+            # approval_policy is always the string form: the granular object form
+            # (`approval_policy = { granular = {...} }`) is rejected by the Codex CLI
+            # and makes the whole config.toml fail to load.
+            top_values['approval_policy'] = self._map_approval_policy(
+                allow_list, deny_list, ask_list, settings
             )
             top_values['project_doc_fallback_filenames'] = ['CLAUDE.md']
 
@@ -1363,33 +1363,6 @@ class CodexAdapter(AdapterBase):
                 sections.append("\n".join(sec))
 
         return "\n\n".join(sections)
-
-    # Granular approval_policy categories (Codex object form).
-    _GRANULAR_KEYS: tuple[str, ...] = (
-        "sandbox_approval", "rules", "mcp_elicitations",
-        "request_permissions", "skill_approval",
-    )
-
-    @classmethod
-    def _approval_policy_granular(cls, settings: dict):
-        """Return the granular approval_policy booleans, or None for string form.
-
-        Opt-in: ``settings["codexApprovalGranular"]`` may be ``True`` (all
-        categories auto-approved) or a dict of any of the five category booleans
-        (sandbox_approval, rules, mcp_elicitations, request_permissions,
-        skill_approval). Absent/invalid -> None (keep the intent-based string form).
-        """
-        spec = settings.get("codexApprovalGranular")
-        if spec is True:
-            return {k: True for k in cls._GRANULAR_KEYS}
-        if isinstance(spec, dict):
-            out = {
-                k: bool(spec[k])
-                for k in cls._GRANULAR_KEYS
-                if isinstance(spec.get(k), bool)
-            }
-            return out or None
-        return None
 
     def _map_approval_policy(
         self,

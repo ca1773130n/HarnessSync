@@ -113,6 +113,12 @@ Default = 32 KiB. From agents-md.md:
 > Codex skips empty files and stops adding files once the combined size reaches the limit defined by `project_doc_max_bytes` (32 KiB by default).
 
 ### `approval_policy`
+> **CORRECTION (2026-06-14, verified against Codex CLI 0.139.0):** the `{ granular = {...} }`
+> OBJECT form below is documented but is **rejected by the installed Codex CLI** — it makes the
+> whole `config.toml` fail to load (`codex doctor` → `✗ config could not be loaded`). Only the
+> STRING values (`untrusted` / `on-request` / `never`) are accepted. HarnessSync emits the string
+> form only (granular emission removed in v0.2.1).
+
 > key: "approval_policy", type: "untrusted | on-request | never | { granular = { sandbox_approval = bool, rules = bool, mcp_elicitations = bool, request_permissions = bool, skill_approval = bool } }", description: "Controls when Codex pauses for approval before executing commands. You can also use `approval_policy = { granular = { ... } }` to allow or auto-reject specific prompt categories while keeping other prompts interactive. `on-failure` is deprecated; use `on-request` for interactive runs or `never` for non-interactive runs."
 
 **Allowed STRING values: `untrusted`, `on-request`, `never`.** `on-failure` is DEPRECATED.

@@ -90,8 +90,8 @@ class TestCodexConfigTomlOrdering:
         assert set(sbw.get("writable_roots", [])) == {"/w", "/d"}
 
 
-class TestCodexEnvAndApprovalGranular:
-    """Follow-ups: settings.env -> [shell_environment_policy.set]; granular approval_policy."""
+class TestCodexEnvAndApproval:
+    """settings.env -> [shell_environment_policy.set]; approval_policy is always a string."""
 
     def test_env_emitted_as_shell_environment_policy(self, tmp_path):
         CodexAdapter(tmp_path).sync_settings({"env": {"ANTHROPIC_MODEL": "x", "MCP_TIMEOUT": 30000}})
@@ -112,33 +112,21 @@ class TestCodexEnvAndApprovalGranular:
         CodexAdapter(tmp_path).sync_settings({"effort": "high"})
         assert "[shell_environment_policy" not in (tmp_path / ".codex" / "config.toml").read_text()
 
-    def test_granular_approval_policy_opt_in(self, tmp_path):
-        CodexAdapter(tmp_path).sync_settings(
-            {"codexApprovalGranular": {"sandbox_approval": True, "rules": False}}
-        )
-        parsed = read_toml_safe(tmp_path / ".codex" / "config.toml")
-        ap = parsed.get("approval_policy")
-        assert isinstance(ap, dict)
-        assert ap["granular"]["sandbox_approval"] is True
-        assert ap["granular"]["rules"] is False
-
-    def test_granular_approval_true_enables_all(self, tmp_path):
-        CodexAdapter(tmp_path).sync_settings({"codexApprovalGranular": True})
-        ap = read_toml_safe(tmp_path / ".codex" / "config.toml").get("approval_policy")
-        assert isinstance(ap, dict) and all(ap["granular"].values())
-        assert len(ap["granular"]) == 5
-
-    def test_granular_survives_mcp_resync(self, tmp_path):
-        a = CodexAdapter(tmp_path)
-        a.sync_settings({"codexApprovalGranular": {"skill_approval": True}})
-        a.sync_mcp({"srv": {"command": "x"}})
-        ap = read_toml_safe(tmp_path / ".codex" / "config.toml").get("approval_policy")
-        assert isinstance(ap, dict) and ap["granular"]["skill_approval"] is True
-
-    def test_default_approval_policy_stays_string(self, tmp_path):
-        CodexAdapter(tmp_path).sync_settings({"permissions": {"allow": ["Read"]}})
-        ap = read_toml_safe(tmp_path / ".codex" / "config.toml").get("approval_policy")
-        assert isinstance(ap, str)  # intent-based string form unchanged by default
+    def test_approval_policy_is_always_a_string(self, tmp_path):
+        # The granular object form (`approval_policy = { granular = {...} }`) is
+        # rejected by the Codex CLI and breaks the whole config, so it is never
+        # emitted — not even when the (now-ignored) codexApprovalGranular is set.
+        for settings in (
+            {"permissions": {"allow": ["Read"]}},
+            {"codexApprovalGranular": {"sandbox_approval": True}},
+            {"codexApprovalGranular": True},
+        ):
+            d = tmp_path / str(abs(hash(str(settings))))
+            d.mkdir()
+            CodexAdapter(d).sync_settings(settings)
+            ap = read_toml_safe(d / ".codex" / "config.toml").get("approval_policy")
+            assert isinstance(ap, str), f"approval_policy must be a string, got {ap!r}"
+            assert ap in ("untrusted", "on-request", "never")
 
 
 class TestCodexPreservesUserConfig:
