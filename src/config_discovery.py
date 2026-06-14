@@ -212,6 +212,22 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
                     pass  # Skip on error
 
         if self.scope in ("project", "all") and self.project_dir:
+            # Ancestor / monorepo CLAUDE.md: walk up from the project dir to the
+            # git repo root so a monorepo-root CLAUDE.md contributes broader
+            # context. Emitted root-to-leaf (broad -> specific) before project rules.
+            ancestor_rules: list[str] = []
+            for ancestor in self._ancestor_dirs(self.project_dir):
+                ap = ancestor / "CLAUDE.md"
+                if ap.exists():
+                    try:
+                        content = ap.read_text(encoding='utf-8', errors='replace')
+                        all_include_refs.extend(extract_include_refs(content))
+                        content, _included = resolve_includes(content, ap.parent)
+                        ancestor_rules.append(f"# [Ancestor rules from {ap}]\n\n{content}")
+                    except (OSError, UnicodeDecodeError):
+                        pass
+            rules.extend(reversed(ancestor_rules))  # _ancestor_dirs is nearest-first
+
             # Project-level CLAUDE.md files
             for claude_md_name in ["CLAUDE.md", "CLAUDE.local.md"]:
                 p = self.project_dir / claude_md_name
@@ -239,6 +255,40 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
         self._include_refs = all_include_refs
 
         return "\n\n---\n\n".join(rules)
+
+    @staticmethod
+    def _ancestor_dirs(start: Path):
+        """Yield strict ancestor dirs of ``start`` up to and including the git repo
+        root, nearest-first.
+
+        Yields nothing when ``start`` is not inside a git repo, or is itself the
+        repo root — this bounds the walk to the repository and avoids pulling in
+        unrelated CLAUDE.md files from above it.
+        """
+        try:
+            start = start.resolve()
+        except OSError:
+            return
+
+        git_root = None
+        node = start
+        for _ in range(40):  # safety cap
+            if (node / ".git").exists():
+                git_root = node
+                break
+            if node.parent == node:
+                break
+            node = node.parent
+
+        if git_root is None or git_root == start:
+            return
+
+        node = start
+        for _ in range(40):
+            node = node.parent
+            yield node
+            if node == git_root:
+                break
 
     def get_include_refs(self) -> list[str]:
         """Return raw ``@include`` path strings found during the last ``get_rules()`` call.
@@ -430,6 +480,7 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
             "permissions": self.get_permissions(),
             "permission_mode": self.get_permission_mode(),
             "output_styles": self.get_output_styles(),
+            "status_line": self.get_status_line(),
             "harness_overrides": self.get_harness_override_paths(),
             "hooks": self.get_hooks(),
             "plugins": self.get_plugins(),
@@ -467,6 +518,10 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
                 paths["rules"].append(user_claude_md)
 
         if self.scope in ("project", "all") and self.project_dir:
+            for ancestor in self._ancestor_dirs(self.project_dir):
+                ap = ancestor / "CLAUDE.md"
+                if ap.exists():
+                    paths["rules"].append(ap)
             for claude_md_name in ["CLAUDE.md", "CLAUDE.local.md"]:
                 p = self.project_dir / claude_md_name
                 if p.exists():
