@@ -272,18 +272,6 @@ class ModelRoutingAdapter:
             notes=notes,
         )
 
-    # ── Helpers ────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _most_capable(models: list[str]) -> str:
-        """Return the most capable Claude model from a list (by tier)."""
-        tiers = ["opus", "sonnet", "haiku"]
-        for tier in tiers:
-            for model in models:
-                if tier in model.lower():
-                    return model
-        return models[0] if models else ""
-
 
 def extract_routing_hints_from_settings_file(settings_path: "Path") -> ModelRoutingHints:
     """Convenience function: read and parse a Claude Code settings.json file.

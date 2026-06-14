@@ -35,8 +35,7 @@ HOOK_SCRIPT_TEMPLATE = """\
 # Installed by: harness-sync git-hook install
 # Remove with: harness-sync git-hook uninstall
 
-HARNESSSYNC_MARKER="# harnesssync-hook-v1"
-$HARNESSSYNC_MARKER
+# harnesssync-hook-v1
 
 # Check if any trigger files changed in this commit
 changed=$(git diff-tree --no-commit-id -r --name-only HEAD 2>/dev/null)
@@ -84,8 +83,7 @@ PRE_COMMIT_HOOK_TEMPLATE = """\
 # Installed by: /sync-git-hook install --pre-commit
 # Remove with: /sync-git-hook uninstall --pre-commit
 
-HARNESSSYNC_PRE_MARKER="# harnesssync-pre-commit-v1"
-$HARNESSSYNC_PRE_MARKER
+# harnesssync-pre-commit-v1
 
 # Check if any trigger files are staged
 staged=$(git diff --cached --name-only 2>/dev/null)
@@ -154,8 +152,7 @@ DRIFT_CHECK_HOOK_TEMPLATE = """\
 # Installed by: /sync-git-hook install --drift-check
 # Remove with:  /sync-git-hook uninstall --drift-check
 
-HARNESSSYNC_DRIFT_MARKER="# harnesssync-drift-check-v1"
-$HARNESSSYNC_DRIFT_MARKER
+# harnesssync-drift-check-v1
 
 # Only run when CLAUDE.md or .claude/ is staged — no Claude config, no check needed
 staged=$(git diff --cached --name-only 2>/dev/null)
@@ -438,8 +435,7 @@ GATE_HOOK_TEMPLATE = """\
 # Installed by: /sync-git-hook install --gate
 # Remove with:  /sync-git-hook uninstall --gate
 
-HARNESSSYNC_GATE_MARKER="# harnesssync-gate-v1"
-$HARNESSSYNC_GATE_MARKER
+# harnesssync-gate-v1
 
 # Only activate when source config files are staged
 staged=$(git diff --cached --name-only 2>/dev/null)
@@ -609,8 +605,7 @@ POST_CHECKOUT_HOOK_TEMPLATE = """\
 # Installed by: /sync-git-hook install --post-checkout
 # Remove with:  /sync-git-hook uninstall --post-checkout
 
-HARNESSSYNC_POST_CHECKOUT_MARKER="# harnesssync-post-checkout-v1"
-$HARNESSSYNC_POST_CHECKOUT_MARKER
+# harnesssync-post-checkout-v1
 
 # $3 is 1 for branch checkouts, 0 for file checkouts — only sync on branch change
 CHECKOUT_TYPE="$3"
@@ -889,8 +884,7 @@ COMMIT_ANNOTATE_HOOK_TEMPLATE = """\
 # Installed by: /sync-git-hook install --annotate
 # Remove with:  /sync-git-hook uninstall --annotate
 
-HARNESSSYNC_ANNOTATE_MARKER="# harnesssync-commit-annotate-v1"
-$HARNESSSYNC_ANNOTATE_MARKER
+# harnesssync-commit-annotate-v1
 
 # Only run when trigger files changed
 changed=$(git diff-tree --no-commit-id -r --name-only HEAD 2>/dev/null)
@@ -1124,8 +1118,7 @@ PRE_PUSH_HOOK_TEMPLATE = """\
 # Installed by: /sync-git-hook install --pre-push
 # Remove with:  /sync-git-hook uninstall --pre-push
 
-HARNESSSYNC_PRE_PUSH_MARKER="# harnesssync-pre-push-v1"
-$HARNESSSYNC_PRE_PUSH_MARKER
+# harnesssync-pre-push-v1
 
 # git pre-push receives remote name and URL as args; commits to push on stdin.
 # We read stdin to discover the local..remote range being pushed.

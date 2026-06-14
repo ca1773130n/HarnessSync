@@ -6,6 +6,7 @@ Provides ModularReaderMixin with methods to discover skills, agents,
 commands, settings, hooks, and permissions from Claude Code configuration.
 """
 
+import sys
 from pathlib import Path
 from src.utils.paths import read_json_safe
 from src.utils.permissions import extract_permissions, extract_permission_mode
@@ -207,14 +208,52 @@ class ModularReaderMixin:
                 if isinstance(proj_data, dict):
                     settings.update(proj_data)
 
-            # Local settings (.claude/settings.local.json) - highest priority
+            # Local settings (.claude/settings.local.json) - higher than project/user
             local_settings = self.project_dir / ".claude" / "settings.local.json"
             if local_settings.exists():
                 local_data = read_json_safe(local_settings)
                 if isinstance(local_data, dict):
                     settings.update(local_data)
 
+        # Enterprise managed-settings.json (highest precedence — overrides all).
+        managed = self._managed_settings_path()
+        try:
+            if managed and managed.exists():
+                managed_data = read_json_safe(managed)
+                if isinstance(managed_data, dict):
+                    settings.update(managed_data)
+        except OSError:
+            pass
+
         return settings
+
+    def _managed_settings_path(self) -> Path | None:
+        """Platform path to the enterprise managed-settings.json, or None.
+
+        Enterprise/MDM-deployed policy that overrides user and project settings,
+        matching Claude Code's precedence. Locations:
+          - macOS:   /Library/Application Support/ClaudeCode/managed-settings.json
+          - Windows: C:\\ProgramData\\ClaudeCode or C:\\Program Files\\ClaudeCode
+          - Linux:   /etc/claude-code/managed-settings.json
+
+        On Windows both documented install locations are checked; the one that
+        exists is returned (falling back to the ProgramData default).
+        """
+        if sys.platform == "darwin":
+            return Path("/Library/Application Support/ClaudeCode/managed-settings.json")
+        if sys.platform.startswith("win"):
+            candidates = [
+                Path(r"C:\ProgramData\ClaudeCode\managed-settings.json"),
+                Path(r"C:\Program Files\ClaudeCode\managed-settings.json"),
+            ]
+            for c in candidates:
+                try:
+                    if c.exists():
+                        return c
+                except OSError:
+                    pass
+            return candidates[0]
+        return Path("/etc/claude-code/managed-settings.json")
 
     def get_hooks(self) -> dict:
         """Discover hooks from settings.json and project-level hooks/hooks.json.
@@ -262,28 +301,35 @@ class ModularReaderMixin:
                                 continue
                             hooks.append(self._normalize_settings_hook(entry, event, "project"))
 
-        # Source 2: project-level hooks/hooks.json (legacy plugin format)
+        # Source 2: legacy hooks/hooks.json (user scope: cc_home; project scope: project_dir)
         # Format: {"hooks": {"PostToolUse": [{"matcher": "...", "hooks": [{"type": "command", "command": "..."}]}]}}
+        legacy_sources: list[tuple] = []
+        if self.scope in ("user", "all"):
+            legacy_sources.append((self.cc_home / "hooks" / "hooks.json", "user"))
         if self.scope in ("project", "all") and self.project_dir:
-            hooks_json = self.project_dir / "hooks" / "hooks.json"
-            if hooks_json.exists():
-                data = read_json_safe(hooks_json)
-                hooks_section = data.get("hooks", {})
-                if isinstance(hooks_section, dict):
-                    for event, event_entries in hooks_section.items():
-                        if not isinstance(event_entries, list):
+            legacy_sources.append((self.project_dir / "hooks" / "hooks.json", "project"))
+
+        for hooks_json, src_scope in legacy_sources:
+            if not hooks_json.exists():
+                continue
+            data = read_json_safe(hooks_json)
+            hooks_section = data.get("hooks", {})
+            if not isinstance(hooks_section, dict):
+                continue
+            for event, event_entries in hooks_section.items():
+                if not isinstance(event_entries, list):
+                    continue
+                for group in event_entries:
+                    if not isinstance(group, dict):
+                        continue
+                    matcher = group.get("matcher", "")
+                    inner_hooks = group.get("hooks", [])
+                    if not isinstance(inner_hooks, list):
+                        continue
+                    for hook_entry in inner_hooks:
+                        if not isinstance(hook_entry, dict):
                             continue
-                        for group in event_entries:
-                            if not isinstance(group, dict):
-                                continue
-                            matcher = group.get("matcher", "")
-                            inner_hooks = group.get("hooks", [])
-                            if not isinstance(inner_hooks, list):
-                                continue
-                            for hook_entry in inner_hooks:
-                                if not isinstance(hook_entry, dict):
-                                    continue
-                                hooks.append(self._normalize_legacy_hook(hook_entry, event, matcher, "project"))
+                        hooks.append(self._normalize_legacy_hook(hook_entry, event, matcher, src_scope))
 
         return {"hooks": hooks}
 
@@ -483,3 +529,20 @@ class ModularReaderMixin:
                 pass
 
         return {"active": active, "styles": styles}
+
+    def get_status_line(self) -> dict:
+        """Surface the ``statusLine`` and ``subagentStatusLine`` settings.
+
+        Each is a command config (e.g. ``{"type": "command", "command": "..."}``)
+        that renders the terminal status line. Few targets have an equivalent, but
+        surfacing it lets adapters that do (or future ones) consume it.
+
+        Returns:
+            Dict with ``"statusLine"`` and ``"subagentStatusLine"`` (each the raw
+            settings value or None).
+        """
+        settings = self.get_settings()
+        return {
+            "statusLine": settings.get("statusLine"),
+            "subagentStatusLine": settings.get("subagentStatusLine"),
+        }

@@ -235,6 +235,127 @@ def test_no_output_style_is_noop(tmp_path):
     assert len(sd["rules"]) == 1
 
 
+# --------------------------------------------------------------------------- #
+# Follow-up #2 — settings.env -> aider `set-env` (the one env-capable non-Codex adapter)
+# --------------------------------------------------------------------------- #
+
+def test_aider_env_to_set_env(tmp_path):
+    from src.adapters.aider import AiderAdapter
+    AiderAdapter(tmp_path).sync_settings({"env": {"HTTP_PROXY": "http://proxy:8080", "TZ": "UTC"}})
+    conf = (tmp_path / ".aider.conf.yml").read_text(encoding="utf-8")
+    assert "set-env:" in conf
+    assert "HTTP_PROXY=http://proxy:8080" in conf
+    assert "TZ=UTC" in conf
+
+
+def test_aider_env_filters_secrets(tmp_path):
+    from src.adapters.aider import AiderAdapter
+    AiderAdapter(tmp_path).sync_settings({"env": {
+        "HTTP_PROXY": "http://proxy:8080",
+        "OPENAI_API_KEY": "placeholder-not-a-real-key",
+    }})
+    conf = (tmp_path / ".aider.conf.yml").read_text(encoding="utf-8")
+    assert "HTTP_PROXY=" in conf
+    assert "OPENAI_API_KEY" not in conf  # secret-looking var is not written
+
+
+def test_aider_env_preserves_existing_set_env(tmp_path):
+    from src.adapters.aider import AiderAdapter
+    (tmp_path / ".aider.conf.yml").write_text("set-env:\n  - USER_VAR=keepme\n", encoding="utf-8")
+    AiderAdapter(tmp_path).sync_settings({"env": {"TZ": "UTC"}})
+    conf = (tmp_path / ".aider.conf.yml").read_text(encoding="utf-8")
+    assert "USER_VAR=keepme" in conf  # user entry preserved
+    assert "TZ=UTC" in conf
+
+
+# --------------------------------------------------------------------------- #
+# C8 — deferred surfaces (statusLine, user hooks, ancestor CLAUDE.md, managed-settings)
+# --------------------------------------------------------------------------- #
+
+def test_status_line_surfaced(tmp_path):
+    sl = {"type": "command", "command": "~/bin/statusline.sh"}
+    r = _reader(tmp_path, settings={"statusLine": sl, "subagentStatusLine": {"type": "command", "command": "x"}})
+    out = r.get_status_line()
+    assert out["statusLine"] == sl
+    assert out["subagentStatusLine"]["command"] == "x"
+    assert r.discover_all()["status_line"]["statusLine"] == sl
+
+
+def test_user_scope_hooks_json(tmp_path):
+    r = _reader(tmp_path, settings={})
+    user_hooks = r.cc_home / "hooks" / "hooks.json"
+    user_hooks.parent.mkdir(parents=True, exist_ok=True)
+    user_hooks.write_text(json.dumps({"hooks": {"SessionStart": [
+        {"matcher": "startup", "hooks": [{"type": "command", "command": "echo hi"}]}
+    ]}}))
+    hooks = r.get_hooks()["hooks"]
+    user = [h for h in hooks if h.get("scope") == "user" and h.get("command") == "echo hi"]
+    assert user, "user-scope hooks/hooks.json should be read"
+
+
+def test_managed_settings_highest_precedence(tmp_path, monkeypatch):
+    managed = tmp_path / "managed-settings.json"
+    managed.write_text(json.dumps({"model": "enterprise-locked"}))
+    r = _reader(tmp_path, settings={"model": "user-choice"})
+    monkeypatch.setattr(r, "_managed_settings_path", lambda: managed)
+    # managed-settings overrides the project/user value
+    assert r.get_settings()["model"] == "enterprise-locked"
+
+
+def test_managed_settings_absent_is_noop(tmp_path, monkeypatch):
+    r = _reader(tmp_path, settings={"model": "user-choice"})
+    monkeypatch.setattr(r, "_managed_settings_path", lambda: tmp_path / "does-not-exist.json")
+    assert r.get_settings()["model"] == "user-choice"
+
+
+def test_ancestor_monorepo_claude_md(tmp_path):
+    # monorepo root (with .git) + a nested project package
+    root = tmp_path / "monorepo"
+    (root / ".git").mkdir(parents=True)
+    (root / "CLAUDE.md").write_text("# Monorepo root rules\nShared conventions.")
+    pkg = root / "packages" / "app"
+    (pkg / ".claude").mkdir(parents=True)
+    (pkg / "CLAUDE.md").write_text("# App rules\nApp-specific.")
+    r = SourceReader(scope="project", project_dir=pkg, cc_home=tmp_path / "cc")
+    rules = r.get_rules()
+    assert "Shared conventions." in rules  # ancestor root CLAUDE.md included
+    assert "App-specific." in rules
+    # broad -> specific ordering: ancestor appears before the project rules
+    assert rules.index("Shared conventions.") < rules.index("App-specific.")
+    # repo-relative label only — no absolute checkout path leaks into synced rules
+    assert "[Ancestor rules from CLAUDE.md]" in rules
+    assert str(root) not in rules
+    # tracked for incremental sync
+    assert (root / "CLAUDE.md") in r.get_source_paths()["rules"]
+
+
+def test_managed_settings_tracked_in_source_paths(tmp_path, monkeypatch):
+    managed = tmp_path / "managed-settings.json"
+    managed.write_text(json.dumps({"model": "x"}))
+    r = _reader(tmp_path, settings={})
+    monkeypatch.setattr(r, "_managed_settings_path", lambda: managed)
+    assert managed in r.get_source_paths()["settings"]
+
+
+def test_ancestor_traversal_stops_at_nearest_repo_root(tmp_path):
+    # Traversal is bounded to the nearest enclosing git repo and never goes above it.
+    root = tmp_path / "repo"
+    (root / ".git").mkdir(parents=True)
+    proj = root / "a" / "b"
+    proj.mkdir(parents=True)
+    ancestors = list(SourceReader(scope="project", project_dir=proj, cc_home=tmp_path / "cc")._ancestor_dirs(proj))
+    assert root in ancestors                     # includes the repo root
+    assert root.parent not in ancestors          # never above it
+    assert all(str(a).startswith(str(root)) for a in ancestors)  # all within the repo
+
+
+def test_ancestor_traversal_none_when_project_is_repo_root(tmp_path):
+    # When the project dir IS the repo root, there are no in-repo ancestors.
+    root = tmp_path / "repo2"
+    (root / ".git").mkdir(parents=True)
+    assert list(SourceReader(scope="project", project_dir=root, cc_home=tmp_path / "cc")._ancestor_dirs(root)) == []
+
+
 def test_discover_all_has_new_keys(tmp_path):
     data = _reader(tmp_path, settings={"env": {"A": "1"}, "model": "fable"}).discover_all()
     for key in ("env", "model_config", "sandbox", "permission_mode", "output_styles", "mcp_disabled"):
