@@ -62,15 +62,34 @@ Gemini target.
   string form remains the default. The minimal TOML reader/writer gained inline-
   table support so the object form round-trips across re-syncs.
 
+### Added — more source surfaces (formerly deferred "C8")
+- `statusLine` + `subagentStatusLine` → `get_status_line()` (discover_all
+  `status_line`).
+- User-scope `hooks/hooks.json` (`~/.claude/hooks/hooks.json`) read alongside the
+  project-level file.
+- Ancestor / monorepo `CLAUDE.md`: `get_rules()` walks up to the nearest git repo
+  root so a monorepo-root `CLAUDE.md` contributes broader context (bounded to the
+  repo; tracked for incremental drift).
+- Enterprise `managed-settings.json` merged into `get_settings()` with highest
+  precedence (per-OS path).
+
+### Added — env to aider
+- `settings.env` → aider `set-env` in `.aider.conf.yml` (secret-looking vars are
+  filtered out; existing user entries preserved). NOTE: aider, codex, and
+  opencode are the only adapters that write a settings file; the IDE/extension-
+  managed harnesses (Continue, Zed, Windsurf, Cursor, Cline, Neovim, VS Code) do
+  not, so session env has no native sync target there.
+
 ### Fixed
 - Codex `config.toml`: managed bare top-level keys are preserved at the document
   root across all writers, so a later `sync_mcp` can no longer push them below
-  `[mcp_servers.*]` tables (which would silently rebind them).
-- Removed the dead `cc_mcp_global` SourceReader attribute (hardcoded
-  `Path.home()`, never read).
-
-### Remaining follow-ups
-- Propagate `settings.env` into the *non-Codex* env-aware adapters (Continue,
-  Zed, Windsurf) — Codex is done; those adapters don't yet emit session env.
-- C8 (deferred, low ROI): `statusLine`, user-scope `hooks/hooks.json`,
-  ancestor/monorepo `CLAUDE.md`, enterprise managed-settings.
+  `[mcp_servers.*]` tables (which would silently rebind them). User-owned keys and
+  managed-table siblings are preserved (merge, not overwrite).
+- git hooks: all 7 installed hook templates emitted their marker as
+  `VAR="# marker"` then `$VAR` on its own line, so the shell ran the comment and
+  printed `#: command not found` on every git operation. Replaced with a literal
+  marker comment.
+- Removed the dead `cc_mcp_global` SourceReader attribute and the orphaned
+  `_most_capable()` model-routing helper (no callers after the Gemini removal).
+- De-flaked `test_drift_check_hook_not_git_repo` (result no longer depends on
+  whether the pytest temp dir resolves inside a git repo).

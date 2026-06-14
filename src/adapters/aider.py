@@ -137,6 +137,23 @@ class AiderAdapter(AdapterBase):
         if approval in ("auto", "bypassPermissions"):
             aider_settings["yes"] = True  # aider --yes: auto-accept all changes
 
+        # Map settings.env -> aider `set-env` (list of "NAME=VALUE"). Secret-looking
+        # vars are filtered out so they're not written into the committed conf;
+        # existing user-set entries for other keys are preserved.
+        env = settings.get("env")
+        if isinstance(env, dict) and env:
+            safe = self._safe_env_vars(env)
+            if safe:
+                existing_set_env = self._read_aider_conf().get("set-env", [])
+                if not isinstance(existing_set_env, list):
+                    existing_set_env = []
+                synced_keys = set(safe)
+                preserved = [
+                    e for e in existing_set_env
+                    if isinstance(e, str) and e.split("=", 1)[0] not in synced_keys
+                ]
+                aider_settings["set-env"] = preserved + [f"{k}={v}" for k, v in safe.items()]
+
         try:
             self._merge_aider_conf(aider_settings)
             return SyncResult(synced=1, synced_files=[AIDER_CONF])
@@ -221,6 +238,25 @@ class AiderAdapter(AdapterBase):
             if tmp.exists():
                 tmp.unlink(missing_ok=True)
             raise
+
+    @staticmethod
+    def _safe_env_vars(env: dict) -> dict:
+        """Return env vars whose name/value don't look like secrets.
+
+        settings.env is not scanned by the pre-sync secret pipeline, so filter
+        here to avoid writing API keys/tokens into the committed .aider.conf.yml.
+        Values are coerced to str.
+        """
+        str_env = {str(k): str(v) for k, v in env.items()}
+        try:
+            from src.secret_detector import SecretDetector
+            sd = SecretDetector()
+            # keyword-based (secret-y var names) + entropy-based (secret-y values)
+            flagged = {d["var_name"] for d in sd.scan(str_env)}
+            flagged |= {d["var_name"] for d in sd.scan_env_with_entropy(str_env)}
+        except Exception:
+            flagged = set()
+        return {k: v for k, v in str_env.items() if k not in flagged}
 
     def _merge_aider_conf(self, updates: dict) -> None:
         """Merge updates into existing .aider.conf.yml."""

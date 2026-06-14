@@ -236,6 +236,39 @@ def test_no_output_style_is_noop(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# Follow-up #2 — settings.env -> aider `set-env` (the one env-capable non-Codex adapter)
+# --------------------------------------------------------------------------- #
+
+def test_aider_env_to_set_env(tmp_path):
+    from src.adapters.aider import AiderAdapter
+    AiderAdapter(tmp_path).sync_settings({"env": {"HTTP_PROXY": "http://proxy:8080", "TZ": "UTC"}})
+    conf = (tmp_path / ".aider.conf.yml").read_text(encoding="utf-8")
+    assert "set-env:" in conf
+    assert "HTTP_PROXY=http://proxy:8080" in conf
+    assert "TZ=UTC" in conf
+
+
+def test_aider_env_filters_secrets(tmp_path):
+    from src.adapters.aider import AiderAdapter
+    AiderAdapter(tmp_path).sync_settings({"env": {
+        "HTTP_PROXY": "http://proxy:8080",
+        "OPENAI_API_KEY": "placeholder-not-a-real-key",
+    }})
+    conf = (tmp_path / ".aider.conf.yml").read_text(encoding="utf-8")
+    assert "HTTP_PROXY=" in conf
+    assert "OPENAI_API_KEY" not in conf  # secret-looking var is not written
+
+
+def test_aider_env_preserves_existing_set_env(tmp_path):
+    from src.adapters.aider import AiderAdapter
+    (tmp_path / ".aider.conf.yml").write_text("set-env:\n  - USER_VAR=keepme\n", encoding="utf-8")
+    AiderAdapter(tmp_path).sync_settings({"env": {"TZ": "UTC"}})
+    conf = (tmp_path / ".aider.conf.yml").read_text(encoding="utf-8")
+    assert "USER_VAR=keepme" in conf  # user entry preserved
+    assert "TZ=UTC" in conf
+
+
+# --------------------------------------------------------------------------- #
 # C8 — deferred surfaces (statusLine, user hooks, ancestor CLAUDE.md, managed-settings)
 # --------------------------------------------------------------------------- #
 
