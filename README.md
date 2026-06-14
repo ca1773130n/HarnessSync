@@ -48,6 +48,8 @@ After this, syncing happens automatically via PostToolUse hooks whenever Claude 
 | `.claude/commands/` | Symlinked or summarized per target capability (namespaced/nested supported) |
 | `.mcp.json` (honors `disabledMcpjsonServers`) | `config.toml`, `settings.json`, or equivalent |
 | `settings.json` (env, model, effort, sandbox, permissions) | Target-specific env / model / reasoning-effort / sandbox config |
+| `outputStyle` + `.claude/output-styles/` | Active custom style appended to each target's system-prompt content |
+| `hooks` (settings.json / `hooks/hooks.json`) | Native lifecycle hooks where supported (e.g. Codex `[hooks.*]`) |
 
 Both **user scope** (`~/.claude/`) and **project scope** (`.claude/`, `CLAUDE.md`) are supported.
 
@@ -65,9 +67,15 @@ Both **user scope** (`~/.claude/`) and **project scope** (`.claude/`, `CLAUDE.md
 | `/sync --dry-run` | Preview changes without writing |
 | `/sync-status` | Sync status and drift detection |
 | `/sync-diff` | Show config differences across targets |
+| `/sync-watch` | Watch config files and auto-sync on change |
 | `/sync-health` | Health check for sync pipeline |
+| `/sync-score` | Sync health score |
 | `/sync-lint` | Lint config for issues |
 | `/sync-scope` | Rule scope hierarchy and conflict detection |
+| `/sync-resolve` | Resolve sync conflicts |
+| `/sync-import` | Import existing target config back to Claude Code |
+| `/sync-coverage` | Per-target coverage report |
+| `/sync-tutorial` | Interactive guided tutorial (see docs/tutorial-reference.md) |
 | `/sync-preset` | Browse and install sync profile presets |
 | `/sync-dashboard` | Visual sync dashboard |
 | `/sync-rollback` | Undo last sync |

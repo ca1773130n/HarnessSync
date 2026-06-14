@@ -14,9 +14,10 @@ python3 src/commands/sync.py --dry-run   # preview without writing
 ## Architecture
 
 - `src/orchestrator.py` — central sync coordinator; reads source, runs adapters, writes targets
-- `src/source_reader.py` — discovers and reads Claude Code config (CLAUDE.md, .mcp.json, settings.json, skills/, agents/, commands/)
+- `src/source_reader.py` — re-export facade for `SourceReader`, implemented across `src/config_discovery.py` (rules, `discover_all`), `src/modular_reader.py` (skills/agents/commands/settings/env/model/sandbox/output-styles/permissions), and `src/mcp_reader.py` (MCP servers + enable/disable gates). `discover_all()` is the canonical source dict.
+- `src/sync_pipeline.py` — pre-sync pipeline run by the orchestrator before adapters: normalize/annotate rules, inject the active custom output style into rules, secret detection, config linting
 - `src/adapters/` — one adapter per target harness, all extend `src/adapters/base.py`
-  - Targets: aider, cline, codex, continue, cursor, neovim, opencode, vscode, windsurf, zed
+  - Targets (10): aider, cline, codex, continue, cursor, neovim, opencode, vscode, windsurf, zed (Gemini was removed — its CLI is deprecated)
 - `src/commands/` — slash command implementations (33 commands: sync, sync-status, sync-diff, sync-health, sync-lint, sync-scope, sync-tutorial, etc.)
 - `commands/` — slash command markdown definitions that Claude Code discovers
 - `hooks/hooks.json` — PostToolUse hook triggers sync on Edit/Write/MultiEdit; SessionStart hook runs startup checks
