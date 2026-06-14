@@ -59,24 +59,6 @@ class CompatibilityReporter:
                 "MCP servers written to agents.json, not natively executed by codex",
             ),
         },
-        "gemini": {
-            "allowedTools": (
-                "tools.allowed",
-                "list format differs; Gemini uses string glob patterns",
-            ),
-            "deniedTools": (
-                "tools.exclude",
-                "list format differs; Gemini uses string glob patterns",
-            ),
-            "approvalMode": (
-                "(inlined as instruction)",
-                "no native approvalMode; written as an instruction block in GEMINI.md",
-            ),
-            "env": (
-                "(not synced)",
-                "environment vars not forwarded to Gemini config",
-            ),
-        },
         "opencode": {
             "allowedTools": (
                 "(inlined as instruction)",
@@ -421,7 +403,7 @@ class CompatibilityReporter:
     def format_fidelity_scores(self, scores: dict) -> str:
         """Format fidelity scores for user output.
 
-        Produces a compact per-target headline (e.g. "Gemini: 87% fidelity
+        Produces a compact per-target headline (e.g. "Codex: 87% fidelity
         (3 skills unsupported, 1 MCP server approximated)") followed by a
         per-category breakdown.
 
@@ -483,11 +465,6 @@ class CompatibilityReporter:
                 "agents": "partial",
                 "commands": "partial",
                 "mcp": "partial",
-                "settings": "partial",
-            },
-            "gemini": {
-                "agents": "partial",
-                "commands": "partial",
                 "settings": "partial",
             },
             "opencode": {
@@ -742,8 +719,8 @@ class CompatibilityReporter:
         Shows exactly which Claude Code features have no equivalent in each target,
         with item counts. Example output:
 
-            GEMINI: 3 agent(s) had tool capabilities dropped (no agent-tools support)
             CODEX: MCP servers skipped (1 server) — codex uses agents.json instead
+            CURSOR: 3 agent(s) inlined as .mdc rules (no separate agent files)
 
         Args:
             results: Dict from orchestrator mapping target -> {config_type: SyncResult}.
@@ -755,11 +732,6 @@ class CompatibilityReporter:
         # Known per-target capability gaps (static knowledge)
         # Maps target -> {config_type -> human-readable limitation}
         _KNOWN_GAPS: dict[str, dict[str, str]] = {
-            "gemini": {
-                "agents": "no agent-tool bindings (agent tools are dropped)",
-                "commands": "slash commands converted to plain GEMINI.md instructions",
-                "settings": "allowedTools / deniedTools map to tools.allowed / tools.exclude",
-            },
             "codex": {
                 "mcp": "MCP servers written to agents.json, not natively executed",
                 "commands": "slash commands have no direct Codex equivalent",
@@ -852,7 +824,7 @@ class CompatibilityReporter:
         including field renames, format differences, and unsupported fields.
 
         Args:
-            target: Target harness name (e.g., "codex", "gemini").
+            target: Target harness name (e.g., "codex", "opencode").
             settings: Claude Code settings dict (from source_data["settings"]).
 
         Returns:
@@ -918,8 +890,6 @@ class CompatibilityReporter:
         _CAPABILITY: dict[str, dict[str, str]] = {
             "codex":    {"rules": "full",  "skills": "partial", "agents": "partial",
                          "commands": "partial", "mcp": "partial", "settings": "partial"},
-            "gemini":   {"rules": "full",  "skills": "partial", "agents": "partial",
-                         "commands": "partial", "mcp": "full",    "settings": "partial"},
             "opencode": {"rules": "full",  "skills": "full",    "agents": "partial",
                          "commands": "partial", "mcp": "full",    "settings": "partial"},
             "cursor":   {"rules": "full",  "skills": "partial", "agents": "partial",
@@ -1064,7 +1034,6 @@ class CompatibilityReporter:
         # Gap matrix: harness -> feature -> fidelity ("none" | "partial")
         _GAP_MATRIX: dict[str, dict[str, str]] = {
             "codex":    {"skills": "partial", "agents": "partial", "commands": "partial"},
-            "gemini":   {"agents": "partial", "commands": "partial"},
             "opencode": {"agents": "partial", "commands": "partial", "mcp": "partial"},
             "cursor":   {"skills": "none", "agents": "none", "commands": "partial"},
             "aider":    {"skills": "none", "agents": "none", "commands": "none", "mcp": "none"},
@@ -1533,32 +1502,32 @@ def generate_sync_coverage_report(
     # harness_support_map: target -> "full"|"partial"|"none"
     _SECTION_META: list[tuple[str, str, float, dict[str, str]]] = [
         ("rules", "rules", 2.0, {
-            "codex": "full", "gemini": "full", "opencode": "full",
+            "codex": "full", "opencode": "full",
             "cursor": "full", "aider": "full", "windsurf": "full",
             "cline": "full", "continue": "full", "zed": "full", "neovim": "full",
         }),
         ("skills", "skills", 1.5, {
-            "codex": "partial", "gemini": "partial", "opencode": "full",
+            "codex": "partial", "opencode": "full",
             "cursor": "partial", "aider": "none", "windsurf": "partial",
             "cline": "partial", "continue": "none", "zed": "none", "neovim": "none",
         }),
         ("agents", "agents", 1.0, {
-            "codex": "partial", "gemini": "partial", "opencode": "partial",
+            "codex": "partial", "opencode": "partial",
             "cursor": "partial", "aider": "none", "windsurf": "partial",
             "cline": "none", "continue": "none", "zed": "none", "neovim": "none",
         }),
         ("commands", "commands", 1.0, {
-            "codex": "partial", "gemini": "partial", "opencode": "partial",
+            "codex": "partial", "opencode": "partial",
             "cursor": "partial", "aider": "none", "windsurf": "partial",
             "cline": "none", "continue": "none", "zed": "none", "neovim": "none",
         }),
         ("mcp_servers", "mcp_servers", 1.5, {
-            "codex": "partial", "gemini": "full", "opencode": "full",
+            "codex": "partial", "opencode": "full",
             "cursor": "full", "aider": "none", "windsurf": "partial",
             "cline": "full", "continue": "full", "zed": "full", "neovim": "full",
         }),
         ("settings", "settings", 1.0, {
-            "codex": "partial", "gemini": "partial", "opencode": "partial",
+            "codex": "partial", "opencode": "partial",
             "cursor": "none", "aider": "partial", "windsurf": "none",
             "cline": "partial", "continue": "none", "zed": "none", "neovim": "partial",
         }),

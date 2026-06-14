@@ -17,7 +17,7 @@ Usage:
     /sync-add-harness --force             Add even if harness is already configured
 
 Supported harness names:
-    codex, gemini, opencode, cursor, aider, windsurf, cline, continue, zed, neovim
+    codex, opencode, cursor, aider, windsurf, cline, continue, zed, neovim
 """
 
 import argparse
@@ -34,14 +34,13 @@ from src.utils.logger import Logger
 
 # Harnesses that HarnessSync has adapters for
 SUPPORTED_HARNESSES: list[str] = [
-    "codex", "gemini", "opencode", "cursor", "aider",
+    "codex", "opencode", "cursor", "aider",
     "windsurf", "cline", "continue", "zed", "neovim",
 ]
 
 # Human-readable install hints per harness
 _INSTALL_HINTS: dict[str, str] = {
     "codex":    "npm install -g @openai/codex",
-    "gemini":   "npm install -g @google/gemini-cli",
     "opencode":  "npm install -g opencode",
     "cursor":   "Download from https://cursor.sh",
     "aider":    "pip install aider-chat",
@@ -55,7 +54,6 @@ _INSTALL_HINTS: dict[str, str] = {
 # Which adapter class name maps to which harness (for the orchestrator target list)
 _ADAPTER_KEYS: dict[str, str] = {
     "codex":    "codex",
-    "gemini":   "gemini",
     "opencode": "opencode",
     "cursor":   "cursor",
     "aider":    "aider",
@@ -128,7 +126,6 @@ def _check_already_configured(harness: str, project_dir: Path) -> bool:
     """Return True if the harness appears to already have HarnessSync-managed config."""
     _INDICATOR_FILES: dict[str, list[str]] = {
         "codex":    ["AGENTS.md"],
-        "gemini":   [".gemini/GEMINI.md"],
         "opencode": [".opencode/AGENTS.md"],
         "cursor":   [".cursor/rules/"],
         "aider":    ["CONVENTIONS.md"],
@@ -145,7 +142,6 @@ def _check_already_configured(harness: str, project_dir: Path) -> bool:
     # Also check user-level config dirs
     _USER_DIRS: dict[str, Path] = {
         "codex":    Path.home() / ".codex" / "AGENTS.md",
-        "gemini":   Path.home() / ".gemini" / "GEMINI.md",
         "opencode": Path.home() / ".config" / "opencode" / "AGENTS.md",
         "cursor":   Path.home() / ".cursor" / "mcp.json",
         "windsurf": Path.home() / ".codeium" / "windsurf" / "mcp_config.json",

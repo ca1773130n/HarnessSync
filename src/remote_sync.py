@@ -38,7 +38,6 @@ from src.utils.logger import Logger
 _SYNC_FILES = [
     "CLAUDE.md",
     "AGENTS.md",
-    "GEMINI.md",
     "opencode.json",
     ".harnesssync",
 ]
@@ -51,7 +50,6 @@ _CC_GLOBAL_FILES = [
 # Remote harness detection commands (returns 0 if present)
 _DETECT_CMDS: dict[str, str] = {
     "codex": "command -v codex",
-    "gemini": "command -v gemini",
     "opencode": "command -v opencode || command -v opencode-cli",
     "cursor": "command -v cursor || test -d ~/.cursor",
     "aider": "command -v aider",
@@ -230,7 +228,7 @@ class RemoteSync:
         if not result.remote_harnesses and not self.dry_run:
             result.warnings.append(
                 "No supported harnesses detected on remote — "
-                "install Codex, Gemini CLI, or another supported harness"
+                "install Codex CLI or another supported harness"
             )
 
         # Ensure remote project dir exists

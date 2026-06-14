@@ -11,7 +11,7 @@ Rule DSL format (YAML/JSON inside CLAUDE.md fenced block):
     ```harness-rule
     id: no-hardcoded-paths
     intent: prevent_hardcoding
-    scope: [codex, gemini, opencode, cursor, aider]
+    scope: [codex, opencode, cursor, aider]
     priority: high
     text: Never hardcode absolute paths; use project-relative paths or env vars.
     applies_to: [rules]
@@ -41,7 +41,7 @@ Usage:
     rules = parser.parse(claude_md_content)
     compiler = RuleDSLCompiler()
     codex_rules = compiler.compile(rules, target="codex")
-    gemini_rules = compiler.compile(rules, target="gemini")
+    opencode_rules = compiler.compile(rules, target="opencode")
 """
 
 import re
@@ -82,7 +82,6 @@ _PRIORITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 # Target-specific preambles for compiled output
 _TARGET_PREAMBLES: dict[str, str] = {
     "codex":    "# Rules (compiled from HarnessSync Rule DSL)\n",
-    "gemini":   "# Rules (compiled from HarnessSync Rule DSL)\n",
     "opencode": "# Rules (compiled from HarnessSync Rule DSL)\n",
     "cursor":   "---\ndescription: HarnessSync compiled rules\n---\n\n",
     "aider":    "# Conventions (compiled from HarnessSync Rule DSL)\n",

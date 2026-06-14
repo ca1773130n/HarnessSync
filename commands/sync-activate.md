@@ -7,7 +7,7 @@ Activate a harness context: shows what's synced to it, outputs shell env-var exp
 Usage: /sync-activate [harness] [--export] [--open] [--list] [--json]
 
 Options:
-- harness: Harness to activate (codex, gemini, opencode, cursor, aider, windsurf)
+- harness: Harness to activate (codex, opencode, cursor, aider, windsurf)
 - --export: Emit shell exports only (eval-able: eval $(sync-activate codex --export))
 - --open: Open the primary config file in $EDITOR
 - --list: List all harnesses and their sync state

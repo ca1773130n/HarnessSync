@@ -16,7 +16,7 @@ Example profile:
             "description": "Work machine — stable skills only, no experimental MCPs",
             "scope": "all",
             "skip_sections": ["mcp"],
-            "targets": ["codex", "gemini"]
+            "targets": ["codex", "opencode"]
         },
         "minimal": {
             "description": "Minimal sync — rules only",
@@ -116,7 +116,7 @@ class ProfileManager:
         Example::
 
             {
-              "base": {"scope": "all", "targets": ["codex", "gemini"]},
+              "base": {"scope": "all", "targets": ["codex", "opencode"]},
               "work": {"extends": "base", "skip_sections": ["mcp"]}
             }
 
@@ -242,7 +242,7 @@ class ProfileManager:
             result["harness_env"] = profile["harness_env"]
 
         # Per-harness env var overrides.
-        # Format: {"codex": {"OPENAI_API_KEY": "sk-..."}, "gemini": {"GEMINI_API_KEY": "..."}}
+        # Format: {"codex": {"OPENAI_API_KEY": "sk-..."}, "opencode": {"OPENCODE_API_KEY": "..."}}
         # The caller (sync.py) is responsible for applying these to os.environ before sync.
         if "env_vars" in profile and isinstance(profile["env_vars"], dict):
             result["profile_env_vars"] = profile["env_vars"]
@@ -254,7 +254,7 @@ class ProfileManager:
 
         Args:
             profile_name: Name of the profile to look up.
-            target: Harness target name (e.g. "codex", "gemini").
+            target: Harness target name (e.g. "codex", "opencode").
 
         Returns:
             Dict mapping env var name -> value string.
@@ -1126,7 +1126,7 @@ def load_project_profile(project_dir: "Path") -> dict | None:
         {
             "description": "Work repo — no experimental MCPs",
             "skip_sections": ["mcp"],
-            "targets": ["codex", "gemini"],
+            "targets": ["codex", "opencode"],
             "extends": "base"
         }
 
@@ -1228,7 +1228,7 @@ PRESET_PROFILES: dict[str, dict] = {
         "description": "Work / corporate — strict compliance rules, approved MCP servers only",
         "scope": "all",
         "skip_sections": ["experimental"],
-        "targets": ["codex", "gemini", "opencode"],
+        "targets": ["codex", "opencode"],
         "harness_env": "corp",
         "settings_overrides": {
             "approval_mode": "auto-edit",
@@ -1249,7 +1249,7 @@ PRESET_PROFILES: dict[str, dict] = {
         "scope": "project",
         "skip_sections": ["mcp"],
         "only_sections": ["rules", "skills"],
-        "targets": ["codex", "gemini"],
+        "targets": ["codex", "opencode"],
         "harness_env": "oss",
     },
     "minimal": {
@@ -1269,7 +1269,7 @@ PRESET_PROFILES: dict[str, dict] = {
         "description": "Team standard — shared rules + MCP, no personal settings or agents",
         "scope": "all",
         "only_sections": ["rules", "mcp"],
-        "targets": ["codex", "gemini", "opencode", "cursor"],
+        "targets": ["codex", "opencode", "cursor"],
         "harness_env": "team",
         "settings_overrides": {
             "approval_mode": "auto-edit",
@@ -1291,7 +1291,7 @@ PRESET_PROFILES: dict[str, dict] = {
         "scope": "all",
         "skip_sections": ["experimental", "agents"],
         "only_sections": ["rules", "settings"],
-        "targets": ["codex", "gemini"],
+        "targets": ["codex", "opencode"],
         "harness_env": "compliance",
         "settings_overrides": {
             "approval_mode": "auto-edit",

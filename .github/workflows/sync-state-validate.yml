@@ -13,7 +13,6 @@ on:
       - '.claude/**'
       - '.mcp.json'
       - 'AGENTS.md'
-      - 'GEMINI.md'
   pull_request:
     branches: [main]
     paths:

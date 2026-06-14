@@ -21,7 +21,7 @@ The server listens on a configurable port (default: 8765) and accepts:
 Response (200 OK):
     {
         "status": "success" | "partial" | "failed",
-        "targets_synced": ["codex", "gemini"],
+        "targets_synced": ["codex", "opencode"],
         "totals": {"synced": 5, "skipped": 2, "failed": 0}
     }
 

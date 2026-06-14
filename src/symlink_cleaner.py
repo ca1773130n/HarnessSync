@@ -86,7 +86,7 @@ class SymlinkCleaner:
     Features:
     - Detects broken symlinks using is_symlink() + not exists() pattern
     - Covers all supported harness targets (codex, opencode, cursor, windsurf,
-      cline, continue, zed, neovim — gemini/aider use inline content, no symlinks)
+      cline, continue, zed, neovim — aider uses inline content, no symlinks)
     - health_report(): non-destructive scan returning SymlinkHealthReport
     - cleanup(): remove broken symlinks for a specific target
     - cleanup_all(): remove broken symlinks across all targets
@@ -126,7 +126,6 @@ class SymlinkCleaner:
             ".avante/rules/skills/",
         ],
         # Inline-content targets — no symlinks created
-        "gemini": [],
         "aider": [],
     }
 
@@ -253,7 +252,7 @@ class SymlinkCleaner:
             List of removed symlink paths
 
         Note:
-            - Targets with no symlink dirs (gemini, aider) return empty list
+            - Targets with no symlink dirs (aider) return empty list
             - Logs errors but continues processing remaining symlinks
         """
         if target_name not in self.TARGET_DIRS:

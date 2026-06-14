@@ -27,7 +27,7 @@ done
 
 echo -e "\n${BOLD}${BLUE}╔═══════════════════════════════════════╗${NC}"
 echo -e "${BOLD}${BLUE}║  HarnessSync Installation             ║${NC}"
-echo -e "${BOLD}${BLUE}║  Claude Code → Codex + Gemini + OC    ║${NC}"
+echo -e "${BOLD}${BLUE}║  Claude Code → Codex + OpenCode + 8   ║${NC}"
 echo -e "${BOLD}${BLUE}╚═══════════════════════════════════════╝${NC}\n"
 
 if [[ "$DRY_RUN" == true ]]; then
@@ -70,16 +70,13 @@ echo -e "\n${BLUE}[2/4] Creating target directories${NC}"
 
 if [[ "$DRY_RUN" == true ]]; then
     echo -e "  [DRY RUN] Would create \${CODEX_HOME:-~/.codex}/skills/"
-    echo -e "  [DRY RUN] Would create ~/.gemini/"
     echo -e "  [DRY RUN] Would create ~/.config/opencode/{skills,agents,commands}/"
 else
     mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-    mkdir -p "$HOME/.gemini"
     mkdir -p "$HOME/.config/opencode/skills"
     mkdir -p "$HOME/.config/opencode/agents"
     mkdir -p "$HOME/.config/opencode/commands"
     echo -e "  ${GREEN}✓${NC} \${CODEX_HOME:-~/.codex}/skills/"
-    echo -e "  ${GREEN}✓${NC} ~/.gemini/"
     echo -e "  ${GREEN}✓${NC} ~/.config/opencode/{skills,agents,commands}/"
 fi
 

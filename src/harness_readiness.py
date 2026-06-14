@@ -51,13 +51,6 @@ TARGET_CONFIGS: dict[str, dict] = {
         "description": "OpenAI Codex CLI",
         "install_hint": "npm install -g @openai/codex",
     },
-    "gemini": {
-        "cli": ["gemini"],
-        "config_dirs": [Path.home() / ".gemini"],
-        "env_vars": ["GEMINI_API_KEY"],
-        "description": "Google Gemini CLI",
-        "install_hint": "npm install -g @google/gemini-cli",
-    },
     "opencode": {
         "cli": ["opencode", "opencode-cli"],
         "config_dirs": [Path.home() / ".config" / "opencode"],
@@ -96,7 +89,7 @@ class HarnessReadinessChecker:
         """Run readiness checks for a single target.
 
         Args:
-            target: Target name (codex, gemini, etc.)
+            target: Target name (codex, opencode, etc.)
             project_dir: Project root directory
 
         Returns:

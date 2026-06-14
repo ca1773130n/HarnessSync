@@ -53,7 +53,6 @@ from dataclasses import dataclass, field
 
 _HARNESS_REPOS: dict[str, str] = {
     "codex":    "openai/openai-codex",
-    "gemini":   "google-gemini/gemini-cli",
     "opencode": "opencode-ai/opencode",
     "cursor":   "getcursor/cursor",
     "aider":    "paul-gauthier/aider",
@@ -455,8 +454,6 @@ _UPVOTE_STORE_PATH = (
 # Updated when new harness versions add features.
 # "supported" means the gap may now be resolved; None = unknown.
 _KNOWN_SUPPORT: dict[tuple[str, str], bool] = {
-    ("gemini", "skills"):   True,   # Gemini CLI added native skill support
-    ("gemini", "commands"): True,   # Gemini CLI added native command support
     ("codex", "mcp"):       True,   # Codex added MCP support
     ("cursor", "skills"):   False,  # No native skill concept yet
     ("aider", "skills"):    False,  # No native skill concept in Aider
@@ -648,10 +645,6 @@ _WORKAROUNDS: dict[tuple[str, str], list[str]] = {
         "Use Windsurf's built-in tool integrations (file system, terminal) as MCP alternatives.",
         "For custom MCP tools: run them as background processes and read their output via context.",
     ],
-    ("gemini", "commands"): [
-        "Use Gemini CLI's `@file` context injection as an approximation of slash commands.",
-        "Create shell aliases: `alias /fix-types='gemini --context skills/fix-types.md'`.",
-    ],
     ("cline", "agents"): [
         "Use Cline's task chaining feature in VS Code to approximate multi-agent flows.",
     ],
@@ -677,7 +670,7 @@ _GENERIC_WORKAROUNDS: dict[str, list[str]] = {
     ],
     "settings": [
         "Document your desired permission model in CLAUDE.md comments for reference.",
-        "Use harness-specific config files (.cursorrules, GEMINI.md) for settings approximation.",
+        "Use harness-specific config files (.cursorrules, AGENTS.md) for settings approximation.",
     ],
 }
 

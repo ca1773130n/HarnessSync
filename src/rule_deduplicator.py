@@ -3,7 +3,7 @@ from __future__ import annotations
 """Cross-harness rule deduplication analyzer.
 
 Detects when the same rule or instruction exists in CLAUDE.md, AGENTS.md,
-GEMINI.md, and other harness config files written in slightly different ways.
+and other harness config files written in slightly different ways.
 Offers to canonicalize them under Claude Code as the single source of truth.
 
 Detection approach:
@@ -28,7 +28,6 @@ from pathlib import Path
 _HARNESS_FILES: dict[str, str] = {
     "claude":    "CLAUDE.md",
     "codex":     "AGENTS.md",
-    "gemini":    "GEMINI.md",
     "opencode":  "AGENTS.md",  # opencode also uses AGENTS.md
     "windsurf":  ".windsurfrules",
     "aider":     "CONVENTIONS.md",
@@ -306,7 +305,7 @@ class RuleDeduplicator:
             lines.append(
                 "  Move canonical versions of cross-harness rules to CLAUDE.md "
                 "and let HarnessSync distribute them. Remove the duplicates from "
-                "AGENTS.md, GEMINI.md, etc. to prevent drift."
+                "AGENTS.md, .windsurfrules, etc. to prevent drift."
             )
 
         return "\n".join(lines)

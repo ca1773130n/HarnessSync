@@ -170,7 +170,6 @@ def semantic_drift_summary(
     # Target config file paths (primary rules file per harness)
     _TARGET_RULES_FILES: dict[str, str] = {
         "codex": "AGENTS.md",
-        "gemini": "GEMINI.md",
         "opencode": "AGENTS.md",
         "cursor": ".cursor/rules/harnesssync.mdc",
         "aider": "CONVENTIONS.md",

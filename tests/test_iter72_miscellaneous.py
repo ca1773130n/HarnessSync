@@ -37,7 +37,7 @@ class TestAuditLog:
 
     def test_record_returns_entry(self, tmp_path):
         log = AuditLog(project_dir=tmp_path)
-        entry = log.record("sync", targets=["codex", "gemini"])
+        entry = log.record("sync", targets=["codex", "opencode"])
         assert entry.event == "sync"
         assert "codex" in entry.targets
         assert entry.chain_hash  # non-empty
@@ -66,7 +66,7 @@ class TestAuditLog:
     def test_verify_detects_tampering(self, tmp_path):
         log = AuditLog(project_dir=tmp_path)
         log.record("sync", targets=["codex"])
-        log.record("sync", targets=["gemini"])
+        log.record("sync", targets=["opencode"])
 
         # Tamper: overwrite the first line
         lines = log.log_path.read_text().splitlines()
@@ -82,7 +82,7 @@ class TestAuditLog:
     def test_verify_detects_line_deletion(self, tmp_path):
         log = AuditLog(project_dir=tmp_path)
         log.record("sync", targets=["codex"])
-        log.record("sync", targets=["gemini"])
+        log.record("sync", targets=["cursor"])
         log.record("sync", targets=["opencode"])
 
         # Delete the middle line
@@ -113,7 +113,7 @@ class TestAuditLog:
 
     def test_format_timeline_shows_events(self, tmp_path):
         log = AuditLog(project_dir=tmp_path)
-        log.record("sync", targets=["codex", "gemini"], files_changed=["AGENTS.md"])
+        log.record("sync", targets=["codex", "opencode"], files_changed=["AGENTS.md"])
         text = log.format_timeline()
         assert "sync" in text
         assert "codex" in text
@@ -244,7 +244,7 @@ class TestPolicyEnforcer:
 
     def test_check_all_aggregates(self):
         enforcer = PolicyEnforcer(policy=self._policy(must_not_sync=["mcp"]))
-        result = enforcer.check_all(self._source(), targets=["codex", "gemini"])
+        result = enforcer.check_all(self._source(), targets=["codex", "opencode"])
         assert result.total_errors == 2  # mcp present in both
 
     def test_strip_forbidden_sections(self):
@@ -315,15 +315,15 @@ class TestPolicyEnforcer:
     def test_policy_check_result_any_blocked(self):
         r1 = PolicyReport(target="codex")
         r2 = PolicyReport(
-            target="gemini",
-            violations=[PolicyViolation("error", "mcp", "gemini", "forbidden")],
+            target="opencode",
+            violations=[PolicyViolation("error", "mcp", "opencode", "forbidden")],
         )
         result = PolicyCheckResult(reports=[r1, r2])
         assert result.any_blocked is True
 
     def test_policy_check_result_none_blocked(self):
         r1 = PolicyReport(target="codex")
-        r2 = PolicyReport(target="gemini")
+        r2 = PolicyReport(target="opencode")
         result = PolicyCheckResult(reports=[r1, r2])
         assert result.any_blocked is False
 

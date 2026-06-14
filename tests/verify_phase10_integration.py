@@ -1,13 +1,11 @@
 """Phase 10 Integration Test: Scope-Aware Target Sync & Environment Translation.
 
-Verifies all 7 Phase 10 requirements:
-- SYNC-01: Gemini scope routing (user/project separation)
+Verifies the Phase 10 requirements:
 - SYNC-02: Codex scope routing (user/project separation)
 - SYNC-03: Plugin MCPs route to user-scope only
-- SYNC-04: Transport detection (SSE skipped on Codex, included on Gemini)
+- SYNC-04: Transport detection (SSE skipped on Codex)
 - ENV-01: ${VAR} translated to literal values for Codex
 - ENV-02: ${VAR:-default} uses default when var unset
-- ENV-03: Gemini preserves ${VAR} syntax unchanged
 """
 
 import json
@@ -25,7 +23,6 @@ os.environ["TEST_API_KEY"] = "sk-test-integration-key"
 os.environ.pop("UNDEFINED_PORT", None)
 
 from src.adapters.codex import CodexAdapter
-from src.adapters.gemini import GeminiAdapter
 from src.adapters.opencode import OpenCodeAdapter
 
 
@@ -219,94 +216,6 @@ def run_tests():
             check(
                 "${UNDEFINED_PORT:-3000} NOT in Codex output",
                 "${UNDEFINED_PORT:-3000}" not in user_content,
-            )
-            print()
-
-    # ================================================================
-    # GEMINI TESTS
-    # ================================================================
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-        home_dir = tmpdir / "home"
-        proj_dir = tmpdir / "project"
-        home_dir.mkdir()
-        proj_dir.mkdir()
-
-        with patch.object(Path, "home", return_value=home_dir):
-            adapter = GeminiAdapter(proj_dir)
-            result = adapter.sync_mcp_scoped(SCOPED_MCPS)
-
-            user_config_path = home_dir / ".gemini" / "settings.json"
-            proj_config_path = proj_dir / ".gemini" / "settings.json"
-
-            # --- SYNC-01: Gemini scope routing ---
-            print("SYNC-01: Gemini scope routing")
-            check(
-                "User-scope settings.json exists",
-                user_config_path.exists(),
-                f"Expected {user_config_path}",
-            )
-            check(
-                "Project-scope settings.json exists",
-                proj_config_path.exists(),
-                f"Expected {proj_config_path}",
-            )
-
-            user_json = json.loads(user_config_path.read_text()) if user_config_path.exists() else {}
-            proj_json = json.loads(proj_config_path.read_text()) if proj_config_path.exists() else {}
-
-            user_mcps = user_json.get("mcpServers", {})
-            proj_mcps = proj_json.get("mcpServers", {})
-
-            check(
-                f"User config has 4 servers (api, port, plugin, sse)",
-                len(user_mcps) == 4,
-                f"Got {len(user_mcps)}: {list(user_mcps.keys())}",
-            )
-            check(
-                "Project config has 1 server (project-db)",
-                len(proj_mcps) == 1 and "project-db" in proj_mcps,
-                f"Got {len(proj_mcps)}: {list(proj_mcps.keys())}",
-            )
-            print()
-
-            # --- SYNC-03: Plugin MCPs user-scope on Gemini ---
-            print("SYNC-03: Plugin MCPs user-scope (Gemini)")
-            check(
-                "plugin-tools in Gemini user config",
-                "plugin-tools" in user_mcps,
-            )
-            check(
-                "plugin-tools NOT in Gemini project config",
-                "plugin-tools" not in proj_mcps,
-            )
-            print()
-
-            # --- SYNC-04: SSE included on Gemini (supported) ---
-            print("SYNC-04: Transport detection (Gemini)")
-            check(
-                "SSE server included on Gemini (SSE supported)",
-                "sse-analytics" in user_mcps,
-                f"Gemini user MCPs: {list(user_mcps.keys())}",
-            )
-            print()
-
-            # --- ENV-03: Gemini preserves ${VAR} syntax ---
-            print("ENV-03: Gemini env var preservation")
-            api_config = user_mcps.get("api-server", {})
-            api_args = api_config.get("args", [])
-            check(
-                "${TEST_API_KEY} preserved in Gemini args",
-                "${TEST_API_KEY}" in str(api_args),
-                f"args: {api_args}",
-            )
-
-            port_config = user_mcps.get("port-server", {})
-            port_args = port_config.get("args", [])
-            check(
-                "${UNDEFINED_PORT:-3000} preserved in Gemini args",
-                "${UNDEFINED_PORT:-3000}" in str(port_args),
-                f"args: {port_args}",
             )
             print()
 

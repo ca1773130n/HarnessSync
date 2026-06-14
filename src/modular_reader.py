@@ -8,7 +8,7 @@ commands, settings, hooks, and permissions from Claude Code configuration.
 
 from pathlib import Path
 from src.utils.paths import read_json_safe
-from src.utils.permissions import extract_permissions
+from src.utils.permissions import extract_permissions, extract_permission_mode
 
 
 class ModularReaderMixin:
@@ -85,15 +85,17 @@ class ModularReaderMixin:
             Includes agents from ~/.claude/agents/ and project .claude/agents/
 
         Note:
+            - Discovery is recursive (rglob), so namespaced agents organized in
+              subdirectories are found (previously missed by non-recursive iterdir)
             - Hidden files (starting with .) are filtered out
             - Only .md files are included
-            - Non-file entries (directories) are skipped
+            - Keyed by file stem; on a name collision across namespaces, last wins
         """
         agents = {}
 
         if self.scope in ("user", "all"):
             if self.cc_agents.is_dir():
-                for f in self.cc_agents.iterdir():
+                for f in self.cc_agents.rglob("*.md"):
                     try:
                         # Skip hidden files and non-.md files
                         if f.suffix == ".md" and not f.name.startswith('.') and f.is_file():
@@ -106,7 +108,7 @@ class ModularReaderMixin:
                 try:
                     agents_dir = p / "agents"
                     if agents_dir.is_dir():
-                        for f in agents_dir.iterdir():
+                        for f in agents_dir.rglob("*.md"):
                             if f.suffix == ".md" and not f.name.startswith('.') and f.is_file():
                                 agents[f.stem] = f
                 except (OSError, ValueError):
@@ -115,7 +117,7 @@ class ModularReaderMixin:
         if self.scope in ("project", "all") and self.project_dir:
             proj_agents = self.project_dir / ".claude" / "agents"
             if proj_agents.is_dir():
-                for f in proj_agents.iterdir():
+                for f in proj_agents.rglob("*.md"):
                     try:
                         if f.suffix == ".md" and not f.name.startswith('.') and f.is_file():
                             agents[f.stem] = f
@@ -133,15 +135,17 @@ class ModularReaderMixin:
             Includes commands from ~/.claude/commands/ and project .claude/commands/
 
         Note:
+            - Discovery is recursive (rglob), so namespaced commands organized in
+              subdirectories (e.g. /foo:bar) are found (previously missed)
             - Hidden files (starting with .) are filtered out
             - Only .md files are included
-            - Non-file entries (directories) are skipped
+            - Keyed by file stem; on a name collision across namespaces, last wins
         """
         commands = {}
 
         if self.scope in ("user", "all"):
             if self.cc_commands.is_dir():
-                for f in self.cc_commands.iterdir():
+                for f in self.cc_commands.rglob("*.md"):
                     try:
                         # Skip hidden files and non-.md files
                         if f.suffix == ".md" and not f.name.startswith('.') and f.is_file():
@@ -154,7 +158,7 @@ class ModularReaderMixin:
                 try:
                     commands_dir = p / "commands"
                     if commands_dir.is_dir():
-                        for f in commands_dir.iterdir():
+                        for f in commands_dir.rglob("*.md"):
                             if f.suffix == ".md" and not f.name.startswith('.') and f.is_file():
                                 commands[f.stem] = f
                 except (OSError, ValueError):
@@ -163,7 +167,7 @@ class ModularReaderMixin:
         if self.scope in ("project", "all") and self.project_dir:
             proj_cmds = self.project_dir / ".claude" / "commands"
             if proj_cmds.is_dir():
-                for f in proj_cmds.iterdir():
+                for f in proj_cmds.rglob("*.md"):
                     try:
                         if f.suffix == ".md" and not f.name.startswith('.') and f.is_file():
                             commands[f.stem] = f
@@ -373,3 +377,109 @@ class ModularReaderMixin:
             return extract_permissions(settings)
         except Exception:
             return {"allow": [], "deny": [], "ask": []}
+
+    def get_permission_mode(self) -> dict:
+        """Surface ``permissions.defaultMode`` + ``additionalDirectories``.
+
+        Separate from :meth:`get_permissions` (which returns allow/deny/ask) so
+        adapters can map the session permission mode and extra writable roots onto
+        target sandbox/approval models without re-parsing settings.
+
+        Returns:
+            Dict with ``"defaultMode"`` (str or None) and
+            ``"additionalDirectories"`` (list[str]).
+        """
+        try:
+            return extract_permission_mode(self.get_settings())
+        except Exception:
+            return {"defaultMode": None, "additionalDirectories": []}
+
+    def get_env(self) -> dict:
+        """Surface the ``settings.env`` block (session environment variables).
+
+        Claude Code's ``env`` settings block bakes variables (e.g.
+        ``ANTHROPIC_MODEL``, ``MCP_TIMEOUT``, ``DISABLE_TELEMETRY``) into every
+        session. Adapters with their own env maps (Codex
+        ``[shell_environment_policy].set``, Continue, Zed) consume this.
+
+        Returns:
+            Dict of env var name -> string value (values coerced to str).
+            Empty dict if ``env`` is absent or not a mapping.
+        """
+        settings = self.get_settings()
+        env = settings.get("env", {})
+        if not isinstance(env, dict):
+            return {}
+        return {str(k): str(v) for k, v in env.items()}
+
+    def get_model_config(self) -> dict:
+        """Surface model + reasoning-effort selection from settings.
+
+        Returns the ``model`` key (an alias like ``"opusplan"``/``"fable"`` or a
+        full model id) and the ``effort`` key (``low``/``medium``/``high``/
+        ``xhigh``) so adapters can emit a real default model and reasoning effort
+        instead of relying on lossy per-task ``modelOverrides``.
+
+        Returns:
+            Dict with ``"model"`` (str or None) and ``"effort"`` (str or None).
+        """
+        settings = self.get_settings()
+        model = settings.get("model")
+        effort = settings.get("effort")
+        return {
+            "model": model if isinstance(model, str) else None,
+            "effort": effort if isinstance(effort, str) else None,
+        }
+
+    def get_sandbox(self) -> dict:
+        """Surface the Claude Code ``sandbox`` settings block.
+
+        NOTE: distinct from HarnessSync's own sandbox *simulation*
+        (``src/sync_sandbox.py``). Claude Code's ``sandbox`` settings key holds
+        ``{enabled, excludedCommands, filesystem:{allowWrite, denyWrite}, ...}``
+        and maps onto Codex ``[sandbox_workspace_write]`` (``writable_roots``,
+        ``network_access``).
+
+        Returns:
+            The ``sandbox`` dict from settings, or ``{}`` if absent/invalid.
+        """
+        settings = self.get_settings()
+        sandbox = settings.get("sandbox", {})
+        return sandbox if isinstance(sandbox, dict) else {}
+
+    def get_output_styles(self) -> dict:
+        """Discover output styles (system-prompt personas).
+
+        Reads the active ``outputStyle`` name from settings and discovers custom
+        output-style markdown bodies from ``<cc_home>/output-styles/*.md`` (user)
+        and ``<project>/.claude/output-styles/*.md`` (project). Custom output
+        styles append to the system prompt and map onto harnesses that write a
+        system-prompt file (e.g. Zed, neovim/avante, Continue).
+
+        Returns:
+            Dict with:
+              - ``"active"``: str or None — the selected output style name
+              - ``"styles"``: dict[name -> Path] — discovered custom style files
+        """
+        settings = self.get_settings()
+        active = settings.get("outputStyle")
+        if not isinstance(active, str):
+            active = None
+
+        styles: dict[str, Path] = {}
+        dirs = []
+        if self.scope in ("user", "all"):
+            dirs.append(self.cc_home / "output-styles")
+        if self.scope in ("project", "all") and self.project_dir:
+            dirs.append(self.project_dir / ".claude" / "output-styles")
+
+        for d in dirs:
+            try:
+                if d.is_dir():
+                    for f in d.glob("*.md"):
+                        if f.is_file() and not f.name.startswith("."):
+                            styles[f.stem] = f
+            except OSError:
+                pass
+
+        return {"active": active, "styles": styles}

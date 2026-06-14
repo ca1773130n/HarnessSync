@@ -17,7 +17,6 @@ Claude Code permission model:
 
 Target mappings:
   Codex:    allowedCommands / deniedCommands (shell-only; no MCP tool refs)
-  Gemini:   tools.allowed / tools.exclude (glob patterns)
   OpenCode: per-tool enable/disable in opencode.json
   Cursor:   .cursor/rules/*.mdc comment block (no native permission system)
   Aider:    CONVENTIONS.md comment block (no native permission system)
@@ -42,12 +41,6 @@ _APPROVAL_MODE_MAP: dict[str, dict[str, str]] = {
         "auto":     "full-auto",
         "suggest":  "on-request",
         "manual":   "on-request",
-    },
-    "gemini": {
-        # Gemini has no approvalMode; yolo is never auto-enabled
-        "auto":     "default",
-        "suggest":  "default",
-        "manual":   "default",
     },
     "opencode": {
         "auto":     "auto",
@@ -191,18 +184,6 @@ class PermissionTranslator:
                 dropped_items=dropped,
             )
 
-        if target == "gemini":
-            # Gemini uses glob patterns for tools.allowed
-            gemini_patterns = [_tool_to_gemini_pattern(t) for t in tools]
-            return PermissionTranslation(
-                target=target,
-                setting="allowedTools",
-                translated_key="tools.allowed",
-                translated_value=gemini_patterns,
-                comment="Converted to Gemini glob patterns",
-                fidelity="approximated",
-            )
-
         if target == "opencode":
             return PermissionTranslation(
                 target=target,
@@ -250,17 +231,6 @@ class PermissionTranslator:
                 ),
                 fidelity="approximated" if dropped else "native",
                 dropped_items=dropped,
-            )
-
-        if target == "gemini":
-            gemini_patterns = [_tool_to_gemini_pattern(t) for t in tools]
-            return PermissionTranslation(
-                target=target,
-                setting="deniedTools",
-                translated_key="tools.exclude",
-                translated_value=gemini_patterns,
-                comment="Converted to Gemini glob patterns; enforcement depends on Gemini version",
-                fidelity="approximated",
             )
 
         if target == "opencode":
@@ -371,22 +341,6 @@ def _is_shell_tool(tool_name: str) -> bool:
         return False
     # Allow known Claude Code built-in tool names through
     return tool_name in _SHELL_EXECUTABLE_TOOLS or "/" in tool_name or tool_name.endswith(".sh")
-
-
-def _tool_to_gemini_pattern(tool_name: str) -> str:
-    """Convert a Claude Code tool name to a Gemini glob pattern.
-
-    Gemini uses strings like "bash", "read_file", "*" for tool matching.
-    MCP tool refs (mcp__server__tool) are converted to their server prefix.
-    """
-    if tool_name.startswith(_MCP_TOOL_PREFIX):
-        # e.g. mcp__github__search → github_*
-        parts = tool_name.split("__", 2)
-        if len(parts) >= 2:
-            return f"{parts[1]}_*"
-        return tool_name
-    # Built-in tools — lower-case, snake_case form
-    return tool_name.lower().replace(" ", "_")
 
 
 # ---------------------------------------------------------------------------
@@ -593,7 +547,6 @@ _SECURITY_MODEL_DESCRIPTIONS: dict[str, dict[str, str]] = {
     "shell_execution": {
         "claude-code": "Bash tool runs commands with full user privileges; approve/deny per-command in suggest mode.",
         "codex":    "Shell commands in AGENTS.md are executed in a sandboxed container by default; --dangerously-allow-host-access exits sandbox.",
-        "gemini":   "Shell tool executes as the user; gemini-cli has no built-in sandbox.",
         "cursor":   "Terminal commands run as the user with no additional sandboxing beyond OS permissions.",
         "aider":    "Aider runs git commands and optionally user-defined scripts; no sandboxing.",
         "windsurf": "Shell commands execute as the user; Windsurf Flow follows IDE trust model.",
@@ -605,7 +558,6 @@ _SECURITY_MODEL_DESCRIPTIONS: dict[str, dict[str, str]] = {
     "file_write": {
         "claude-code": "Write/Edit tools modify files directly; all paths accessible unless denied via deniedTools.",
         "codex":    "File edits are sandboxed; diffs shown before apply; --dangerously-allow-host-access bypasses this.",
-        "gemini":   "File edits applied directly to the working directory with no diff preview by default.",
         "cursor":   "Cursor applies edits directly; user can review diffs in the IDE before accepting.",
         "aider":    "Aider always shows a diff and requires confirmation (--yes flag bypasses).",
         "windsurf": "Cascade applies edits directly; file preview is shown in the IDE.",
@@ -614,14 +566,12 @@ _SECURITY_MODEL_DESCRIPTIONS: dict[str, dict[str, str]] = {
     "network_access": {
         "claude-code": "WebFetch/WebSearch tools access the network; can be denied via deniedTools.",
         "codex":    "Network access is sandboxed by default; --dangerously-allow-host-access enables it.",
-        "gemini":   "Gemini CLI accesses the network for tool calls and grounding; no per-request approval.",
         "cursor":   "Network requests happen within the IDE process; no separate permission gate.",
         "aider":    "Aider makes no network requests during editing; LLM API calls are the only network use.",
     },
     "env_var_exposure": {
         "claude-code": "Environment variables in settings.json are injected into the shell; visible to all tools.",
         "codex":    "Env vars in config.toml are available to shell commands inside the container.",
-        "gemini":   "Env vars in settings.json are available to the gemini-cli process and tools it spawns.",
         "opencode": "Env vars in opencode.json are available to all tool calls.",
         "cursor":   "Env vars in .cursor/mcp.json env blocks are passed only to the specific MCP server.",
     },
@@ -639,10 +589,6 @@ _SECURITY_DIVERGENCES: dict[str, list[tuple[str, str]]] = {
     "aider": [
         ("shell_execution", "Aider's --yes flag bypasses confirmation for all commands, similar "
                             "to Claude Code's acceptEdits mode, but there is no per-command approval."),
-    ],
-    "gemini": [
-        ("network_access",  "Gemini's web search grounding makes network calls automatically with "
-                            "no deny-list equivalent for Claude Code's deniedTools."),
     ],
 }
 
@@ -664,7 +610,7 @@ def compare_security_models(
     Returns:
         Multi-line explanation string with flagged divergences.
     """
-    target_list = targets or ["codex", "gemini", "cursor", "aider", "windsurf", "cline", "opencode"]
+    target_list = targets or ["codex", "cursor", "aider", "windsurf", "cline", "opencode"]
 
     lines: list[str] = [
         "Permission Security Model Comparison",

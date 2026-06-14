@@ -55,7 +55,7 @@ def test_conflict_wizard_theirs_returns_current():
     """Strategy 'theirs' preserves manual edits."""
     wizard = SyncConflictWizard(strategy="theirs")
     three_way = {
-        "file_path": "GEMINI.md",
+        "file_path": "AGENTS.md",
         "source_lines": ["sync version\n"],
         "current_lines": ["manual version\n"],
     }
@@ -141,7 +141,7 @@ def test_load_project_profile_missing(tmp_path):
 
 def test_save_and_load_project_profile(tmp_path):
     """Saving then loading a project profile round-trips correctly."""
-    profile = {"skip_sections": ["mcp"], "targets": ["codex", "gemini"]}
+    profile = {"skip_sections": ["mcp"], "targets": ["codex", "opencode"]}
     save_project_profile(tmp_path, profile)
     loaded = load_project_profile(tmp_path)
     assert loaded == profile
@@ -162,9 +162,9 @@ def test_load_project_profile_invalid_json(tmp_path):
 def test_merge_project_profile_project_wins():
     """Project profile keys override named profile keys."""
     named = {"scope": "all", "targets": ["codex"]}
-    project = {"targets": ["gemini"], "skip_sections": ["mcp"]}
+    project = {"targets": ["opencode"], "skip_sections": ["mcp"]}
     merged = merge_project_profile(named, project)
-    assert merged["targets"] == ["gemini"]
+    assert merged["targets"] == ["opencode"]
     assert merged["scope"] == "all"
     assert merged["skip_sections"] == ["mcp"]
 
@@ -347,7 +347,6 @@ def test_render_coverage_heatmap_basic():
     matrix = HarnessFeatureMatrix()
     output = matrix.render_coverage_heatmap()
     assert "codex" in output
-    assert "gemini" in output
     assert "aider" in output
 
 
@@ -369,9 +368,9 @@ def test_render_coverage_heatmap_coverage_line():
 def test_render_coverage_heatmap_subset_targets():
     """Heatmap with restricted targets only shows those targets."""
     matrix = HarnessFeatureMatrix()
-    output = matrix.render_coverage_heatmap(targets=["codex", "gemini"])
+    output = matrix.render_coverage_heatmap(targets=["codex", "opencode"])
     assert "codex" in output
-    assert "gemini" in output
+    assert "opencode" in output
     assert "aider" not in output
 
 
@@ -408,9 +407,9 @@ def test_build_capability_preview_returns_targets():
     current = {"rules": "use TypeScript\n", "mcp": {"github": {}}, "skills": []}
     previous = {"rules": "", "mcp": {}, "skills": []}
     previews = predictor.build_capability_preview(
-        current, previous, targets=["codex", "gemini", "aider"]
+        current, previous, targets=["codex", "opencode", "aider"]
     )
-    assert set(previews.keys()) == {"codex", "gemini", "aider"}
+    assert set(previews.keys()) == {"codex", "opencode", "aider"}
 
 
 def test_build_capability_preview_rules_added():
@@ -463,10 +462,10 @@ def test_format_capability_preview_output():
     predictor = SyncImpactPredictor()
     current = {"rules": "new rule\n", "mcp": {"gh": {}}}
     previous = {}
-    previews = predictor.build_capability_preview(current, previous, targets=["codex", "gemini"])
+    previews = predictor.build_capability_preview(current, previous, targets=["codex", "opencode"])
     output = predictor.format_capability_preview(previews)
     assert "codex" in output
-    assert "gemini" in output
+    assert "opencode" in output
     assert "Pre-Sync Capability Preview" in output
 
 
@@ -524,11 +523,11 @@ def test_sync_scheduler_interval_map_coverage():
 def test_sync_scheduler_targets_stored(tmp_path):
     """Target list is persisted in the schedule entry."""
     scheduler = SyncScheduler(state_dir=tmp_path, dry_run=True)
-    scheduler.add("daily", targets=["codex", "gemini"])
+    scheduler.add("daily", targets=["codex", "opencode"])
     entry = scheduler.get()
     assert entry is not None
     assert "codex" in entry.targets
-    assert "gemini" in entry.targets
+    assert "opencode" in entry.targets
 
 
 def test_sync_scheduler_format_status_not_configured(tmp_path):

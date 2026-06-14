@@ -25,7 +25,7 @@ Variant block syntax in CLAUDE.md:
 
 Targets mapped to each variant:
 
-    /sync-ab setup --name myexp --a codex,gemini --b cursor,aider
+    /sync-ab setup --name myexp --a codex,opencode --b cursor,aider
 
 After a week:
 

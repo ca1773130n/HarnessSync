@@ -49,6 +49,46 @@ def extract_permissions(settings: dict) -> dict:
     return result
 
 
+def extract_permission_mode(settings: dict) -> dict:
+    """Extract permission mode and additional writable directories from settings.
+
+    Reads ``settings["permissions"]["defaultMode"]`` (e.g. ``"default"``,
+    ``"acceptEdits"``, ``"plan"``, ``"bypassPermissions"``, and the newer
+    ``"auto"`` / ``"dontAsk"``) and
+    ``settings["permissions"]["additionalDirectories"]`` (extra directories the
+    session may read/write outside the project root). Adapters map these onto
+    target sandbox/approval models (e.g. Codex ``approval_policy`` and
+    ``[sandbox_workspace_write].writable_roots``).
+
+    Args:
+        settings: Claude Code settings dict.
+
+    Returns:
+        Dict with keys ``"defaultMode"`` (str or None) and
+        ``"additionalDirectories"`` (list[str], possibly empty).
+    """
+    empty = {"defaultMode": None, "additionalDirectories": []}
+    if not isinstance(settings, dict):
+        return dict(empty)
+
+    permissions = settings.get("permissions", {})
+    if not isinstance(permissions, dict):
+        return dict(empty)
+
+    mode = permissions.get("defaultMode")
+    if not isinstance(mode, str):
+        mode = None
+
+    dirs = permissions.get("additionalDirectories", [])
+    if not isinstance(dirs, list):
+        dirs = []
+
+    return {
+        "defaultMode": mode,
+        "additionalDirectories": [d for d in dirs if isinstance(d, str)],
+    }
+
+
 def parse_permission_string(perm: str) -> tuple[str, str]:
     """Parse a Claude Code permission string into (tool_name, args).
 

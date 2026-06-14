@@ -18,7 +18,7 @@ Workflow:
    for targets that are now reachable.
 
 Availability check:
-- For targets with a known config directory (codex ~/.codex, gemini ~/.gemini, etc.)
+- For targets with a known config directory (codex ~/.codex, opencode ~/.config/opencode, etc.)
   we check if the directory is accessible (os.access).
 - For project-scoped targets, we check if the project_dir is accessible.
 """
@@ -47,7 +47,6 @@ _BACKOFF_MAX_SECONDS = 3600     # Cap backoff at 1 hour
 # via the project_scoped set in is_target_available().
 _TARGET_CONFIG_DIRS: dict[str, Path] = {
     "codex":    Path.home() / ".codex",
-    "gemini":   Path.home() / ".gemini",
     "opencode": Path.home() / ".config" / "opencode",
     "windsurf": Path.home() / ".codeium" / "windsurf",
     # Cursor stores user-level MCP config in ~/.cursor; project rules live in .cursor/
@@ -77,7 +76,7 @@ def is_target_available(target: str, project_dir: Path) -> bool:
     for project-scoped targets) is readable/writable on the filesystem.
 
     Args:
-        target: Target name ("codex", "gemini", "cursor", etc.)
+        target: Target name ("codex", "opencode", "cursor", etc.)
         project_dir: Project root directory.
 
     Returns:

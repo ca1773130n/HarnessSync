@@ -17,8 +17,7 @@ Configuration format in .harnesssync:
     "mcp_aliases": {
         "my-sentry-mcp": {
             "cursor": "sentry",
-            "codex": "sentry-mcp",
-            "gemini": "sentry"
+            "codex": "sentry-mcp"
         },
         "context7-server": {
             "aider": "ctx7"
@@ -195,13 +194,11 @@ _MCP_ENV_VAR_REMAP: dict[str, dict[str, str]] = {
         "opencode": "ANTHROPIC_API_KEY",
         "aider":    "ANTHROPIC_API_KEY",   # Aider reads this natively
         "codex":    "OPENAI_API_KEY",      # Codex uses OpenAI protocol; remap for proxy servers
-        "gemini":   "GOOGLE_API_KEY",      # Gemini uses Google key
         "windsurf": "WINDSURF_API_KEY",    # Windsurf has its own key management
     },
     "GITHUB_TOKEN": {
         "cursor":   "GITHUB_TOKEN",
         "codex":    "GITHUB_TOKEN",
-        "gemini":   "GITHUB_TOKEN",
         "opencode": "GITHUB_TOKEN",
         "aider":    "GITHUB_TOKEN",
         "windsurf": "GITHUB_TOKEN",
@@ -210,14 +207,12 @@ _MCP_ENV_VAR_REMAP: dict[str, dict[str, str]] = {
     "BRAVE_API_KEY": {
         "cursor":   "BRAVE_API_KEY",
         "codex":    "BRAVE_API_KEY",
-        "gemini":   "BRAVE_API_KEY",
         "opencode": "BRAVE_API_KEY",
         "aider":    "BRAVE_API_KEY",
     },
     "OPENAI_API_KEY": {
         "cursor":   "OPENAI_API_KEY",
         "codex":    "OPENAI_API_KEY",
-        "gemini":   "OPENAI_API_KEY",
         "aider":    "OPENAI_API_KEY",
         "opencode": "OPENAI_API_KEY",
     },

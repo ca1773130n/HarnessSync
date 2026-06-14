@@ -460,10 +460,10 @@ class ChangelogManager:
         """Generate a human-readable audit summary of a sync event.
 
         Produces natural language like:
-          "Added 3 skills to codex, updated MCP server URL for gemini,
+          "Added 3 skills to codex, updated MCP server URL for opencode,
            removed deprecated rule from cursor — 2 targets synced."
         or:
-          "Sync to 3 targets (codex, gemini, cursor) — no changes detected."
+          "Sync to 3 targets (codex, opencode, cursor) — no changes detected."
 
         The summary decomposes changes per-target and per-section so users
         have an audit trail they can explain to teammates.
@@ -687,7 +687,7 @@ def get_diff_history(
 
         # Extract targets mentioned
         target_m = _re.findall(
-            r"\b(codex|gemini|opencode|cursor|aider|windsurf|cline|continue|zed|neovim)\b",
+            r"\b(codex|opencode|cursor|aider|windsurf|cline|continue|zed|neovim)\b",
             section,
             _re.IGNORECASE,
         )

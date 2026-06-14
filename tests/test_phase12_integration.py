@@ -4,7 +4,6 @@ from __future__ import annotations
 
 Verifies all phase 12 requirements:
 - Codex: config.toml filename, on-request approval policy
-- Gemini: tools.exclude / tools.allowed (not blockedTools/allowedTools)
 - OpenCode: permission (singular) with per-tool entries, old permissions cleanup
 - SourceReader: rules directory discovery with frontmatter path-scoping
 """
@@ -19,7 +18,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.adapters.codex import CodexAdapter, CONFIG_TOML
-from src.adapters.gemini import GeminiAdapter
 from src.adapters.opencode import OpenCodeAdapter
 from src.source_reader import SourceReader
 
@@ -54,40 +52,6 @@ def test_codex_approval_policy_ask(tmp_path):
     content = config_path.read_text()
     assert "on-request" in content
     assert "on-failure" not in content
-
-
-# ---------- Gemini Tests ----------
-
-
-def test_gemini_deny_list_uses_exclude(tmp_path):
-    """Gemini settings uses tools.exclude, not blockedTools."""
-    gemini_dir = tmp_path / ".gemini"
-    gemini_dir.mkdir()
-
-    adapter = GeminiAdapter(tmp_path)
-    adapter.sync_settings({"permissions": {"deny": ["Write"], "allow": []}})
-
-    settings_path = gemini_dir / "settings.json"
-    assert settings_path.exists()
-
-    data = json.loads(settings_path.read_text())
-    assert "exclude" in data.get("tools", {}), "tools.exclude key missing"
-    assert "blockedTools" not in data, "deprecated blockedTools key still present"
-
-
-def test_gemini_allow_list_no_tools_allowed(tmp_path):
-    """Gemini no longer uses tools.allowed (removed from schema)."""
-    gemini_dir = tmp_path / ".gemini"
-    gemini_dir.mkdir()
-
-    adapter = GeminiAdapter(tmp_path)
-    adapter.sync_settings({"permissions": {"deny": [], "allow": ["Read", "Bash"]}})
-
-    settings_path = gemini_dir / "settings.json"
-    data = json.loads(settings_path.read_text())
-    # tools.allowed was removed from the Gemini schema
-    assert "allowed" not in data.get("tools", {}), "tools.allowed should not be written"
-    assert "allowedTools" not in data, "deprecated allowedTools key still present"
 
 
 # ---------- OpenCode Tests ----------

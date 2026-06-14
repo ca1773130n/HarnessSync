@@ -311,9 +311,9 @@ def test_rank_harnesses_unknown_category_falls_back():
 
 def test_rank_harnesses_installed_filter():
     """Passing installed_harnesses limits results to that list."""
-    summary = rank_harnesses_for_task("code_review", installed_harnesses=["codex", "gemini"])
+    summary = rank_harnesses_for_task("code_review", installed_harnesses=["codex", "aider"])
     targets = [r.target for r in summary.rankings]
-    assert set(targets) == {"codex", "gemini"}
+    assert set(targets) == {"codex", "aider"}
 
 
 def test_task_performance_summary_best_harness():
@@ -324,9 +324,9 @@ def test_task_performance_summary_best_harness():
 
 def test_task_performance_summary_format():
     """format() returns a non-empty string with ranking info."""
-    summary = rank_harnesses_for_task("writing_docs", installed_harnesses=["codex", "gemini", "cursor"])
+    summary = rank_harnesses_for_task("writing_docs", installed_harnesses=["codex", "aider", "cursor"])
     output = summary.format()
-    assert "codex" in output or "gemini" in output
+    assert "codex" in output or "aider" in output
     assert "#1" in output
 
 
@@ -397,7 +397,7 @@ def test_pre_sync_validate_format_summary():
 
 def test_pre_sync_validate_result_attributes():
     """PreSyncValidationResult has expected attributes."""
-    result = pre_sync_validate({}, target="gemini")
+    result = pre_sync_validate({}, target="opencode")
     assert hasattr(result, "status")
     assert hasattr(result, "warnings")
     assert hasattr(result, "errors")
@@ -469,10 +469,10 @@ def test_restore_by_date_finds_closest_before_cutoff(tmp_path):
 def test_restore_by_date_skips_snapshots_after_cutoff(tmp_path):
     """Snapshots newer than cutoff date are not picked."""
     backup_root = tmp_path / "backups"
-    _make_backup(backup_root, "gemini", "20260315_100000", "future content")
+    _make_backup(backup_root, "opencode", "20260315_100000", "future content")
     mgr = BackupManager(backup_root=backup_root)
-    result = mgr.restore_by_date("2026-03-10", target_name="gemini", dry_run=True)
-    assert "gemini" not in result["restored"]
+    result = mgr.restore_by_date("2026-03-10", target_name="opencode", dry_run=True)
+    assert "opencode" not in result["restored"]
     assert len(result["skipped"]) >= 1
 
 

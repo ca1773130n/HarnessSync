@@ -62,16 +62,6 @@ _HARNESS_PROFILES: dict[str, HarnessProfile] = {
         has_skills=True,
         has_mcp=False,
     ),
-    "gemini": HarnessProfile(
-        name="gemini",
-        delivery="system_prompt",
-        supports_headings=True,
-        enforcement="context_only",
-        char_limit=0,
-        stripped_constructs=["$CLAUDE_PLUGIN_ROOT", "PostToolUse", "PreToolUse"],
-        has_skills=True,
-        has_mcp=True,
-    ),
     "opencode": HarnessProfile(
         name="opencode",
         delivery="system_prompt",
@@ -144,24 +134,23 @@ _BEHAVIORAL_PATTERNS: list[tuple[re.Pattern, str, list[str]]] = [
     (
         re.compile(r"CLAUDE\.md", re.IGNORECASE),
         "References 'CLAUDE.md' by name — translated to target-specific file name",
-        ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"],
+        ["codex", "opencode", "cursor", "aider", "windsurf"],
     ),
     (
         re.compile(r"\b(TodoWrite|WebFetch|WebSearch|EnterPlanMode|ExitPlanMode)\b"),
         "Claude Code-specific tool name — not available in other harnesses",
-        ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"],
+        ["codex", "opencode", "cursor", "aider", "windsurf"],
     ),
     (
         re.compile(r"\b(hook|PostToolUse|PreToolUse|UserPromptSubmit|SessionStart|SessionEnd)\b"),
         "Hook event name — only available in Claude Code",
-        ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"],
+        ["codex", "opencode", "cursor", "aider", "windsurf"],
     ),
 ]
 
 # Canonical file name substitutions for CLAUDE.md references per harness
 _FILE_SUBSTITUTIONS: dict[str, dict[str, str]] = {
     "codex":    {"CLAUDE.md": "AGENTS.md", "CLAUDE.local.md": "AGENTS.md"},
-    "gemini":   {"CLAUDE.md": "GEMINI.md", "CLAUDE.local.md": "GEMINI.md"},
     "opencode": {"CLAUDE.md": "AGENTS.md", "CLAUDE.local.md": "AGENTS.md"},
     "cursor":   {"CLAUDE.md": ".cursor/rules/harnesssync.mdc"},
     "aider":    {"CLAUDE.md": "CONVENTIONS.md"},

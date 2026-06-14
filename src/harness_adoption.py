@@ -35,7 +35,6 @@ DEFAULT_STALE_DAYS = 30
 # Key config files per harness used to detect active reads (mtime proxy)
 _TARGET_CONFIG_FILES: dict[str, list[str]] = {
     "codex": ["AGENTS.md", ".agents/skills"],
-    "gemini": ["GEMINI.md", ".gemini/skills"],
     "opencode": ["opencode.json", ".opencode/"],
     "cursor": [".cursor/rules/"],
     "aider": ["CONVENTIONS.md", ".aider.conf.yml"],
@@ -56,12 +55,6 @@ _QUICK_START_SNIPPETS: dict[str, list[str]] = {
         "  Try: codex --help",
         "  Run your first agent: codex run <agent-name>",
         "  Or start an interactive session: codex chat",
-    ],
-    "gemini": [
-        "Your Gemini CLI is now configured with HarnessSync!",
-        "  Try: gemini --help",
-        "  Run an agent: gemini run <agent-name>",
-        "  Or start a chat: gemini",
     ],
     "opencode": [
         "Your OpenCode is now configured with HarnessSync!",
@@ -430,7 +423,6 @@ _SHELL_HISTORY_FILES = [
 # CLI executable names per harness to search for in shell history
 _HARNESS_CLI_NAMES: dict[str, list[str]] = {
     "codex":    ["codex"],
-    "gemini":   ["gemini"],
     "opencode": ["opencode"],
     "cursor":   ["cursor"],
     "windsurf": ["windsurf"],

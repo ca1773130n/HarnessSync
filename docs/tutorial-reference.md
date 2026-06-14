@@ -23,7 +23,7 @@ The tutorial covers 9 config surfaces in progressive steps:
 | Step | Config Surface | What You'll See |
 |------|---------------|----------------|
 | 1 | **Setup** | Scaffold TaskFlow app, verify it works |
-| 2 | **CLAUDE.md** | Project rules synced as `.cursorrules`, `AGENTS.md`, `GEMINI.md`, etc. |
+| 2 | **CLAUDE.md** | Project rules synced as `.cursorrules`, `AGENTS.md`, etc. |
 | 3 | **Rules directory** | `.claude/rules/*.md` files merged into target configs |
 | 4 | **Permissions** | `settings.json` allow/deny translated per harness |
 | 5 | **Commands** | `/check` command represented as slash commands, aliases, or instructions |

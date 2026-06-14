@@ -72,7 +72,7 @@ def main() -> None:
         action="store_true",
         help=(
             "Run skill portability linter: flag Claude Code-specific patterns in "
-            "SKILL.md files that won't translate to Cursor, Gemini, Aider, etc."
+            "SKILL.md files that won't translate to Cursor, Codex, Aider, etc."
         ),
     )
     parser.add_argument("--project-dir", type=str, default=None)

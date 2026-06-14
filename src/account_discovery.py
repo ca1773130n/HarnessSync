@@ -5,7 +5,7 @@ Filesystem discovery for Claude Code configuration directories.
 
 Scans home directory with depth limits to find ~/.claude* directories,
 validates them for Claude Code structure, and discovers target CLI
-directories (.codex*, .gemini*, .opencode*).
+directories (.codex*, .opencode*).
 """
 
 from pathlib import Path
@@ -103,7 +103,7 @@ def validate_claude_config(path: Path) -> bool:
 
 
 def discover_target_configs(home_dir: Path = None) -> dict[str, list[Path]]:
-    """Scan for target CLI directories (.codex*, .gemini*, .opencode*).
+    """Scan for target CLI directories (.codex*, .opencode*).
 
     Useful for setup wizard to suggest existing target paths.
 
@@ -116,7 +116,6 @@ def discover_target_configs(home_dir: Path = None) -> dict[str, list[Path]]:
     home_dir = home_dir or Path.home()
     targets = {
         'codex': [],
-        'gemini': [],
         'opencode': [],
     }
 
@@ -128,8 +127,6 @@ def discover_target_configs(home_dir: Path = None) -> dict[str, list[Path]]:
             name = entry.name
             if name.startswith('.codex'):
                 targets['codex'].append(entry)
-            elif name.startswith('.gemini'):
-                targets['gemini'].append(entry)
             elif name.startswith('.opencode'):
                 targets['opencode'].append(entry)
     except (OSError, PermissionError):
@@ -145,7 +142,6 @@ def discover_target_configs(home_dir: Path = None) -> dict[str, list[Path]]:
 # Auth credential markers per CLI — if none exist, the CLI isn't set up
 _TARGET_AUTH_MARKERS = {
     'codex': ['auth.json'],
-    'gemini': ['settings.json', '.gemini/oauth_creds.json', '.gemini/google_accounts.json'],
     'opencode': ['package.json', 'config.json'],
 }
 
@@ -164,7 +160,7 @@ def _extract_suffix(name: str, prefix: str) -> str:
 
     .claude-personal1 with prefix '.claude' -> 'personal1'
     .codex with prefix '.codex' -> ''
-    .gemini-work with prefix '.gemini' -> 'work'
+    .opencode-work with prefix '.opencode' -> 'work'
     """
     rest = name[len(prefix):]
     return rest.lstrip('-')
@@ -173,7 +169,7 @@ def _extract_suffix(name: str, prefix: str) -> str:
 def auto_discover_accounts(home_dir: Path = None) -> list[dict]:
     """Auto-discover accounts by scanning home directory.
 
-    Matches .claude* source dirs to .codex*/.gemini*/.opencode* target dirs
+    Matches .claude* source dirs to .codex*/.opencode* target dirs
     by suffix pattern. Filters targets that lack auth credentials.
 
     Args:
@@ -198,7 +194,7 @@ def auto_discover_accounts(home_dir: Path = None) -> list[dict]:
         suffix_to_source[account_name] = src
 
     # Step 3: Scan for target dirs and match by suffix
-    cli_prefixes = {'codex': '.codex', 'gemini': '.gemini', 'opencode': '.opencode'}
+    cli_prefixes = {'codex': '.codex', 'opencode': '.opencode'}
     # Build suffix -> {cli: path} mapping from targets
     suffix_to_targets: dict[str, dict[str, Path]] = {}
 

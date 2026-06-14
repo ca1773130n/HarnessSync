@@ -21,7 +21,7 @@ Usage::
 
     notifier = DesktopNotifier()
     notifier.notify_sync_complete(
-        targets_updated=["codex", "gemini"],
+        targets_updated=["codex", "opencode"],
         targets_skipped=["aider"],
         errors=[],
     )
@@ -308,7 +308,7 @@ class SyncDigestCollector:
 
         digest = SyncDigestCollector()
         digest.record_sync(targets_updated=["codex"], targets_skipped=[], errors=[])
-        digest.record_sync(targets_updated=["gemini"], targets_skipped=["aider"], errors=[])
+        digest.record_sync(targets_updated=["opencode"], targets_skipped=["aider"], errors=[])
         print(digest.format_digest())
         digest.send_digest()   # optional OS notification at session end
     """

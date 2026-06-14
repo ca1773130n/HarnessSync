@@ -84,7 +84,7 @@ SECRET_KEYWORDS = [
     'TOKEN', 'ACCESS_TOKEN', 'AUTH_TOKEN',
     'PRIVATE_KEY',
     # AI provider keys
-    'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY',
+    'ANTHROPIC_API_KEY', 'OPENAI_API_KEY',
     'GOOGLE_API_KEY', 'COHERE_API_KEY', 'MISTRAL_API_KEY',
     'AZURE_OPENAI_API_KEY', 'AWS_SECRET_ACCESS_KEY',
     # Modern AI providers
@@ -445,8 +445,6 @@ class SecretDetector:
             project_dir / ".zed" / "settings.json",
             # Neovim avante
             project_dir / ".avante" / "mcp.json",
-            # Gemini settings
-            project_dir / ".gemini" / "settings.json",
             # Aider config
             project_dir / ".aider.conf.yml",
             # Codex config
@@ -957,7 +955,7 @@ def pre_sync_secret_scan(
     # Discover config files if no explicit list provided
     if config_paths is None:
         _SCAN_TARGETS = [
-            "CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "GEMINI.md",
+            "CLAUDE.md", "CLAUDE.local.md", "AGENTS.md",
             "CONVENTIONS.md", ".windsurfrules",
             ".claude/settings.json", ".claude/settings.local.json",
         ]

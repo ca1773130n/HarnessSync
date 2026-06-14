@@ -50,7 +50,7 @@ def main() -> None:
         type=str,
         default=None,
         metavar="TARGET",
-        help="Filter entries by target harness name (e.g. codex, gemini)",
+        help="Filter entries by target harness name (e.g. codex, opencode)",
     )
     parser.add_argument(
         "--since",

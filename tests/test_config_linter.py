@@ -462,7 +462,6 @@ class TestQualityScore:
             "```python\ncode\n",  # Unclosed fence
             "<!-- sync:exclude -->\n",
             "<!-- sync:codex-only -->\n",
-            "<!-- sync:gemini-only -->\n",
         ])
         result = linter.quality_score({"rules": rules})
         assert result["score"] >= 0

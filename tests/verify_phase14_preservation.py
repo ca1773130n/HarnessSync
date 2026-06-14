@@ -1,8 +1,7 @@
 """Verification tests for Phase 14 Plan 02 -- PRES-01 config preservation.
 
 Tests that Codex config.toml writes preserve non-managed [agents], [profiles],
-[features] sections, and that Gemini settings.json preserves non-synced keys
-like hooks and security.
+[features] sections.
 """
 from __future__ import annotations
 
@@ -10,7 +9,6 @@ import json
 import tempfile
 from pathlib import Path
 from src.adapters.codex import CodexAdapter
-from src.adapters.gemini import GeminiAdapter
 
 
 def test_codex_preservation():
@@ -97,42 +95,7 @@ def test_codex_sync_settings_preservation():
         print("  Codex sync_settings() preservation: OK")
 
 
-def test_gemini_preservation():
-    """Gemini settings.json preserves non-synced keys (hooks, security)."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        project = Path(tmpdir)
-        adapter = GeminiAdapter(project)
-
-        # Pre-create settings.json with user-defined keys
-        settings_path = project / ".gemini" / "settings.json"
-        settings_path.parent.mkdir(parents=True)
-        settings_path.write_text(
-            json.dumps({
-                "hooks": {"pre_commit": "lint"},
-                "security": {"sandbox": True},
-                "mcpServers": {},
-            }, indent=2),
-            encoding='utf-8',
-        )
-
-        # Run sync_settings (should preserve hooks and security)
-        adapter.sync_settings({
-            'permissions': {'deny': ['Bash']},
-        })
-
-        content = json.loads(settings_path.read_text(encoding='utf-8'))
-
-        assert 'hooks' in content, f"hooks key lost!\n{content}"
-        assert content['hooks']['pre_commit'] == 'lint', f"hooks.pre_commit changed!\n{content}"
-        assert 'security' in content, f"security key lost!\n{content}"
-        assert content['security']['sandbox'] is True, f"security.sandbox changed!\n{content}"
-        assert 'tools' in content, f"tools key missing (should have been added)!\n{content}"
-
-        print("  Gemini settings.json preservation: OK")
-
-
 if __name__ == '__main__':
     test_codex_preservation()
     test_codex_sync_settings_preservation()
-    test_gemini_preservation()
     print("PRES-01 OK")

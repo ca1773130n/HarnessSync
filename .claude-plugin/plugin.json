@@ -1,7 +1,7 @@
 {
   "name": "harness-sync",
   "version": "0.1.4",
-  "description": "Sync Claude Code configuration to Codex, Gemini CLI, and OpenCode. Configure once, sync everywhere.",
+  "description": "Sync Claude Code configuration to Codex, OpenCode, Cursor, and 7 more AI coding harnesses. Configure once, sync everywhere.",
   "author": {
     "name": "HarnessSync Contributors"
   },

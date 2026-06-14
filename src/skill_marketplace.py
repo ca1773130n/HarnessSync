@@ -633,7 +633,7 @@ class CommunityAdapterRegistry:
             if not harness:
                 # Try to infer from description
                 desc = (item.get("description") or "").lower()
-                for h in ("codex", "gemini", "cursor", "windsurf", "aider",
+                for h in ("codex", "cursor", "windsurf", "aider",
                           "continue", "zed", "neovim", "cline", "opencode"):
                     if h in desc:
                         harness = h

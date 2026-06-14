@@ -53,13 +53,13 @@ _SKIP_ALL_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Matches <!-- sync:skip target=codex,gemini --> (skip for specific targets)
+# Matches <!-- sync:skip target=codex,opencode --> (skip for specific targets)
 _SKIP_TARGET_RE = re.compile(
     r"<!--\s*sync:skip\s+target=([a-zA-Z0-9_,\s-]+?)\s*-->",
     re.IGNORECASE,
 )
 
-# Matches <!-- sync:only target=codex,gemini --> (sync to specific targets only)
+# Matches <!-- sync:only target=codex,opencode --> (sync to specific targets only)
 _ONLY_TARGET_RE = re.compile(
     r"<!--\s*sync:only\s+target=([a-zA-Z0-9_,\s-]+?)\s*-->",
     re.IGNORECASE,

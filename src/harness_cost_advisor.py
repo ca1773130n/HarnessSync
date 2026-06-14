@@ -2,13 +2,13 @@ from __future__ import annotations
 
 """Cross-Harness Cost Optimization Advisor (item 27).
 
-Analyzes harness configuration and usage patterns across Claude Code, Gemini,
+Analyzes harness configuration and usage patterns across Claude Code,
 OpenCode, Codex, Aider, Cursor, and Windsurf to surface config changes that
 could reduce API costs.
 
 Examples of advice generated:
-- "Your Gemini config is using Opus-class models for simple tasks; switching to
-  Flash would save ~40% cost."
+- "Your Codex config is using Opus-class models for simple tasks; switching to
+  a mid-tier model would save ~40% cost."
 - "Cursor is set to auto-trigger on every keystroke; switching to manual trigger
   reduces API calls by ~60%."
 - "3 MCP servers are configured globally but only used in 1 project; scoping
@@ -44,11 +44,6 @@ _MODEL_PRICES: dict[str, tuple[float, float]] = {
     "claude-3-5-sonnet-20241022":      (3.0,   15.0),
     "claude-3-5-haiku-20241022":       (0.8,   4.0),
     "claude-haiku-4-5":                (0.8,   4.0),
-    # Gemini
-    "gemini-1.5-pro":                  (3.5,   10.5),
-    "gemini-1.5-flash":                (0.075, 0.3),
-    "gemini-2.0-flash":                (0.075, 0.3),
-    "gemini-exp-1206":                 (0.0,   0.0),  # Free tier
     # OpenAI (Codex backend)
     "gpt-4o":                          (2.5,   10.0),
     "gpt-4o-mini":                     (0.15,  0.6),
@@ -59,9 +54,9 @@ _MODEL_PRICES: dict[str, tuple[float, float]] = {
 # Model tier classification
 def _model_tier(model: str) -> str:
     model_lower = model.lower()
-    if any(k in model_lower for k in ("opus", "gpt-4o\b", "o1", "1.5-pro", "gemini-exp")):
+    if any(k in model_lower for k in ("opus", "gpt-4o\b", "o1")):
         return "expensive"
-    if any(k in model_lower for k in ("sonnet", "gpt-4o-mini", "flash", "haiku")):
+    if any(k in model_lower for k in ("sonnet", "gpt-4o-mini", "haiku")):
         return "mid"
     return "unknown"
 
@@ -110,12 +105,6 @@ class HarnessCostAdvisor:
         advisories.extend(cc_items)
         if cc_found:
             detected.append("claude-code")
-
-        # Gemini
-        g_items, g_found = self._analyze_gemini()
-        advisories.extend(g_items)
-        if g_found:
-            detected.append("gemini")
 
         # OpenCode
         oc_items, oc_found = self._analyze_opencode()
@@ -194,35 +183,6 @@ class HarnessCostAdvisor:
                 estimated_savings="~5–15% context token reduction per session",
                 current_value=f"{len(mcp_servers)} servers",
             ))
-        return items, True
-
-    def _analyze_gemini(self) -> tuple[list[CostAdvisory], bool]:
-        items: list[CostAdvisory] = []
-        # Check GEMINI.md for model hints and gemini.json
-        gemini_md = self.project_dir / "GEMINI.md"
-        gemini_json = self.project_dir / "gemini.json"
-        found = gemini_md.exists() or gemini_json.exists()
-        if not found:
-            return items, False
-
-        # Read gemini.json if present
-        if gemini_json.exists():
-            try:
-                data = json.loads(gemini_json.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                data = {}
-            model = data.get("model", "") or ""
-            if model and _model_tier(model) == "expensive":
-                items.append(CostAdvisory(
-                    harness="gemini",
-                    severity="high",
-                    category="model",
-                    issue=f"Gemini configured with expensive model: {model}",
-                    recommendation="Use gemini-2.0-flash or gemini-1.5-flash for routine tasks (~97% cheaper per token)",
-                    estimated_savings="~90–97% API cost for routine tasks",
-                    current_value=model,
-                ))
-
         return items, True
 
     def _analyze_opencode(self) -> tuple[list[CostAdvisory], bool]:
@@ -385,8 +345,6 @@ class HarnessCostAdvisor:
         model_lower = model.lower()
         if "opus" in model_lower:
             return "claude-sonnet-4-6 (5x cheaper, ~90% capability)"
-        if "gemini-1.5-pro" in model_lower or "gemini-exp" in model_lower:
-            return "gemini-2.0-flash (~97% cheaper per token)"
         if "gpt-4o\b" in model_lower or model_lower in ("gpt-4o", "o1"):
             return "gpt-4o-mini (~16x cheaper per input token)"
         return "a mid-tier model variant"

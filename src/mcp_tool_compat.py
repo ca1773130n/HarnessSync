@@ -57,8 +57,6 @@ ALL_HARNESSES: list[str] = list(EXTENDED_TARGETS) + ["vscode"]
 MCP_TRANSPORT_SUPPORT: dict[str, frozenset[str]] = {
     # Codex: config.toml; stdio + http only (SSE support was removed)
     "codex":    frozenset({"stdio", "http"}),
-    # Gemini CLI: settings.json; full transport support including SSE
-    "gemini":   frozenset({"stdio", "http", "sse"}),
     # OpenCode: opencode.json type-discriminated; stdio + http only (no SSE)
     "opencode": frozenset({"stdio", "http"}),
     # Cursor: .cursor/mcp.json; standard MCP JSON; all transports
@@ -90,12 +88,6 @@ MCP_CAPABILITY_SUPPORT: dict[str, dict[str, str]] = {
     "codex": {
         "tools":     SUPPORTED,
         "resources": UNKNOWN,    # Not documented
-        "prompts":   UNKNOWN,    # Not documented
-        "sampling":  UNSUPPORTED,
-    },
-    "gemini": {
-        "tools":     SUPPORTED,
-        "resources": PARTIAL,    # Limited — read-only resource URIs
         "prompts":   UNKNOWN,    # Not documented
         "sampling":  UNSUPPORTED,
     },
@@ -173,15 +165,6 @@ MCP_FEATURE_SUPPORT: dict[str, dict[str, str]] = {
         # HTTP auth headers only apply to http transport (no SSE)
         "header_auth":       PARTIAL,
     },
-    "gemini": {
-        # ${VAR} works natively in settings.json
-        "env_interpolation": SUPPORTED,
-        # includeTools / excludeTools fields per server
-        "tool_filtering":    SUPPORTED,
-        # trust field per server entry
-        "per_server_trust":  SUPPORTED,
-        "header_auth":       SUPPORTED,
-    },
     "opencode": {
         # ${VAR} in env fields; {env:VAR} syntax required in headers
         "env_interpolation": PARTIAL,
@@ -249,7 +232,6 @@ MCP_FEATURE_SUPPORT: dict[str, dict[str, str]] = {
 # One-line notes explaining the key MCP limitation(s) per harness
 HARNESS_MCP_NOTES: dict[str, str] = {
     "codex":    "config.toml; no SSE; ${VAR} must be expanded at sync time",
-    "gemini":   "settings.json; full support; native ${VAR}; trust + tool filtering",
     "opencode": "opencode.json type-discriminated; no SSE; {env:VAR} in headers",
     "cursor":   ".cursor/mcp.json; standard mcpServers JSON; all transports",
     "aider":    "Name written to .aider.conf.yml only — no MCP tool invocation",
@@ -311,7 +293,7 @@ def check_server_compat(
     Args:
         server_name: Name of the MCP server (used in issue messages).
         config: MCP server config dict (command/url/args/env/headers).
-        target: Target harness name (e.g. "codex", "gemini").
+        target: Target harness name (e.g. "codex", "opencode").
 
     Returns:
         List of CompatIssue objects. Empty list means fully compatible.
@@ -863,7 +845,6 @@ _MCP_EQUIVALENTS: dict[str, dict[str, str]] = {
     },
     "context7": {
         "cursor":   "No direct Cursor equivalent; copy context7 prompts into .cursor/rules/",
-        "gemini":   "No Gemini CLI equivalent; add library docs to GEMINI.md manually",
         "codex":    "No Codex equivalent; embed relevant docs snippets in AGENTS.md",
     },
     "sqlite": {
@@ -871,14 +852,12 @@ _MCP_EQUIVALENTS: dict[str, dict[str, str]] = {
         "aider":    "Aider cannot execute DB queries; use CLI tools and pipe output as context",
     },
     "brave-search": {
-        "gemini":   "Gemini 2.0 has native web search via Google Search grounding",
         "cursor":   "Cursor has no built-in web search; keep MCP server if available",
         "codex":    "Codex has no built-in web search; keep MCP server",
     },
     "memory": {
         "windsurf": "Windsurf Memories (native) — use .windsurf/memories/ directory instead",
         "cursor":   "Cursor has no native memory; consider using a persistent .mdc always-apply rule",
-        "gemini":   "Use GEMINI.md as static memory — no dynamic memory MCP equivalent",
     },
 }
 

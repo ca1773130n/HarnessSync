@@ -46,8 +46,8 @@ def test_drift_duration_tracker_mark_start(tmp_path):
 def test_drift_duration_tracker_duration_positive(tmp_path):
     """Duration is positive after marking drift start."""
     tracker = DriftDurationTracker(persist_path=tmp_path / "drift.json")
-    tracker.mark_drift_start("gemini", timestamp=time.time() - 3600)
-    duration = tracker.drift_duration("gemini")
+    tracker.mark_drift_start("opencode", timestamp=time.time() - 3600)
+    duration = tracker.drift_duration("opencode")
     assert duration is not None
     assert duration >= 3599
 
@@ -83,11 +83,11 @@ def test_drift_duration_tracker_format_report(tmp_path):
     """format_report lists all tracked targets."""
     tracker = DriftDurationTracker(persist_path=tmp_path / "drift.json")
     tracker.mark_drift_start("codex")
-    tracker.mark_drift_start("gemini")
-    tracker.mark_drift_resolved("gemini")
+    tracker.mark_drift_start("opencode")
+    tracker.mark_drift_resolved("opencode")
     report = tracker.format_report()
     assert "codex" in report
-    assert "gemini" in report
+    assert "opencode" in report
     assert "DRIFTING" in report
     assert "resolved" in report
 
@@ -135,15 +135,15 @@ def _make_report(targets, scores, gaps=None) -> HarnessComparisonReport:
 def test_format_coverage_summary_percentages():
     """Coverage summary includes scores for each target."""
     report = _make_report(
-        ["codex", "gemini"],
-        {"codex": 87.0, "gemini": 100.0},
-        {"codex": ["skills: not supported"], "gemini": []},
+        ["codex", "opencode"],
+        {"codex": 87.0, "opencode": 100.0},
+        {"codex": ["skills: not supported"], "opencode": []},
     )
     summary = report.format_coverage_summary()
     assert "87%" in summary
     assert "100%" in summary
     assert "codex" in summary
-    assert "gemini" in summary
+    assert "opencode" in summary
 
 
 def test_format_coverage_summary_gap_count():
@@ -159,7 +159,7 @@ def test_format_coverage_summary_gap_count():
 
 def test_format_coverage_summary_no_gaps():
     """Target with no gaps doesn't mention 'have no equivalent'."""
-    report = _make_report(["gemini"], {"gemini": 100.0}, {"gemini": []})
+    report = _make_report(["opencode"], {"opencode": 100.0}, {"opencode": []})
     summary = report.format_coverage_summary()
     assert "have no equivalent" not in summary
 
@@ -254,7 +254,7 @@ def test_confidence_level_exact_clean_content():
     """Clean content with no CC constructs is classified as exact or approximate."""
     content = "Always write unit tests for every public function."
     translated = content  # No changes
-    level = compute_confidence_level(content, translated, "gemini")
+    level = compute_confidence_level(content, translated, "opencode")
     assert level in (ConfidenceLevel.EXACT, ConfidenceLevel.APPROXIMATE)
 
 
@@ -270,10 +270,10 @@ def test_annotate_with_confidence_exact_format():
     """Exact confidence produces a single-line annotation."""
     content = "Write clean, testable code."
     translated = content
-    result = annotate_with_confidence(content, translated, "my-skill", "gemini")
+    result = annotate_with_confidence(content, translated, "my-skill", "opencode")
     assert "sync:confidence" in result
     assert "my-skill" in result
-    assert "gemini" in result
+    assert "opencode" in result
 
 
 def test_annotate_with_confidence_lossy_warning():
@@ -309,7 +309,7 @@ def test_generate_skill_browser_contains_skill_names():
         {"name": "commit-skill", "content": "Always write descriptive commit messages.", "path": "skills/commit-skill.md"},
         {"name": "test-skill", "content": "Write unit tests for all public functions.", "path": "skills/test-skill.md"},
     ]
-    html = generate_skill_browser(skills, targets=["codex", "gemini"])
+    html = generate_skill_browser(skills, targets=["codex", "opencode"])
     assert "commit-skill" in html
     assert "test-skill" in html
 
@@ -317,9 +317,9 @@ def test_generate_skill_browser_contains_skill_names():
 def test_generate_skill_browser_contains_target_columns():
     """Skill browser has columns for each target."""
     skills = [{"name": "s", "content": "Be helpful.", "path": ""}]
-    html = generate_skill_browser(skills, targets=["codex", "gemini", "cursor"])
+    html = generate_skill_browser(skills, targets=["codex", "opencode", "cursor"])
     assert "codex" in html
-    assert "gemini" in html
+    assert "opencode" in html
     assert "cursor" in html
 
 

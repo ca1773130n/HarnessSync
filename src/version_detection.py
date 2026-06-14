@@ -14,7 +14,6 @@ from pathlib import Path
 _DEFAULT_VERSIONS: dict[str, str] = {
     "cursor":   "0.43",
     "codex":    "1.2",
-    "gemini":   "2.0",
     "opencode": "0.2",
     "aider":    "0.60",
     "windsurf": "1.3",
@@ -140,7 +139,6 @@ def _detect_installed_version(target: str) -> str | None:
 
     cli_map: dict[str, list[str]] = {
         "codex": ["codex", "--version"],
-        "gemini": ["gemini", "--version"],
         "opencode": ["opencode", "--version"],
         "cursor": ["cursor", "--version"],
         "aider": ["aider", "--version"],
@@ -194,7 +192,7 @@ def detect_installed_version(target: str) -> str | None:
     like Cursor where the CLI binary may not be on PATH.
 
     Args:
-        target: Harness name (e.g. "cursor", "gemini", "codex").
+        target: Harness name (e.g. "cursor", "opencode", "codex").
 
     Returns:
         Version string (e.g. "0.43.2"), or None if not detectable.
@@ -250,7 +248,6 @@ def detect_all_installed_versions(project_dir: Path | None = None) -> dict[str, 
 
     _CLI_NAMES: dict[str, str] = {
         "codex":    "codex",
-        "gemini":   "gemini",
         "opencode": "opencode",
         "aider":    "aider",
         "cursor":   "cursor",

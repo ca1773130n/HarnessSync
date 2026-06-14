@@ -51,7 +51,7 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
     Processes content line by line, supporting:
     1. Classic sync:exclude / sync:X-only / sync:end tags
     2. New <!-- no-sync --> shorthand (excludes from all)
-    3. New <!-- sync:codex,gemini --> multi-target include lists
+    3. New <!-- sync:codex,opencode --> multi-target include lists
     4. New <!-- harness:X -->...<!-- /harness:X --> override blocks
        (content only visible to target X)
     5. Inline <!-- harness:skip=X,Y --> -- drops THIS line for listed targets
@@ -63,7 +63,7 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
 
     Args:
         content: Raw rules text (e.g. CLAUDE.md contents).
-        target_name: Target identifier ("codex", "gemini", "opencode", ...).
+        target_name: Target identifier ("codex", "opencode", "cursor", ...).
 
     Returns:
         Filtered content with excluded sections removed. Tag comment lines
@@ -159,7 +159,7 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
                 active_tag = tag
             continue
 
-        # --- Check for multi-target sync tag: <!-- sync:codex,gemini --> ---
+        # --- Check for multi-target sync tag: <!-- sync:codex,opencode --> ---
         mm = re.search(r"<!--\s*sync:([a-z0-9,\s]+)\s*-->", line, re.IGNORECASE)
         if mm:
             targets_str = mm.group(1)
@@ -172,8 +172,8 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
                 continue
 
         # --- @harness:skip-X shorthand (item 28) -- applies to this line only ---
-        # <!-- @harness:skip-gemini --> or <!-- @harness:skip-gemini,aider -->
-        # Semantically equivalent to <!-- harness:skip=gemini --> but uses the
+        # <!-- @harness:skip-codex --> or <!-- @harness:skip-codex,aider -->
+        # Semantically equivalent to <!-- harness:skip=codex --> but uses the
         # @harness: prefix style.  Checked before the plain harness:skip form.
         at_skip_m = _AT_HARNESS_SKIP_RE.search(line)
         if at_skip_m:
@@ -198,8 +198,8 @@ def filter_rules_for_target(content: str, target_name: str) -> str:
             continue  # Always consumed -- other targets don't see this line
 
         # --- Inline harness:skip=X annotation -- applies to this line only ---
-        # Must be checked BEFORE harness_open so "harness:skip=gemini" doesn't
-        # get confused with the block-opening "harness:gemini".
+        # Must be checked BEFORE harness_open so "harness:skip=codex" doesn't
+        # get confused with the block-opening "harness:codex".
         skip_m = _HARNESS_SKIP_RE.search(line)
         if skip_m:
             skip_targets = _parse_target_list(skip_m.group(1))
@@ -413,7 +413,7 @@ def has_sync_tags(content: str) -> bool:
     # harness open/close
     if _HARNESS_OPEN_RE.search(content) or _HARNESS_CLOSE_RE.search(content):
         return True
-    # Multi-target sync tags (<!-- sync:codex,gemini -->)
+    # Multi-target sync tags (<!-- sync:codex,opencode -->)
     mm = re.search(r"<!--\s*sync:([a-z0-9,\s]+)\s*-->", content, re.IGNORECASE)
     if mm:
         targets_str = mm.group(1)
@@ -441,7 +441,7 @@ def filter_sections_for_target(content: str, target_name: str) -> str:
 
     Args:
         content: Raw CLAUDE.md Markdown text.
-        target_name: Target harness name (e.g. "codex", "gemini").
+        target_name: Target harness name (e.g. "codex", "opencode").
 
     Returns:
         Filtered content with excluded sections removed.

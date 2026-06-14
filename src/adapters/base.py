@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Abstract base class for target adapters.
 
-AdapterBase defines the interface all target adapters (Codex, Gemini, OpenCode)
+AdapterBase defines the interface all target adapters (Codex, OpenCode)
 must implement. It enforces 8 sync methods for different configuration types:
 - sync_rules: CLAUDE.md rules
 - sync_skills: Skills directory
@@ -58,7 +58,7 @@ class AdapterBase(ABC):
     @property
     @abstractmethod
     def target_name(self) -> str:
-        """Return target CLI name (e.g., "codex", "gemini").
+        """Return target CLI name (e.g., "codex", "opencode").
 
         Returns:
             Target CLI identifier
@@ -199,7 +199,7 @@ class AdapterBase(ABC):
         """Sync hooks to target format.
 
         Default no-op implementation — returns all hooks as skipped.
-        Only adapters with native hook support (Codex, Gemini) override this.
+        Only adapters with native hook support (Codex) override this.
 
         Args:
             hooks: Dict with 'hooks' key containing list of normalized hook dicts.
@@ -269,7 +269,7 @@ class AdapterBase(ABC):
     def _read_managed_md(self, path: Path) -> str:
         """Read a managed markdown file or return empty string.
 
-        Works for AGENTS.md, GEMINI.md, or any adapter's primary .md file.
+        Works for AGENTS.md or any adapter's primary .md file.
 
         Args:
             path: Path to the markdown file

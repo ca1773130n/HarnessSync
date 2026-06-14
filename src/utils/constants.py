@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 # Canonical target lists - import these instead of hardcoding
-CORE_TARGETS: tuple[str, ...] = ("codex", "gemini", "opencode", "cursor", "aider", "windsurf")
+CORE_TARGETS: tuple[str, ...] = ("codex", "opencode", "cursor", "aider", "windsurf")
 EXTENDED_TARGETS: tuple[str, ...] = CORE_TARGETS + ("cline", "continue", "zed", "neovim")
 ALL_TARGETS: tuple[str, ...] = EXTENDED_TARGETS
 

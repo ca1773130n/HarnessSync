@@ -7,7 +7,7 @@ Check which config elements (MCP servers, skills, rules, env vars, permissions) 
 Usage: /sync-coverage [--target <harness>] [--format text|json]
 
 Options:
-- --target: Limit output to a specific harness (e.g. codex, gemini)
+- --target: Limit output to a specific harness (e.g. codex, opencode)
 - --format: Output format — text (default) or json
 - --scope: Config scope to read (default: all)
 

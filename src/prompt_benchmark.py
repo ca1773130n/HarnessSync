@@ -6,7 +6,7 @@ Run the same prompt/task description against multiple harnesses' configurations
 and compare compatibility/coverage scores side-by-side.
 
 No LLM calls are made.  Instead this module statically analyzes the synced
-config files on disk (AGENTS.md, GEMINI.md, .cursor/rules/, etc.) and scores
+config files on disk (AGENTS.md, .cursor/rules/, etc.) and scores
 how well each harness is set up to handle a given prompt or task description.
 
 Scoring dimensions (total: 100 points):
@@ -23,7 +23,7 @@ Usage:
     print(report.format_comparison_table())
 
 Or from the CLI:
-    /sync-bench "your task description here" [--targets codex,gemini] [--json]
+    /sync-bench "your task description here" [--targets codex,opencode] [--json]
 """
 
 import json
@@ -146,43 +146,43 @@ _TASK_RELEVANT_SKILLS: dict[str, list[str]] = {
 
 _CAPABILITY_FIT: dict[str, dict[str, int]] = {
     "code_generation": {
-        "codex": 7, "gemini": 7, "opencode": 8, "cursor": 9, "aider": 8,
+        "codex": 7, "opencode": 8, "cursor": 9, "aider": 8,
         "windsurf": 7, "cline": 7, "continue": 7, "zed": 7, "neovim": 6,
     },
     "code_review": {
-        "codex": 6, "gemini": 8, "opencode": 7, "cursor": 7, "aider": 5,
+        "codex": 6, "opencode": 7, "cursor": 7, "aider": 5,
         "windsurf": 6, "cline": 6, "continue": 6, "zed": 7, "neovim": 5,
     },
     "debugging": {
-        "codex": 7, "gemini": 7, "opencode": 8, "cursor": 8, "aider": 6,
+        "codex": 7, "opencode": 8, "cursor": 8, "aider": 6,
         "windsurf": 7, "cline": 7, "continue": 7, "zed": 7, "neovim": 6,
     },
     "data_science": {
-        "codex": 6, "gemini": 9, "opencode": 6, "cursor": 7, "aider": 9,
+        "codex": 6, "opencode": 6, "cursor": 7, "aider": 9,
         "windsurf": 6, "cline": 5, "continue": 6, "zed": 5, "neovim": 5,
     },
     "infra_ops": {
-        "codex": 8, "gemini": 7, "opencode": 8, "cursor": 7, "aider": 7,
+        "codex": 8, "opencode": 8, "cursor": 7, "aider": 7,
         "windsurf": 6, "cline": 7, "continue": 7, "zed": 6, "neovim": 6,
     },
     "writing_docs": {
-        "codex": 6, "gemini": 9, "opencode": 7, "cursor": 7, "aider": 6,
+        "codex": 6, "opencode": 7, "cursor": 7, "aider": 6,
         "windsurf": 6, "cline": 6, "continue": 6, "zed": 7, "neovim": 5,
     },
     "refactoring": {
-        "codex": 7, "gemini": 7, "opencode": 8, "cursor": 8, "aider": 10,
+        "codex": 7, "opencode": 8, "cursor": 8, "aider": 10,
         "windsurf": 7, "cline": 7, "continue": 7, "zed": 7, "neovim": 7,
     },
     "web_search": {
-        "codex": 6, "gemini": 10, "opencode": 6, "cursor": 6, "aider": 5,
+        "codex": 6, "opencode": 6, "cursor": 6, "aider": 5,
         "windsurf": 6, "cline": 5, "continue": 5, "zed": 5, "neovim": 4,
     },
     "multi_agent": {
-        "codex": 5, "gemini": 8, "opencode": 7, "cursor": 4, "aider": 3,
+        "codex": 5, "opencode": 7, "cursor": 4, "aider": 3,
         "windsurf": 4, "cline": 5, "continue": 5, "zed": 4, "neovim": 3,
     },
     "general": {
-        "codex": 7, "gemini": 8, "opencode": 8, "cursor": 8, "aider": 7,
+        "codex": 7, "opencode": 8, "cursor": 8, "aider": 7,
         "windsurf": 7, "cline": 7, "continue": 7, "zed": 7, "neovim": 6,
     },
 }
@@ -191,7 +191,6 @@ _CAPABILITY_FIT: dict[str, dict[str, int]] = {
 
 _HARNESS_CAPABILITY_LIMITS: dict[str, list[str]] = {
     "codex":    ["No native hook events", "MCP limited to stdio servers"],
-    "gemini":   ["No native hook events"],
     "opencode": ["No native hook events"],
     "cursor":   ["Skills converted to .mdc", "No native hook events",
                  "MCP requires separate Cursor setup"],
@@ -228,7 +227,6 @@ _TASK_REQUIRED_CAPS: dict[str, list[str]] = {
 
 _RULES_FILES: dict[str, list[str]] = {
     "codex":    ["AGENTS.md"],
-    "gemini":   ["GEMINI.md"],
     "opencode": ["OPENCODE.md"],
     "cursor":   [".cursor/rules/claude-code-rules.mdc"],
     "aider":    ["CONVENTIONS.md"],
@@ -241,7 +239,6 @@ _RULES_FILES: dict[str, list[str]] = {
 
 _SKILLS_DIRS: dict[str, str] = {
     "codex":    ".agents/skills",
-    "gemini":   ".gemini/skills",
     "opencode": ".opencode/skills",
     "cursor":   ".cursor/rules/skills",
     "cline":    ".roo/rules/skills",
@@ -252,7 +249,6 @@ _SKILLS_DIRS: dict[str, str] = {
 
 _MCP_FILES: dict[str, str] = {
     "codex":    ".codex/config.toml",
-    "gemini":   ".gemini/settings.json",
     "opencode": ".opencode/settings.json",
     "cursor":   ".cursor/mcp.json",
     "cline":    ".roo/mcp.json",
@@ -262,7 +258,7 @@ _MCP_FILES: dict[str, str] = {
 }
 
 _ALL_TARGETS: list[str] = [
-    "codex", "gemini", "opencode", "cursor", "aider",
+    "codex", "opencode", "cursor", "aider",
     "windsurf", "cline", "continue", "zed", "neovim",
 ]
 
@@ -736,7 +732,7 @@ class PromptBenchmark:
                 missing.append("No native agent support (agents converted to rules)")
 
         if "commands" in required:
-            no_cmd_targets = {"aider", "gemini"}
+            no_cmd_targets = {"aider"}
             if harness in no_cmd_targets:
                 missing.append("Slash commands not available")
 

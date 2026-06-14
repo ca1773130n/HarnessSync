@@ -8,7 +8,7 @@ Install or uninstall git hooks that auto-sync config when CLAUDE.md,
 
 Post-commit hook:   syncs in background after commit (non-blocking)
 Pre-commit hook:    syncs synchronously and stages updated target files
-                    (AGENTS.md, GEMINI.md, etc.) in the same commit
+                    (AGENTS.md, .cursor/rules, etc.) in the same commit
 Gate hook:          blocks commits when harness configs are stale
                     (Claude Code config changed but targets not synced yet)
 Post-checkout hook: auto-syncs when switching branches or pulling team
@@ -77,7 +77,7 @@ def _generate_lazy_wrapper(harness: str, cli_executable: str, plugin_root: str) 
     lazy sync is best-effort and never blocks the user's workflow.
 
     Args:
-        harness:        Harness name (e.g. "aider", "gemini").
+        harness:        Harness name (e.g. "aider", "codex").
         cli_executable: Absolute path to the real CLI (from shutil.which).
         plugin_root:    Absolute path to the HarnessSync plugin root.
 
@@ -114,7 +114,6 @@ def _show_lazy_wrappers(harness_list: list[str] | None, plugin_root: str) -> Non
     # Known CLI executables per harness
     _CLI_MAP: dict[str, list[str]] = {
         "aider":    ["aider"],
-        "gemini":   ["gemini"],
         "codex":    ["codex"],
         "opencode": ["opencode", "opencode-cli"],
         "cursor":   ["cursor"],
@@ -151,13 +150,13 @@ def _show_lazy_wrappers(harness_list: list[str] | None, plugin_root: str) -> Non
         print("# ── How to use ──────────────────────────────────────────────")
         print("# 1. Paste the functions above into ~/.zshrc (or ~/.bashrc)")
         print("# 2. Run: source ~/.zshrc")
-        print("# 3. Now calling 'aider', 'gemini', etc. will sync first.")
+        print("# 3. Now calling 'aider', 'codex', etc. will sync first.")
         print()
         print("# To disable, remove the function from your shell config.")
         print("# Lazy sync is best-effort — the CLI runs even if sync fails.")
     else:
         print("No supported harness CLIs found on PATH.")
-        print("Install a harness (aider, gemini, codex, opencode, cursor, windsurf)")
+        print("Install a harness (aider, codex, opencode, cursor, windsurf)")
         print("and re-run /sync-git-hook --lazy-wrapper.")
 
 
@@ -225,7 +224,7 @@ def main() -> None:
         dest="lazy_wrapper",
         help=(
             "Generate lazy on-demand sync shell wrappers for each installed harness CLI "
-            "(aider, gemini, codex, opencode, cursor, windsurf). "
+            "(aider, codex, opencode, cursor, windsurf). "
             "When a harness CLI is invoked through the wrapper, HarnessSync syncs "
             "only that harness first, then runs the real CLI. "
             "Paste the printed shell snippet into your ~/.zshrc or ~/.bashrc."
@@ -240,7 +239,7 @@ def main() -> None:
         help=(
             "Comma-separated harnesses to generate lazy wrappers for "
             "(default: all that are installed on PATH). "
-            "Example: --lazy-harnesses aider,gemini"
+            "Example: --lazy-harnesses aider,codex"
         ),
     )
     parser.add_argument("--project-dir", type=str, default=None)
@@ -326,7 +325,7 @@ def main() -> None:
                 print(f"OK: {message}")
                 print()
                 print("HarnessSync will now sync harness configs and stage updated")
-                print("target files (AGENTS.md, GEMINI.md, etc.) before each commit")
+                print("target files (AGENTS.md, .cursor/rules, etc.) before each commit")
                 print("when CLAUDE.md, .claude/, or .mcp.json is staged.")
             else:
                 print(f"Error: {message}", file=sys.stderr)

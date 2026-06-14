@@ -7,7 +7,7 @@ This package provides the core adapter infrastructure:
 - AdapterRegistry: Decorator-based registry for adapter discovery
 - SyncResult: Structured dataclass for tracking sync outcomes
 
-Target adapters (Codex, Gemini, OpenCode) implement AdapterBase and register
+Target adapters (Codex, OpenCode, and others) implement AdapterBase and register
 themselves using @AdapterRegistry.register('target-name').
 
 Example usage:
@@ -38,7 +38,6 @@ from .result import SyncResult
 
 # Import adapter modules to trigger @AdapterRegistry.register() decorators
 from . import codex  # noqa: F401
-from . import gemini  # noqa: F401
 from . import opencode  # noqa: F401
 from . import cursor  # noqa: F401
 from . import aider  # noqa: F401

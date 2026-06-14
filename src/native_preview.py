@@ -11,7 +11,6 @@ translation issues (bad TOML, malformed JSON, wrong section headers).
 
 Supported preview targets:
 - codex:    AGENTS.md (with HarnessSync markers), .codex/config.toml
-- gemini:   GEMINI.md, .gemini/settings.json
 - opencode: AGENTS.md, opencode.json
 - cursor:   .cursor/rules/harnesssync.mdc, .cursor/mcp.json
 - aider:    CONVENTIONS.md, .aider.conf.yml
@@ -125,32 +124,6 @@ def _render_codex_config_toml(mcp_servers: dict, settings: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _render_gemini_md(rules_content: str) -> str:
-    """Render GEMINI.md as Gemini CLI would receive it."""
-    return _render_managed_md_section(rules_content, "GEMINI.md")
-
-
-def _render_gemini_settings_json(mcp_servers: dict, settings: dict) -> str:
-    """Render .gemini/settings.json content."""
-    output: dict = {}
-
-    # Map settings
-    allowed = settings.get("permissions", {}).get("allow", [])
-    denied = settings.get("permissions", {}).get("deny", [])
-    if allowed:
-        output["tools"] = {"allowed": allowed}
-    if denied:
-        output.setdefault("tools", {})["exclude"] = denied
-
-    # Add MCP servers
-    if mcp_servers:
-        output["mcpServers"] = {}
-        for name, cfg in sorted(mcp_servers.items()):
-            output["mcpServers"][name] = cfg
-
-    return json.dumps(output, indent=2, ensure_ascii=False) + "\n"
-
-
 def _render_opencode_agents_md(rules_content: str) -> str:
     """Render AGENTS.md for OpenCode."""
     return _render_managed_md_section(rules_content, "AGENTS.md for opencode")
@@ -214,10 +187,6 @@ _FILE_RENDERERS: dict[str, dict[str, object]] = {
         "AGENTS.md": _render_codex_agents_md,
         ".codex/config.toml": _render_codex_config_toml,
     },
-    "gemini": {
-        "GEMINI.md": _render_gemini_md,
-        ".gemini/settings.json": _render_gemini_settings_json,
-    },
     "opencode": {
         "AGENTS.md": _render_opencode_agents_md,
     },
@@ -245,7 +214,7 @@ def render_native_preview(
     """Render native-format preview for a target harness.
 
     Args:
-        harness: Target harness name (e.g. "codex", "gemini").
+        harness: Target harness name (e.g. "codex", "opencode").
         rules_content: Source rules text from CLAUDE.md.
         mcp_servers: MCP server config dict.
         settings: Settings dict.

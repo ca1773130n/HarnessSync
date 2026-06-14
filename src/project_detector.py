@@ -114,7 +114,7 @@ class ProjectTypeDetector:
                 project_type="monorepo",
                 description="Multi-package monorepo (Nx, Turborepo, Lerna, Cargo workspace, etc.)",
                 recommended_scope="project",
-                suggested_targets=["codex", "gemini", "cursor"],
+                suggested_targets=["codex", "cursor"],
                 notes=[
                     "Sync with --scope project so each package gets its own config.",
                     "Consider tag-based selective sync (<!-- sync:codex-only -->) per package.",
@@ -157,7 +157,7 @@ class ProjectTypeDetector:
                     project_type="nestjs",
                     description="NestJS Node.js API server",
                     recommended_scope="project",
-                    suggested_targets=["codex", "gemini"],
+                    suggested_targets=["codex"],
                     notes=[
                         "Sync decorators/DI patterns via CLAUDE.md rules for consistency.",
                     ],
@@ -168,7 +168,7 @@ class ProjectTypeDetector:
                     project_type="node-api",
                     description="Node.js/Express API server",
                     recommended_scope="project",
-                    suggested_targets=["codex", "gemini", "opencode"],
+                    suggested_targets=["codex", "opencode"],
                     notes=[
                         "Skip skills section if this is a simple scripts-only project.",
                     ],
@@ -190,7 +190,7 @@ class ProjectTypeDetector:
                     project_type="python-lib",
                     description="Python package (Poetry-managed)",
                     recommended_scope="project",
-                    suggested_targets=["codex", "gemini", "aider"],
+                    suggested_targets=["codex", "aider"],
                     notes=[
                         "Aider is popular for Python library development — include it.",
                         "Sync type annotation and docstring conventions via CLAUDE.md.",
@@ -202,7 +202,7 @@ class ProjectTypeDetector:
                     project_type="django",
                     description="Django web application",
                     recommended_scope="project",
-                    suggested_targets=["codex", "gemini", "aider"],
+                    suggested_targets=["codex", "aider"],
                     notes=[
                         "Django-specific conventions (ORM, migrations, views) should be in rules.",
                         "Aider works well for Django due to its file-diff workflow.",
@@ -213,7 +213,7 @@ class ProjectTypeDetector:
                 project_type="python",
                 description="Python project",
                 recommended_scope="project",
-                suggested_targets=["codex", "gemini", "aider"],
+                suggested_targets=["codex", "aider"],
                 notes=[
                     "Aider is a strong choice for Python projects.",
                 ],
@@ -226,7 +226,7 @@ class ProjectTypeDetector:
                 project_type="go",
                 description="Go module",
                 recommended_scope="project",
-                suggested_targets=["codex", "gemini"],
+                suggested_targets=["codex"],
                 notes=[
                     "Sync Go idioms (error handling, interface patterns) via CLAUDE.md.",
                     "Skip skills section — Go projects rarely use CLI skill systems.",
@@ -241,7 +241,7 @@ class ProjectTypeDetector:
                 project_type="rust",
                 description="Rust project (Cargo)",
                 recommended_scope="project",
-                suggested_targets=["codex", "gemini"],
+                suggested_targets=["codex"],
                 notes=[
                     "Sync borrow checker guidance and unsafe usage rules via CLAUDE.md.",
                 ],
@@ -277,7 +277,7 @@ class ProjectTypeDetector:
                 project_type="terraform",
                 description="Terraform infrastructure project",
                 recommended_scope="project",
-                suggested_targets=["codex", "gemini"],
+                suggested_targets=["codex"],
                 suggested_skip_sections=["skills", "agents", "commands"],
                 notes=[
                     "Focus on syncing rules for Terraform naming conventions and security policies.",
@@ -290,7 +290,7 @@ class ProjectTypeDetector:
                 project_type="docker",
                 description="Containerized application",
                 recommended_scope="project",
-                suggested_targets=["codex", "gemini"],
+                suggested_targets=["codex"],
                 confidence="low",
             )
 
@@ -299,7 +299,7 @@ class ProjectTypeDetector:
             project_type="generic",
             description="Generic project (type could not be determined)",
             recommended_scope="all",
-            suggested_targets=["codex", "gemini", "opencode"],
+            suggested_targets=["codex", "opencode"],
             notes=[
                 "Could not detect project type from filesystem signals.",
                 "Manually configure HarnessSync with /sync-setup.",

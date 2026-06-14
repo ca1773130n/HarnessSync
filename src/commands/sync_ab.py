@@ -16,7 +16,7 @@ Usage:
     /sync-ab delete --name EXPERIMENT
 
 Example:
-    /sync-ab setup --name ts-strictness --a codex,gemini --b cursor,aider
+    /sync-ab setup --name ts-strictness --a codex,opencode --b cursor,aider
     /sync-ab run --name ts-strictness
     # ... use the harnesses for a week ...
     /sync-ab annotate --name ts-strictness --prefer A --reason "fewer type errors"

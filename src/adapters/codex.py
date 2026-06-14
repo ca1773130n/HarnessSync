@@ -26,12 +26,13 @@ from src.utils.toml_writer import (
     format_mcp_servers_toml,
     format_mcp_server_toml,
     format_toml_value,
+    format_inline_table,
     write_toml_atomic,
     escape_toml_string,
     read_toml_safe,
 )
 from src.utils.env_translator import translate_env_vars_for_codex, check_transport_support
-from src.utils.permissions import extract_permissions, parse_permission_string
+from src.utils.permissions import extract_permissions, extract_permission_mode, parse_permission_string
 
 # Thresholds for intent-based approval policy mapping (see _map_approval_policy)
 CODEX_DENY_THRESHOLD = 3    # deny_list >= this -> "untrusted"
@@ -41,6 +42,13 @@ AGENTS_OVERRIDE_MD = "AGENTS.override.md"
 CODEX_SIZE_LIMIT = 32768  # 32KB size limit for AGENTS.md
 SKILLS_DIR = ".agents/skills"
 CONFIG_TOML = "config.toml"
+
+# Valid Codex model_reasoning_effort values (xhigh is model-dependent, still valid)
+CODEX_REASONING_EFFORTS = frozenset({"minimal", "low", "medium", "high", "xhigh"})
+# Model id prefixes that are meaningful to Codex (OpenAI/Codex providers).
+# Claude/Anthropic aliases (opus/sonnet/haiku/fable/opusplan) are intentionally
+# NOT propagated as Codex `model`, since they are not valid Codex models.
+CODEX_MODEL_PREFIXES = ("gpt", "o1", "o3", "o4", "codex")
 
 
 @AdapterRegistry.register("codex")
@@ -427,28 +435,50 @@ class CodexAdapter(AdapterBase):
 
     # ── Hooks Sync ─────────────────────────────────────────────────────────────
 
-    # Codex event mapping (Claude Code event -> Codex event)
+    # Managed bare top-level config.toml keys. Every writer that rebuilds
+    # config.toml must re-emit these BEFORE any [table] (TOML requires bare keys
+    # to precede tables), and _extract_unmanaged_toml must skip them so they are
+    # never re-appended after a table (which would silently rebind them).
+    _MANAGED_TOP_LEVEL_KEYS: tuple[str, ...] = (
+        "sandbox_mode",
+        "approval_policy",
+        "command_attribution",
+        "model",
+        "model_reasoning_effort",
+        "model_verbosity",
+        "project_doc_fallback_filenames",
+    )
+
+    # Codex event mapping (Claude Code event -> Codex event).
+    # Codex hook events are now stable; names match Claude Code's directly
+    # (there is no legacy "AfterToolUse" — it is "PostToolUse").
     _CODEX_EVENT_MAP: dict[str, str] = {
         "SessionStart": "SessionStart",
         "Stop": "Stop",
-        "PostToolUse": "AfterToolUse",  # Rename
+        "PreToolUse": "PreToolUse",
+        "PostToolUse": "PostToolUse",
+        "UserPromptSubmit": "UserPromptSubmit",
+        "PreCompact": "PreCompact",
+        "PostCompact": "PostCompact",
+        "PermissionRequest": "PermissionRequest",
+        "SubagentStart": "SubagentStart",
+        "SubagentStop": "SubagentStop",
     }
-    # Events to skip (unsupported by Codex)
-    _CODEX_SKIP_EVENTS: set[str] = {"PreToolUse"}
+    # Events with no Codex equivalent fall through to "no Codex equivalent".
+    _CODEX_SKIP_EVENTS: set[str] = set()
 
     def sync_hooks(self, hooks: dict) -> SyncResult:
-        """Sync hooks to Codex config.toml (experimental, gated behind features.hooks).
+        """Sync hooks to Codex ``config.toml`` (hooks are now a stable feature).
 
-        Codex hooks are experimental and require ``[features] hooks = true`` in config.
-        If the feature flag is not set, available hooks are documented in AGENTS.md
-        instead of being written to config.toml. NEVER enables the flag automatically.
+        Codex hooks are enabled by default; HarnessSync writes them to
+        ``config.toml`` unless the user has explicitly set ``[features] hooks = false``,
+        in which case the available hooks are documented in AGENTS.md instead.
+        Codex itself trust-gates execution of non-managed command hooks.
 
-        Event mapping:
-        - SessionStart -> SessionStart (direct)
-        - Stop -> Stop (direct)
-        - PostToolUse -> AfterToolUse (rename)
-        - PreToolUse -> Skip (unsupported)
-        - HTTP hooks -> Skip (shell-only)
+        Event mapping (Codex events match Claude Code names directly):
+        - SessionStart / Stop / PreToolUse / PostToolUse / UserPromptSubmit -> same name
+        - events with no Codex equivalent (e.g. Notification) -> Skip
+        - HTTP hooks -> Skip (Codex hooks are command/shell only)
 
         Args:
             hooks: Dict with 'hooks' key containing list of normalized hook dicts
@@ -462,9 +492,9 @@ class CodexAdapter(AdapterBase):
 
         result = SyncResult()
 
-        # Check if the feature gate is enabled
+        # Hooks are enabled by default; only an explicit opt-out disables writing.
         config_path = self.project_dir / ".codex" / CONFIG_TOML
-        feature_enabled = self._codex_hooks_feature_enabled(config_path)
+        hooks_enabled = self._codex_hooks_feature_enabled(config_path)
 
         # Map hooks to Codex events
         mapped_hooks: list[dict] = []
@@ -495,12 +525,13 @@ class CodexAdapter(AdapterBase):
                 "event": codex_event,
                 "command": hook.get("command", ""),
                 "matcher": hook.get("matcher", ""),
+                "timeout": hook.get("timeout"),
             })
 
         if not mapped_hooks:
             return result
 
-        if feature_enabled:
+        if hooks_enabled:
             # Write hooks to config.toml under [[hooks.EVENT]] sections
             try:
                 self._write_codex_hooks(config_path, mapped_hooks)
@@ -514,32 +545,34 @@ class CodexAdapter(AdapterBase):
                 result.failed = len(mapped_hooks)
                 result.failed_files.append(f"hooks: {str(e)}")
         else:
-            # Document available hooks in AGENTS.md (feature gate not set)
+            # Hooks explicitly disabled ([features] hooks = false): document in AGENTS.md
             self._document_hooks_in_agents_md(mapped_hooks)
             result.skipped = len(mapped_hooks)
             result.skipped_files.append(
-                "hooks: documented in AGENTS.md (enable [features] hooks = true in Codex config to activate)"
+                "hooks: documented in AGENTS.md (hooks disabled via [features] hooks = false)"
             )
 
         return result
 
     @staticmethod
     def _codex_hooks_feature_enabled(config_path: Path) -> bool:
-        """Check if Codex has the experimental hooks feature flag enabled.
+        """Whether Codex hooks should be written (enabled by default).
 
-        Looks for ``[features]`` section with ``hooks = true`` in config.toml.
+        Codex hooks are a stable feature, on by default. This returns False only
+        when the user has explicitly opted out via ``[features] hooks = false`` in
+        config.toml; otherwise True.
 
         Args:
             config_path: Path to Codex config.toml
 
         Returns:
-            True if hooks feature is explicitly enabled
+            True unless hooks are explicitly disabled.
         """
         existing = read_toml_safe(config_path)
         features = existing.get("features", {})
         if isinstance(features, dict):
-            return features.get("hooks") is True
-        return False
+            return features.get("hooks") is not False
+        return True
 
     def _write_codex_hooks(self, config_path: Path, mapped_hooks: list[dict]) -> None:
         """Write mapped hooks to Codex config.toml under [[hooks.EVENT]] sections.
@@ -576,11 +609,17 @@ class CodexAdapter(AdapterBase):
             event = hook["event"]
             command = hook.get("command", "")
             matcher = hook.get("matcher", "")
+            timeout = hook.get("timeout")
             hook_lines.append("")
             hook_lines.append(f'[[hooks.{event}]]')
-            hook_lines.append(f'command = {format_toml_value(command)}')
             if matcher:
                 hook_lines.append(f'matcher = {format_toml_value(matcher)}')
+            hook_lines.append("")
+            hook_lines.append(f'[[hooks.{event}.hooks]]')
+            hook_lines.append('type = "command"')
+            hook_lines.append(f'command = {format_toml_value(command)}')
+            if isinstance(timeout, (int, float)) and timeout > 0:
+                hook_lines.append(f'timeout = {int(timeout)}')
 
         final = cleaned + "\n" + "\n".join(hook_lines) + "\n"
         write_toml_atomic(config_path, final)
@@ -831,6 +870,16 @@ class CodexAdapter(AdapterBase):
         # essential: drop silently (no Codex equivalent)
         translated.pop('essential', None)
 
+        # HTTP transport: Claude Code uses `headers`; Codex uses `http_headers`
+        # (static header values) and `env_http_headers` (header -> env var name).
+        if 'http_headers' not in translated:
+            headers = translated.pop('headers', None)
+            if isinstance(headers, dict) and headers:
+                translated['http_headers'] = headers
+        else:
+            translated.pop('headers', None)
+        # env_http_headers passes through unchanged when already present.
+
         # Remote URL servers: detect auth env var and set bearer_token_env_var
         if 'url' in translated and 'bearer_token_env_var' not in translated:
             env = translated.get('env')
@@ -959,25 +1008,21 @@ class CodexAdapter(AdapterBase):
             # Generate MCP servers TOML section from merged servers
             mcp_toml = format_mcp_servers_toml(merged_mcp_servers)
 
-            # Build settings section from existing config
-            settings_lines = []
-            for key in ['sandbox_mode', 'approval_policy']:
-                if key in existing_config:
-                    val = existing_config[key]
-                    if isinstance(val, str):
-                        settings_lines.append(f'{key} = "{val}"')
-                    elif isinstance(val, bool):
-                        settings_lines.append(f'{key} = {"true" if val else "false"}')
-                    else:
-                        settings_lines.append(f'{key} = {val}')
+            # Re-emit all managed top-level keys from existing config (at the top)
+            settings_section = self._format_top_level_keys(existing_config)
 
-            settings_section = '\n'.join(settings_lines) if settings_lines else ''
+            # Preserve managed tables ([sandbox_workspace_write],
+            # [shell_environment_policy.set]) from the existing parsed config.
+            tables_section = self._format_managed_tables(existing_config)
 
             # Extract non-managed sections for preservation
             preserved = self._extract_unmanaged_toml(config_path)
 
             # Build complete config.toml
-            final_toml = self._build_config_toml(settings_section, mcp_toml, preserved)
+            final_toml = self._build_config_toml(
+                settings_section, mcp_toml, preserved,
+                tables_section=tables_section,
+            )
 
             # Write atomically
             write_toml_atomic(config_path, final_toml)
@@ -1047,30 +1092,62 @@ class CodexAdapter(AdapterBase):
             ):
                 sandbox_mode = 'workspace-write'
 
-            # Determine approval_policy using intent-based mapping
-            approval_policy = self._map_approval_policy(
-                allow_list, deny_list, ask_list, settings
-            )
+            granular = self._approval_policy_granular(settings)
 
-            # Read existing config to preserve MCP servers
+            # Read existing config to preserve MCP servers + user-owned config.
             existing_config = self._read_existing_config()
 
-            # Build settings section
-            settings_lines = [
-                f'sandbox_mode = "{sandbox_mode}"',
-                f'approval_policy = "{approval_policy}"',
-            ]
+            # Managed top-level keys: start from any existing managed keys (so keys
+            # HarnessSync recognizes but does NOT generate, e.g. model_verbosity, are
+            # preserved at the document root), then overlay values derived from source.
+            top_values: dict = {
+                k: existing_config[k]
+                for k in self._MANAGED_TOP_LEVEL_KEYS if k in existing_config
+            }
+            top_values['sandbox_mode'] = sandbox_mode
+            top_values['approval_policy'] = (
+                {'granular': granular} if granular is not None
+                else self._map_approval_policy(allow_list, deny_list, ask_list, settings)
+            )
+            top_values['project_doc_fallback_filenames'] = ['CLAUDE.md']
 
-            # Map attribution -> command_attribution
+            # model: only propagate ids meaningful to Codex; otherwise leave any
+            # existing user-set model untouched (do not clobber with nothing).
+            model = settings.get('model')
+            if isinstance(model, str) and model.strip().lower().startswith(CODEX_MODEL_PREFIXES):
+                top_values['model'] = model.strip()
+
+            effort = settings.get('effort')
+            if isinstance(effort, str) and effort.strip().lower() in CODEX_REASONING_EFFORTS:
+                top_values['model_reasoning_effort'] = effort.strip().lower()
+
             attribution = settings.get('attribution')
             if attribution is not None:
                 attr_value = self._map_attribution(attribution)
                 if attr_value is not None:
-                    settings_lines.append(
-                        f'command_attribution = {format_toml_value(attr_value)}'
-                    )
+                    top_values['command_attribution'] = attr_value
 
-            settings_section = '\n'.join(settings_lines)
+            settings_section = self._format_top_level_keys(top_values)
+
+            # Managed tables, merged with existing user keys so siblings HarnessSync
+            # does not own (e.g. [shell_environment_policy].inherit,
+            # [sandbox_workspace_write].exclude_slash_tmp) are preserved.
+            sbw_existing = existing_config.get('sandbox_workspace_write')
+            sbw_existing = sbw_existing if isinstance(sbw_existing, dict) else {}
+            sbw = {**sbw_existing, **self._sandbox_workspace_write_values(settings, sandbox_mode)}
+
+            sep = existing_config.get('shell_environment_policy')
+            sep = dict(sep) if isinstance(sep, dict) else {}
+            env = settings.get('env')
+            if isinstance(env, dict) and env:
+                sep['set'] = {str(k): str(v) for k, v in env.items()}
+
+            table_values: dict = {}
+            if sbw:
+                table_values['sandbox_workspace_write'] = sbw
+            if sep:
+                table_values['shell_environment_policy'] = sep
+            tables_section = self._format_managed_tables(table_values)
 
             # Build profiles section from modelOverrides
             profiles_section = ''
@@ -1091,6 +1168,7 @@ class CodexAdapter(AdapterBase):
             final_toml = self._build_config_toml(
                 settings_section, mcp_section, preserved,
                 profiles_section=profiles_section,
+                tables_section=tables_section,
             )
 
             # Write atomically
@@ -1183,6 +1261,135 @@ class CodexAdapter(AdapterBase):
             lines.append(f'[profiles.{task_type}]')
             lines.append(f'model = {format_toml_value(model_name)}')
         return '\n'.join(lines)
+
+    def _sandbox_workspace_write_values(self, settings: dict, sandbox_mode: str) -> dict:
+        """Derive ``[sandbox_workspace_write]`` values from CC sandbox + permissions.
+
+        Maps ``sandbox.filesystem.allowWrite`` + ``permissions.additionalDirectories``
+        to ``writable_roots`` and a boolean network flag to ``network_access``. Only
+        meaningful when ``sandbox_mode = "workspace-write"``; returns ``{}`` otherwise
+        or when there is nothing to express.
+        """
+        if sandbox_mode != "workspace-write":
+            return {}
+
+        sandbox = settings.get("sandbox", {})
+        sandbox = sandbox if isinstance(sandbox, dict) else {}
+        fs = sandbox.get("filesystem", {})
+        fs = fs if isinstance(fs, dict) else {}
+
+        roots: list[str] = []
+        for source in (fs.get("allowWrite", []), extract_permission_mode(settings)["additionalDirectories"]):
+            if isinstance(source, list):
+                for d in source:
+                    if isinstance(d, str) and d and d not in roots:
+                        roots.append(d)
+
+        network = None
+        for key in ("allowNetwork", "network_access"):
+            v = sandbox.get(key)
+            if isinstance(v, bool):
+                network = v
+                break
+
+        values: dict = {}
+        if roots:
+            values["writable_roots"] = roots
+        if network is not None:
+            values["network_access"] = network
+        return values
+
+    @staticmethod
+    def _scalar_toml(value) -> str:
+        """Format a scalar/list/dict as a TOML value (inline table for dicts)."""
+        fv = format_toml_value(value)
+        if not fv and isinstance(value, dict):
+            fv = format_inline_table(value)
+        return fv
+
+    @classmethod
+    def _format_top_level_keys(cls, values: dict) -> str:
+        """Format managed bare top-level keys in canonical order."""
+        lines = []
+        for key in cls._MANAGED_TOP_LEVEL_KEYS:
+            if key in values:
+                fv = cls._scalar_toml(values[key])
+                if fv:
+                    lines.append(f"{key} = {fv}")
+        return "\n".join(lines)
+
+    @classmethod
+    def _format_managed_tables(cls, values: dict) -> str:
+        """Format the managed config.toml table sections from a values dict.
+
+        Handles ``[sandbox_workspace_write]`` (flat) and
+        ``[shell_environment_policy]`` (sibling keys + nested ``set`` table). All
+        keys present are emitted so user-owned siblings survive. The same formatter
+        is used both when emitting from source settings and when re-emitting from an
+        existing parsed config (so tables survive a later sync_mcp rebuild).
+        """
+        sections: list[str] = []
+
+        sbw = values.get("sandbox_workspace_write")
+        if isinstance(sbw, dict) and sbw:
+            lines = ["[sandbox_workspace_write]"]
+            for k, v in sbw.items():
+                fv = cls._scalar_toml(v)
+                if fv:
+                    lines.append(f"{k} = {fv}")
+            if len(lines) > 1:
+                sections.append("\n".join(lines))
+
+        sep = values.get("shell_environment_policy")
+        if isinstance(sep, dict) and sep:
+            top_lines: list[str] = []
+            set_map = None
+            for k, v in sep.items():
+                if k == "set" and isinstance(v, dict):
+                    set_map = v
+                else:
+                    fv = cls._scalar_toml(v)
+                    if fv:
+                        top_lines.append(f"{k} = {fv}")
+            sec: list[str] = []
+            if top_lines:
+                sec.append("[shell_environment_policy]")
+                sec.extend(top_lines)
+            if isinstance(set_map, dict) and set_map:
+                sec.append("[shell_environment_policy.set]")
+                for k, v in set_map.items():
+                    sec.append(f"{k} = {format_toml_value(str(v))}")
+            if sec:
+                sections.append("\n".join(sec))
+
+        return "\n\n".join(sections)
+
+    # Granular approval_policy categories (Codex object form).
+    _GRANULAR_KEYS: tuple[str, ...] = (
+        "sandbox_approval", "rules", "mcp_elicitations",
+        "request_permissions", "skill_approval",
+    )
+
+    @classmethod
+    def _approval_policy_granular(cls, settings: dict):
+        """Return the granular approval_policy booleans, or None for string form.
+
+        Opt-in: ``settings["codexApprovalGranular"]`` may be ``True`` (all
+        categories auto-approved) or a dict of any of the five category booleans
+        (sandbox_approval, rules, mcp_elicitations, request_permissions,
+        skill_approval). Absent/invalid -> None (keep the intent-based string form).
+        """
+        spec = settings.get("codexApprovalGranular")
+        if spec is True:
+            return {k: True for k in cls._GRANULAR_KEYS}
+        if isinstance(spec, dict):
+            out = {
+                k: bool(spec[k])
+                for k in cls._GRANULAR_KEYS
+                if isinstance(spec.get(k), bool)
+            }
+            return out or None
+        return None
 
     def _map_approval_policy(
         self,
@@ -1335,7 +1542,8 @@ description: {quoted_desc}
 
         Managed content (will be regenerated):
         - Header comments (# ... HarnessSync ..., # Do not edit ...)
-        - sandbox_mode, approval_policy, and command_attribution top-level keys
+        - All managed top-level keys (see _MANAGED_TOP_LEVEL_KEYS)
+        - The [sandbox_workspace_write] and [shell_environment_policy.*] tables
         - All [mcp_servers.*] sections
         - All [profiles.*] sections
 
@@ -1365,17 +1573,16 @@ description: {quoted_desc}
             if stripped.startswith('#') and ('HarnessSync' in stripped or 'Do not edit' in stripped or 'MCP servers' in stripped):
                 continue
 
-            # Skip managed top-level keys
-            if stripped.startswith('sandbox_mode') and '=' in stripped:
-                continue
-            if stripped.startswith('approval_policy') and '=' in stripped:
-                continue
-            if stripped.startswith('command_attribution') and '=' in stripped:
+            # Skip managed top-level keys (exact key match before '=')
+            if '=' in stripped and stripped.split('=', 1)[0].strip() in self._MANAGED_TOP_LEVEL_KEYS:
                 continue
 
             # Track table headers
             if stripped.startswith('['):
-                if stripped.startswith('[mcp_servers') or stripped.startswith('[profiles.'):
+                if (stripped.startswith('[mcp_servers')
+                        or stripped.startswith('[profiles.')
+                        or stripped.startswith('[sandbox_workspace_write')
+                        or stripped.startswith('[shell_environment_policy')):
                     in_mcp_section = True
                     continue
                 else:
@@ -1397,17 +1604,24 @@ description: {quoted_desc}
         mcp_section: str,
         preserved_sections: str = '',
         profiles_section: str = '',
+        tables_section: str = '',
     ) -> str:
-        """Combine settings, profiles, and MCP sections into complete config.toml.
+        """Combine settings, managed tables, profiles, and MCP into config.toml.
 
         Args:
             settings_section: Settings TOML content (sandbox_mode, approval_policy, etc.)
             mcp_section: MCP servers TOML content
             preserved_sections: Non-managed TOML sections to preserve
             profiles_section: [profiles.*] TOML sections from modelOverrides
+            tables_section: Managed [table] sections ([sandbox_workspace_write],
+                [shell_environment_policy.set])
 
         Returns:
             Complete config.toml string with header comment
+
+        Note:
+            Bare top-level keys (settings_section) MUST precede any [table]
+            sections per TOML, so the managed/profiles/mcp tables follow it.
         """
         lines = [
             '# Codex configuration managed by HarnessSync',
@@ -1417,6 +1631,10 @@ description: {quoted_desc}
 
         if settings_section:
             lines.append(settings_section)
+            lines.append('')
+
+        if tables_section:
+            lines.append(tables_section)
             lines.append('')
 
         if profiles_section:

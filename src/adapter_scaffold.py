@@ -7,7 +7,7 @@ config file format. Lowers the contribution bar from 'read source code'
 to 'fill in a template', making it easy to add support for new harnesses.
 
 Supported config formats:
-  markdown  — Single markdown file (like AGENTS.md or GEMINI.md)
+  markdown  — Single markdown file (like AGENTS.md)
   json      — JSON config file (like opencode.json)
   yaml      — YAML config file
   toml      — TOML config file

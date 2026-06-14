@@ -38,18 +38,6 @@ _CAPABILITIES: dict[str, dict[str, str]] = {
         "env":         "partial",
         "permissions": "partial",
     },
-    "gemini": {
-        "rules":       "full",
-        "skills":      "full",
-        "agents":      "partial",
-        "commands":    "none",
-        "mcp":         "full",
-        "settings":    "partial",
-        "hooks":       "none",
-        "plugins":     "none",
-        "env":         "none",
-        "permissions": "none",
-    },
     "opencode": {
         "rules":       "full",
         "skills":      "none",

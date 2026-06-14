@@ -17,7 +17,7 @@ Usage::
     scheduler = SyncScheduler()
 
     # Add a daily sync at 09:00
-    ok, msg = scheduler.add("daily", targets=["codex", "gemini"])
+    ok, msg = scheduler.add("daily", targets=["codex", "opencode"])
 
     # List configured schedule
     entry = scheduler.get()
@@ -168,7 +168,7 @@ class SyncScheduler:
         # Build the cron line
         cmd = _resolve_harnesssync_cmd()
         if targets:
-            # Filter-flag accepted by sync.py --targets codex,gemini
+            # Filter-flag accepted by sync.py --targets codex,opencode
             cmd += f" --targets {','.join(targets)}"
         cron_line = f"{cron_expr} {cmd}  {_CRON_MARKER}"
 

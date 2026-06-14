@@ -31,8 +31,8 @@ from src.commands.sync_coverage import _CAPABILITIES, _source_sections, _SYMBOLS
 
 class TestSyncCoverage:
     def test_capabilities_contains_known_harnesses(self):
-        """All 11 harnesses should be present in the capability map."""
-        expected = {"codex", "gemini", "opencode", "cursor", "aider",
+        """All 10 harnesses should be present in the capability map."""
+        expected = {"codex", "opencode", "cursor", "aider",
                     "windsurf", "cline", "continue", "zed", "neovim", "vscode"}
         assert expected == set(_CAPABILITIES.keys())
 
@@ -259,11 +259,11 @@ class TestOverrideManager:
         """Markdown override in .claude/overrides/ should be loaded as fallback."""
         od = tmp_path / ".claude" / "overrides"
         od.mkdir(parents=True)
-        (od / "gemini.md").write_text("# Gemini extras\n")
+        (od / "windsurf.md").write_text("# Windsurf extras\n")
         om = OverrideManager(tmp_path)
-        result = om.load_overrides("gemini")
+        result = om.load_overrides("windsurf")
         assert "md" in result
-        assert "Gemini extras" in result["md"]
+        assert "Windsurf extras" in result["md"]
 
     def test_primary_takes_precedence(self, tmp_path):
         """Primary override dir should win over .claude/overrides/."""

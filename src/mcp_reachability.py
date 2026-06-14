@@ -308,7 +308,6 @@ class McpReachabilityChecker:
 # "http":  supports URL-based (HTTP/SSE/WebSocket) MCP servers
 _HARNESS_TRANSPORT_SUPPORT: dict[str, set[str]] = {
     "codex":    {"stdio", "http"},
-    "gemini":   {"http"},           # Gemini CLI requires HTTP/SSE transport
     "opencode": {"stdio", "http"},
     "cursor":   {"stdio", "http"},
     "aider":    set(),              # Aider has no MCP support
@@ -343,8 +342,8 @@ def check_harness_transport_compat(
     """Validate that each MCP server's transport is supported by each target harness.
 
     Before syncing MCP configs, this check flags servers that use a transport
-    type the target harness does not support — e.g. stdio-based servers synced
-    to Gemini CLI (which only supports HTTP/SSE transport).
+    type the target harness does not support — e.g. servers using a transport
+    that a harness with no MCP support (such as Aider) cannot accept.
 
     Args:
         mcp_servers: Dict mapping server name to server config dict.
@@ -414,7 +413,7 @@ def format_transport_compat_warnings(issues: list[TransportCompatIssue]) -> list
 
 # Harnesses that support MCP; syncing to others is pointless
 _MCP_CAPABLE_TARGETS: frozenset[str] = frozenset(
-    {"codex", "gemini", "opencode", "cursor", "cline", "continue", "zed", "neovim", "windsurf"}
+    {"codex", "opencode", "cursor", "cline", "continue", "zed", "neovim", "windsurf"}
 )
 
 # Status constants
@@ -484,7 +483,7 @@ def pre_sync_validate(
 
     Args:
         mcp_servers: Dict mapping server name → server config dict.
-        target: Target harness name (e.g. 'codex', 'gemini').
+        target: Target harness name (e.g. 'codex', 'opencode').
         timeout: TCP socket timeout for URL-based servers (default: 3.0s).
         block_on_unreachable: If True, any unreachable server escalates to
                                a BLOCK status (useful in CI/CD pipelines).

@@ -55,7 +55,6 @@ _PUBLISH_FILES: list[str] = [
     "CLAUDE.md",
     "CLAUDE.local.md",
     "AGENTS.md",
-    "GEMINI.md",
     "CONVENTIONS.md",
     ".windsurfrules",
     ".cursor/rules/claude-code-rules.mdc",
@@ -230,7 +229,7 @@ class TeamGitHubSync:
                 self.logger.warn(f"publish: copy failed for {rel}: {exc}")
 
         # Also copy per-target override files (CLAUDE.<target>.md)
-        for target in ("codex", "gemini", "opencode", "cursor", "aider", "windsurf"):
+        for target in ("codex", "opencode", "cursor", "aider", "windsurf"):
             override_rel = f"CLAUDE.{target}.md"
             src = self.project_dir / override_rel
             if not src.exists():
@@ -586,7 +585,7 @@ class TeamGitHubSync:
                 applicable.append(rel)
 
         # Also include per-target override files present in the repo
-        for target in ("codex", "gemini", "opencode", "cursor", "aider", "windsurf"):
+        for target in ("codex", "opencode", "cursor", "aider", "windsurf"):
             override_rel = f"CLAUDE.{target}.md"
             if (repo_dir / override_rel).exists():
                 applicable.append(override_rel)

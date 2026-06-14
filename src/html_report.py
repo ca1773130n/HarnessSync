@@ -805,7 +805,7 @@ def generate_skill_browser(
                 - translated (dict): {target: translated_content} (optional)
                 - scores (dict): {target: score_dict} (optional; auto-computed if absent)
         targets: Target harness names to include in columns.
-                 Defaults to ["codex", "gemini", "cursor", "aider", "windsurf"].
+                 Defaults to ["codex", "opencode", "cursor", "aider", "windsurf"].
         title: HTML page title.
 
     Returns:
@@ -819,7 +819,7 @@ def generate_skill_browser(
     )
 
     if targets is None:
-        targets = ["codex", "gemini", "cursor", "aider", "windsurf"]
+        targets = ["codex", "opencode", "cursor", "aider", "windsurf"]
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 

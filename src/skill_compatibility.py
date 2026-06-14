@@ -55,11 +55,6 @@ TARGET_LIMITATIONS: dict[str, list[str]] = {
         "Hook events not available",
         "Claude Code-specific tools not available",
     ],
-    "gemini": [
-        "Hook events not available",
-        "Claude Code-specific tools not available",
-        "Some MCP servers may not be configured",
-    ],
     "opencode": [
         "Hook events not available",
         "Claude Code-specific tools not available",
@@ -197,14 +192,6 @@ _FEATURE_COVERAGE: dict[str, dict[str, float]] = {
         "agents": 0.5,
         "settings": 0.2,  # only allow/deny lists carry over
     },
-    "gemini": {
-        "rules": 1.0,
-        "skills": 0.6,   # converted to system instructions
-        "mcp": 0.8,       # stdio MCP supported; SSE may need workarounds
-        "commands": 0.3,
-        "agents": 0.4,
-        "settings": 0.3,
-    },
     "opencode": {
         "rules": 1.0,
         "skills": 0.7,
@@ -284,11 +271,6 @@ _COVERAGE_EXPLANATIONS: dict[str, dict[str, str]] = {
     "codex": {
         "mcp": "MCP servers not supported — configure separately",
         "commands": "commands become plain AGENTS.md instruction notes",
-        "settings": "only allow/deny permissions carry over",
-    },
-    "gemini": {
-        "commands": "commands converted to GEMINI.md instruction blocks",
-        "agents": "agents approximated as GEMINI.md role definitions",
         "settings": "only allow/deny permissions carry over",
     },
     "aider": {
@@ -673,7 +655,7 @@ _FALLBACK_SUGGESTIONS: list[tuple[str, str]] = [
     (
         "Bash' tool",
         "Replace references to the Bash tool with generic shell-command instructions "
-        "('Run the following shell command:') so Codex/Gemini users know what to execute.",
+        "('Run the following shell command:') so Codex users know what to execute.",
     ),
     (
         "Read' tool",
@@ -919,7 +901,7 @@ def generate_what_youre_missing_report(
         {
             "feature": "PostToolUse / PreToolUse hooks",
             "description": "Claude Code hooks trigger shell commands around tool calls.",
-            "affected_harnesses": {"cursor", "aider", "codex", "gemini", "opencode", "windsurf", "cline", "continue", "vscode", "neovim"},
+            "affected_harnesses": {"cursor", "aider", "codex", "opencode", "windsurf", "cline", "continue", "vscode", "neovim"},
             "workaround": "Add equivalent actions to CI or a pre-commit hook instead.",
             "severity": "medium",
         },
@@ -933,14 +915,14 @@ def generate_what_youre_missing_report(
         {
             "feature": "Persistent memory (memory/ directory)",
             "description": "Claude Code agents can read/write persistent markdown memory files.",
-            "affected_harnesses": {"cursor", "codex", "gemini", "aider", "windsurf", "cline", "continue", "vscode", "neovim", "opencode"},
+            "affected_harnesses": {"cursor", "codex", "aider", "windsurf", "cline", "continue", "vscode", "neovim", "opencode"},
             "workaround": "Attach relevant context manually or via project README.",
             "severity": "low",
         },
         {
             "feature": "Multi-agent orchestration (Agent tool)",
             "description": "Claude Code can spawn and coordinate subagents for parallel tasks.",
-            "affected_harnesses": {"cursor", "aider", "windsurf", "cline", "continue", "vscode", "neovim", "opencode", "codex", "gemini"},
+            "affected_harnesses": {"cursor", "aider", "windsurf", "cline", "continue", "vscode", "neovim", "opencode", "codex"},
             "workaround": "Structure prompts sequentially; use CI pipelines for parallelism.",
             "severity": "low",
         },

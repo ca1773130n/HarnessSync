@@ -18,11 +18,11 @@ Usage:
     from src.harness_comparison import HarnessConfigComparison
 
     cmp = HarnessConfigComparison()
-    report = cmp.compare(source_data, targets=["codex", "gemini", "cursor"])
+    report = cmp.compare(source_data, targets=["codex", "opencode", "cursor"])
     print(cmp.format_report(report))
 
 Or from the CLI (sync-compare command):
-    /sync-compare [--targets codex,gemini,cursor] [--project-dir PATH]
+    /sync-compare [--targets codex,opencode,cursor] [--project-dir PATH]
 """
 
 from dataclasses import dataclass, field
@@ -36,7 +36,6 @@ from src.utils.constants import EXTENDED_TARGETS
 _FEATURE_SUPPORT: dict[str, dict[str, str]] = {
     "rules": {
         "codex":    "full",
-        "gemini":   "full",
         "opencode": "full",
         "cursor":   "full",
         "aider":    "full",
@@ -48,7 +47,6 @@ _FEATURE_SUPPORT: dict[str, dict[str, str]] = {
     },
     "skills": {
         "codex":    "none",     # No native skill concept; translates to AGENTS.md prompt
-        "gemini":   "partial",  # Translated to GEMINI.md sections
         "opencode": "none",
         "cursor":   "partial",  # Embedded in .mdc rules
         "aider":    "none",
@@ -60,7 +58,6 @@ _FEATURE_SUPPORT: dict[str, dict[str, str]] = {
     },
     "agents": {
         "codex":    "partial",  # Translated to AGENTS.md subagent descriptions
-        "gemini":   "none",
         "opencode": "none",
         "cursor":   "none",
         "aider":    "none",
@@ -72,7 +69,6 @@ _FEATURE_SUPPORT: dict[str, dict[str, str]] = {
     },
     "commands": {
         "codex":    "none",
-        "gemini":   "partial",  # Translated to GEMINI.md slash-command hints
         "opencode": "none",
         "cursor":   "none",
         "aider":    "none",
@@ -84,7 +80,6 @@ _FEATURE_SUPPORT: dict[str, dict[str, str]] = {
     },
     "mcp": {
         "codex":    "full",
-        "gemini":   "full",
         "opencode": "full",
         "cursor":   "full",
         "aider":    "none",
@@ -96,7 +91,6 @@ _FEATURE_SUPPORT: dict[str, dict[str, str]] = {
     },
     "settings": {
         "codex":    "full",
-        "gemini":   "partial",  # Fewer settings supported
         "opencode": "full",
         "cursor":   "none",
         "aider":    "partial",  # Via .aider.conf.yml
@@ -138,7 +132,7 @@ class HarnessComparisonReport:
 
         Produces one line per target in the style:
             Codex:    87% of your Claude Code config is active here  (2 features have no equivalent)
-            Gemini:  100% of your Claude Code config is active here
+            Opencode: 100% of your Claude Code config is active here
             Cursor:   62% of your Claude Code config is active here  (3 features have no equivalent)
 
         Returns:
@@ -306,14 +300,11 @@ class HarnessConfigComparison:
     def _partial_note(feature: str, target: str) -> str:
         """Return a brief explanation for partial feature support."""
         notes = {
-            ("skills", "gemini"):   "skills translated to GEMINI.md sections without invocation syntax",
             ("skills", "cursor"):   "skills embedded in .mdc rules; no separate skill invocation",
             ("agents", "codex"):    "agents described in AGENTS.md as subagent descriptions only",
-            ("commands", "gemini"): "commands translated to GEMINI.md slash-command hints only",
             ("mcp", "windsurf"):    "some MCP fields (auth, headers) omitted in Windsurf format",
             ("mcp", "zed"):         "MCP mapped to context_servers; different schema and no env var support",
             ("mcp", "neovim"):      "MCP via .avante/mcp.json; limited to command/args fields only",
-            ("settings", "gemini"): "subset of settings supported; approval_mode and shell only",
             ("settings", "aider"):  "settings translated to .aider.conf.yml key-value pairs",
             ("settings", "windsurf"): "limited settings via .windsurfrules",
             ("settings", "zed"):    "assistant model/context settings only; permissions not supported",
@@ -333,7 +324,6 @@ class HarnessConfigComparison:
             ("skills", "continue"): "no skill concept in Continue",
             ("skills", "zed"):      "no skill concept in Zed AI",
             ("skills", "neovim"):   "no skill concept in neovim AI plugins",
-            ("agents", "gemini"):   "no subagent concept in Gemini CLI",
             ("agents", "opencode"): "no subagent concept in OpenCode",
             ("agents", "cursor"):   "no subagent concept in Cursor",
             ("agents", "aider"):    "no subagent concept in Aider",
@@ -497,7 +487,7 @@ def run_behavioral_equivalence_test(
             from src.adapters import AdapterRegistry
             targets = AdapterRegistry.list_targets()
         except Exception:
-            targets = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"]
+            targets = ["codex", "opencode", "cursor", "aider", "windsurf"]
 
     # Discover source rules
     source_rules = ""
@@ -518,7 +508,6 @@ def run_behavioral_equivalence_test(
     # Target config file locations
     _TARGET_RULES_FILES: dict[str, list[str]] = {
         "codex":    ["AGENTS.md", ".codex/AGENTS.md"],
-        "gemini":   ["GEMINI.md", ".gemini/GEMINI.md"],
         "opencode": [".opencode/AGENTS.md"],
         "cursor":   [".cursor/rules/claude-code-rules.mdc"],
         "aider":    ["CONVENTIONS.md"],
@@ -723,23 +712,19 @@ _TASK_FEATURE_WEIGHTS: dict[str, dict[str, float]] = {
 _TASK_HARNESS_RATIONALE: dict[str, dict[str, str]] = {
     "code_generation": {
         "codex": "Strong rules and agent support; AGENTS.md well-suited for code tasks",
-        "gemini": "Full rules + partial skills; good for structured code generation",
         "cursor": "IDE integration means real-time rule application during editing",
         "opencode": "Full rules + MCP support; clean code-gen workflow",
     },
     "code_review": {
         "codex": "Agent translation enables multi-step review workflows",
-        "gemini": "Full rules fidelity; structured review prompts translate well",
         "cursor": "IDE context gives harness direct file access for review",
     },
     "debugging": {
         "codex": "Agent support + full MCP access enables deep debugging workflows",
         "opencode": "Full rules + MCP; can attach debug MCP servers",
-        "gemini": "Good rules fidelity; useful for structured debugging prompts",
     },
     "refactoring": {
         "codex": "Agent support makes multi-file refactoring plans viable",
-        "gemini": "Skills translation handles refactoring recipes well",
         "cursor": "IDE integration makes refactoring instructions contextual",
     },
     "multi_agent": {
@@ -748,7 +733,6 @@ _TASK_HARNESS_RATIONALE: dict[str, dict[str, str]] = {
     "data_science": {
         "opencode": "Full MCP support connects to database/notebook MCP servers",
         "codex": "MCP support + agents enable data pipeline orchestration",
-        "gemini": "Rules + MCP; accessible for notebook-style workflows",
     },
 }
 
@@ -936,7 +920,6 @@ _DEFAULT_BENCHMARK_PROMPTS = [
 # Each value is a list of argv tokens; {prompt} is substituted.
 _HARNESS_CLI_TEMPLATES: dict[str, list[str]] = {
     "codex":    ["codex", "--quiet", "{prompt}"],
-    "gemini":   ["gemini", "--model", "gemini-2.0-flash", "-p", "{prompt}"],
     "opencode": ["opencode", "ask", "{prompt}"],
     "aider":    ["aider", "--message", "{prompt}", "--yes-always", "--no-auto-commits"],
 }

@@ -86,7 +86,7 @@ def main():
         "--targets",
         type=str,
         metavar="CLI=PATH,...",
-        help="Target paths as codex=/path,gemini=/path,opencode=/path (use with --add)"
+        help="Target paths as codex=/path,opencode=/path (use with --add)"
     )
 
     try:
@@ -125,7 +125,7 @@ def main():
 def _auto_setup() -> None:
     """Auto-discover accounts by scanning home directory.
 
-    Finds .claude* sources matched to .codex*/.gemini*/.opencode* targets
+    Finds .claude* sources matched to .codex*/.opencode* targets
     by suffix, filtering out targets without auth credentials.
     """
     print("Scanning home directory for CLI accounts...")
@@ -138,10 +138,10 @@ def _auto_setup() -> None:
         print()
         print("HarnessSync looks for:")
         print("  Source:  ~/.claude, ~/.claude-<name>")
-        print("  Targets: ~/.codex[-<name>], ~/.gemini[-<name>], ~/.opencode[-<name>]")
+        print("  Targets: ~/.codex[-<name>], ~/.opencode[-<name>]")
         print()
         print("Targets must have auth credentials (e.g. auth.json for Codex,")
-        print("settings.json for Gemini) to be recognized.")
+        print("opencode.json for opencode) to be recognized.")
         return
 
     am = AccountManager()
@@ -193,7 +193,7 @@ def _add_account_inline(name: str, source: str, targets_str: str) -> None:
     Args:
         name: Account name
         source: Path to Claude Code config directory
-        targets_str: Comma-separated CLI=PATH pairs (e.g. codex=~/.codex,gemini=~/.gemini)
+        targets_str: Comma-separated CLI=PATH pairs (e.g. codex=~/.codex,opencode=~/.opencode)
     """
     if not source:
         print("Error: --source is required with --add", file=sys.stderr)
@@ -216,7 +216,7 @@ def _add_account_inline(name: str, source: str, targets_str: str) -> None:
         suffix = "" if name == "default" else f"-{name}"
         targets = {
             cli: Path.home() / f".{cli}{suffix}"
-            for cli in ["codex", "gemini", "opencode"]
+            for cli in ["codex", "opencode"]
         }
 
     am = AccountManager()

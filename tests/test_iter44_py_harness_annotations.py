@@ -95,7 +95,7 @@ def test_py_replace_multi_target():
 
 def test_py_replace_other_targets_get_original():
     content = "- Run /sync  # @codex,cursor: replace with Run harnesssync"
-    result = filter_rules_for_target(content, "gemini")
+    result = filter_rules_for_target(content, "aider")
     assert "Run /sync" in result
     assert "Run harnesssync" not in result
 
@@ -130,14 +130,14 @@ def test_py_replace_empty_replacement_drops_line():
 def test_html_comment_annotations_unaffected():
     """HTML comment annotations still work alongside new Python-style ones."""
     content = (
-        "- HTML skip line  <!-- harness:skip=gemini -->\n"
+        "- HTML skip line  <!-- harness:skip=opencode -->\n"
         "- Python skip line  # @aider: skip\n"
         "- Normal line"
     )
-    gemini_result = filter_rules_for_target(content, "gemini")
-    assert "HTML skip line" not in gemini_result
-    assert "Python skip line" in gemini_result
-    assert "Normal line" in gemini_result
+    opencode_result = filter_rules_for_target(content, "opencode")
+    assert "HTML skip line" not in opencode_result
+    assert "Python skip line" in opencode_result
+    assert "Normal line" in opencode_result
 
     aider_result = filter_rules_for_target(content, "aider")
     assert "HTML skip line" in aider_result

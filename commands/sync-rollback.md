@@ -10,7 +10,7 @@ Usage: /sync-rollback [--list] [--target TARGET] [--backup NAME] [--timestamp DA
 
 Options:
 - --list: List all available backups for all targets
-- --target TARGET: Target to restore (codex, gemini, opencode, cursor, etc.)
+- --target TARGET: Target to restore (codex, opencode, cursor, aider, etc.)
 - --backup NAME: Specific backup to restore (default: most recent)
 - --label LABEL: Find backup by label instead of name
 - --timestamp DATE: Time-travel: restore backup from on or before this date (YYYY-MM-DD or YYYY-MM-DDTHH:MM)
@@ -23,8 +23,8 @@ Examples:
 - /sync-rollback --target codex
 - /sync-rollback --target codex --steps 3
 - /sync-rollback --target codex --steps 1 --dry-run
-- /sync-rollback --target gemini --timestamp 2025-03-10
+- /sync-rollback --target opencode --timestamp 2025-03-10
 - /sync-rollback --target codex --before-commit abc1234
-- /sync-rollback --target gemini --backup AGENTS.md_20240115_143022
+- /sync-rollback --target codex --backup AGENTS.md_20240115_143022
 
 !PY=$(command -v python3 || command -v python) && [ -n "$PY" ] || { echo "Error: Python not found. Install Python 3 to use HarnessSync." >&2; exit 1; }; "$PY" ${CLAUDE_PLUGIN_ROOT}/src/commands/sync_rollback.py $ARGUMENTS

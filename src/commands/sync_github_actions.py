@@ -166,7 +166,6 @@ on:
       - ".claude/**"
       - ".harness-sync/**"
       - "AGENTS.md"
-      - "GEMINI.md"
 
 permissions:
   contents: read
@@ -244,7 +243,6 @@ def _build_sync_targets_glob(targets: list[str]) -> str:
     patterns = []
     target_files = {
         "codex": "AGENTS.md .agents/",
-        "gemini": "GEMINI.md .gemini/",
         "opencode": "opencode.json .opencode/",
         "cursor": ".cursor/",
         "aider": "CONVENTIONS.md .aider.conf.yml",

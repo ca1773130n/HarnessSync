@@ -7,7 +7,7 @@ Add a new AI coding tool to HarnessSync. Detects the installed tool, translates 
 Usage: /sync-add-harness [NAME] [--list] [--dry-run] [--force] [--project-dir PATH]
 
 Options:
-- NAME: Harness to add (codex, gemini, opencode, cursor, aider, windsurf, cline, continue, zed, neovim). Omit to auto-detect.
+- NAME: Harness to add (codex, opencode, cursor, aider, windsurf, cline, continue, zed, neovim). Omit to auto-detect.
 - --list: List detected but unconfigured harnesses and exit
 - --dry-run: Preview what would be written without modifying any files
 - --force: Add even if the harness appears to be already configured

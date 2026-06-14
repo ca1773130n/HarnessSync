@@ -96,7 +96,7 @@ class SyncPreviewGenerator:
     def get_target_rules_path(self, adapter) -> Path | None:
         """Return the path of the rules file for a given adapter, or None."""
         # Each adapter exposes a known path attribute
-        for attr in ("agents_md_path", "gemini_md_path", "rules_path"):
+        for attr in ("agents_md_path", "rules_path"):
             p = getattr(adapter, attr, None)
             if p is not None:
                 return p
@@ -104,7 +104,6 @@ class SyncPreviewGenerator:
         target = adapter.target_name
         rules_filenames = {
             "codex": "AGENTS.md",
-            "gemini": "GEMINI.md",
             "opencode": "OPENCODE.md",
             "cursor": ".cursor/rules/harnesssync.mdc",
             "aider": "CONVENTIONS.md",
@@ -124,7 +123,7 @@ class SyncPreviewGenerator:
         skills_dir = getattr(adapter, 'skills_dir', None)
         if skills_dir is None:
             # Guess common locations
-            for candidate in (".agents/skills", ".gemini/skills", ".opencode/skills"):
+            for candidate in (".agents/skills", ".opencode/skills"):
                 p = self.project_dir / candidate
                 if p.is_dir():
                     skills_dir = p
@@ -135,7 +134,7 @@ class SyncPreviewGenerator:
 
     def get_current_agents(self, adapter) -> dict:
         """Read current agent names from adapter's agents output directory."""
-        for candidate in (".gemini/agents", ".opencode/agents"):
+        for candidate in (".opencode/agents",):
             p = self.project_dir / candidate
             if p.is_dir():
                 return {f.stem: str(f) for f in p.iterdir()
@@ -144,7 +143,7 @@ class SyncPreviewGenerator:
 
     def get_current_commands(self, adapter) -> dict:
         """Read current command names from adapter's commands output directory."""
-        for candidate in (".gemini/commands", ".opencode/commands"):
+        for candidate in (".opencode/commands",):
             p = self.project_dir / candidate
             if p.is_dir():
                 return {f.stem: str(f) for f in p.iterdir()
@@ -155,7 +154,6 @@ class SyncPreviewGenerator:
         """Read current MCP config from adapter's output location."""
         # Common MCP output locations
         for candidate in (
-            ".gemini/settings.json",
             ".codex/config.toml",
             ".opencode/settings.json",
         ):
@@ -172,7 +170,6 @@ class SyncPreviewGenerator:
     def get_current_settings(self, adapter) -> dict:
         """Read current settings from adapter's settings output."""
         for candidate in (
-            ".gemini/settings.json",
             ".opencode/settings.json",
         ):
             p = self.project_dir / candidate

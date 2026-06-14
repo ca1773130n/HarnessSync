@@ -3,7 +3,7 @@ from __future__ import annotations
 """Harness Migration Assistant (item 25).
 
 Guides users through migrating their primary AI coding harness *into* Claude Code.
-Reads existing Cursor, Aider, Gemini, OpenCode, Codex, and Windsurf configurations
+Reads existing Cursor, Aider, OpenCode, Codex, and Windsurf configurations
 and maps them to Claude Code equivalents: CLAUDE.md rules, .claude/agents/,
 .claude/commands/, and ~/.claude.json MCP servers.
 
@@ -148,50 +148,6 @@ def _read_aider_conventions(project_dir: Path) -> list[MigrationItem]:
     return items
 
 
-def _read_gemini_rules(project_dir: Path) -> list[MigrationItem]:
-    """Read GEMINI.md sections as rules."""
-    gemini_md = project_dir / "GEMINI.md"
-    if not gemini_md.exists():
-        return []
-    try:
-        content = gemini_md.read_text(encoding="utf-8")
-    except OSError:
-        return []
-    # Split on H2 sections
-    sections = re.split(r"\n(##\s+[^\n]+)\n", content)
-    items: list[MigrationItem] = []
-    if sections:
-        # Preamble
-        preamble = sections[0].strip()
-        if preamble:
-            items.append(MigrationItem(
-                source_harness="gemini",
-                source_file=str(gemini_md),
-                item_type="rule",
-                original_content=preamble,
-                proposed_target="CLAUDE.md",
-                proposed_content=f"\n## Gemini Preamble (migrated)\n\n{preamble}\n",
-                confidence=0.8,
-            ))
-        # Sections
-        i = 1
-        while i < len(sections) - 1:
-            heading = sections[i].strip()
-            body = sections[i + 1].strip()
-            if body:
-                items.append(MigrationItem(
-                    source_harness="gemini",
-                    source_file=str(gemini_md),
-                    item_type="rule",
-                    original_content=f"{heading}\n{body}",
-                    proposed_target="CLAUDE.md",
-                    proposed_content=f"\n{heading} (from Gemini)\n\n{body}\n",
-                    confidence=0.85,
-                ))
-            i += 2
-    return items
-
-
 def _read_codex_rules(project_dir: Path) -> list[MigrationItem]:
     """Read AGENTS.md as Codex rules."""
     agents_md = project_dir / "AGENTS.md"
@@ -291,7 +247,6 @@ def _read_windsurf_rules(project_dir: Path) -> list[MigrationItem]:
 _READERS: dict[str, list] = {
     "cursor":    [_read_cursor_rules, _read_cursor_mcp],
     "aider":     [_read_aider_conventions],
-    "gemini":    [_read_gemini_rules],
     "codex":     [_read_codex_rules, _read_codex_config],
     "opencode":  [_read_opencode_config],
     "windsurf":  [_read_windsurf_rules],
@@ -464,7 +419,7 @@ class MigrationAssistant:
             stem = source_path.stem
 
             # Derive a skill name: prefer file stem unless it's generic
-            generic_names = {"CONVENTIONS", "CLAUDE", "GEMINI", "AGENTS", "windsurfrules"}
+            generic_names = {"CONVENTIONS", "CLAUDE", "AGENTS", "windsurfrules"}
             if stem.upper() in generic_names or not stem:
                 skill_name = f"migrated-rule-{idx:02d}"
             else:

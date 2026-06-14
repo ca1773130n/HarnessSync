@@ -14,18 +14,18 @@ from src.utils.toml_writer import read_toml_safe
 
 
 def test_1_adapter_discovery():
-    """Test 1: AdapterRegistry.list_targets() returns all 3 targets."""
+    """Test 1: AdapterRegistry.list_targets() includes codex and opencode."""
     targets = AdapterRegistry.list_targets()
 
-    assert targets == ['codex', 'gemini', 'opencode'], f"Expected ['codex', 'gemini', 'opencode'], got {targets}"
+    assert 'codex' in targets, f"Expected 'codex' in targets, got {targets}"
+    assert 'opencode' in targets, f"Expected 'opencode' in targets, got {targets}"
 
-    print("✓ Test 1: Adapter discovery (3 targets)")
+    print("✓ Test 1: Adapter discovery")
 
 
 def test_2_has_target_checks():
     """Test 2: AdapterRegistry.has_target() works for all targets."""
     assert AdapterRegistry.has_target('codex') is True
-    assert AdapterRegistry.has_target('gemini') is True
     assert AdapterRegistry.has_target('opencode') is True
     assert AdapterRegistry.has_target('nonexistent') is False
 
@@ -33,7 +33,7 @@ def test_2_has_target_checks():
 
 
 def test_3_three_adapter_integration():
-    """Test 3: All 3 adapters sync the same test project successfully."""
+    """Test 3: All adapters sync the same test project successfully."""
     with tempfile.TemporaryDirectory() as tmpdir:
         base_dir = Path(tmpdir)
 
@@ -105,7 +105,7 @@ def test_3_three_adapter_integration():
         # Test all 3 adapters
         results_summary = []
 
-        for target in ['codex', 'gemini', 'opencode']:
+        for target in ['codex', 'opencode']:
             # Create separate project directory for each adapter
             project_dir = base_dir / f'project_{target}'
             project_dir.mkdir()
@@ -152,7 +152,7 @@ def test_3_three_adapter_integration():
         for summary in results_summary:
             print(f"  {summary['target']:<8} | {summary['rules']:<5} | {summary['skills']:<6} | {summary['agents']:<6} | {summary['commands']:<4} | {summary['mcp']:<3} | {summary['settings']:<8} | PASS")
 
-    print("\n✓ Test 3: 3-adapter integration (all adapters sync successfully)")
+    print("\n✓ Test 3: multi-adapter integration (all adapters sync successfully)")
 
 
 def test_4_codex_artifacts():
@@ -188,47 +188,6 @@ def test_4_codex_artifacts():
         assert 'mcp_servers' in config, "Codex MCP servers missing from TOML"
 
     print("✓ Test 4: Codex-specific artifacts verified")
-
-
-def test_5_gemini_artifacts():
-    """Test 5: Verify Gemini-specific artifacts (inline content, no YAML frontmatter)."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        project_dir = Path(tmpdir)
-
-        # Create minimal test data
-        skill_dir = project_dir / 'test_skills' / 'test-skill'
-        skill_dir.mkdir(parents=True)
-        (skill_dir / 'SKILL.md').write_text('---\nname: Test Skill\ndescription: Test\n---\n\nSkill content here')
-
-        source_data = {
-            'rules': [{'path': Path('CLAUDE.md'), 'content': 'Test rule'}],
-            'skills': {'test-skill': skill_dir},
-            'agents': {},
-            'commands': {},
-            'mcp': {'server1': {'command': 'node', 'args': ['server.js']}},
-            'settings': {}
-        }
-
-        adapter = AdapterRegistry.get_adapter('gemini', project_dir)
-        adapter.sync_all(source_data)
-
-        # Verify Gemini artifacts
-        assert (project_dir / 'GEMINI.md').exists(), "Gemini GEMINI.md missing"
-        assert (project_dir / '.gemini' / 'settings.json').exists(), "Gemini settings.json missing"
-
-        # Verify GEMINI.md has NO YAML frontmatter (skills are inlined)
-        gemini_content = (project_dir / 'GEMINI.md').read_text()
-        assert '## Skill: Test Skill' in gemini_content, "Gemini skill not inlined"
-        assert 'Skill content here' in gemini_content, "Gemini skill content missing"
-        # Should NOT have YAML frontmatter in inlined content
-        assert '---\nname: Test Skill\n---' not in gemini_content, "Gemini has YAML frontmatter (should be stripped)"
-
-        # Verify settings.json has mcpServers
-        settings_path = project_dir / '.gemini' / 'settings.json'
-        settings = json.loads(settings_path.read_text())
-        assert 'mcpServers' in settings, "Gemini mcpServers missing"
-
-    print("✓ Test 5: Gemini-specific artifacts verified (inline, no frontmatter)")
 
 
 def test_6_opencode_artifacts():
@@ -282,7 +241,7 @@ def test_6_opencode_artifacts():
 
 
 def test_7_conservative_permissions():
-    """Test 7: Conservative permission mapping across all 3 adapters."""
+    """Test 7: Conservative permission mapping across all adapters."""
     with tempfile.TemporaryDirectory() as tmpdir:
         base_dir = Path(tmpdir)
 
@@ -311,15 +270,6 @@ def test_7_conservative_permissions():
         codex_config = read_toml_safe(codex_dir / '.codex' / 'config.toml')
         assert codex_config.get('sandbox_mode') == 'read-only', "Codex not conservative (expected read-only)"
 
-        # Gemini: deny list -> tools.exclude
-        gemini_dir = base_dir / 'gemini'
-        gemini_dir.mkdir()
-        gemini_adapter = AdapterRegistry.get_adapter('gemini', gemini_dir)
-        gemini_adapter.sync_all(source_data)
-
-        gemini_settings = json.loads((gemini_dir / '.gemini' / 'settings.json').read_text())
-        assert 'exclude' in gemini_settings.get('tools', {}), "Gemini not conservative (expected tools.exclude)"
-
         # OpenCode: deny list -> per-tool permission with "deny" values
         opencode_dir = base_dir / 'opencode'
         opencode_dir.mkdir()
@@ -329,7 +279,7 @@ def test_7_conservative_permissions():
         opencode_config = json.loads((opencode_dir / 'opencode.json').read_text())
         assert 'permission' in opencode_config, "OpenCode not using permission (singular)"
 
-    print("✓ Test 7: Conservative permission mapping across all 3 adapters")
+    print("✓ Test 7: Conservative permission mapping across all adapters")
 
 
 def main():
@@ -341,7 +291,6 @@ def main():
         test_2_has_target_checks,
         test_3_three_adapter_integration,
         test_4_codex_artifacts,
-        test_5_gemini_artifacts,
         test_6_opencode_artifacts,
         test_7_conservative_permissions,
     ]
@@ -367,11 +316,9 @@ def main():
     else:
         print("All Task 2 tests passed!")
         print("\nPhase 3 success criteria:")
-        print("  ✓ Gemini adapter inlines skills into GEMINI.md (strips frontmatter)")
-        print("  ✓ Gemini adapter translates MCP to settings.json mcpServers")
         print("  ✓ OpenCode adapter creates symlinks to .opencode/ with stale cleanup")
         print("  ✓ OpenCode adapter translates MCP to opencode.json with type discrimination")
-        print("  ✓ All 3 adapters sync test project successfully")
+        print("  ✓ All adapters sync test project successfully")
         print("  ✓ Conservative permission mapping for all adapters")
         sys.exit(0)
 

@@ -103,10 +103,8 @@ def _restore_snapshot(snap_path: Path, target: str, project_dir: Path) -> bool:
         # Each item is the backed-up file/directory with its original name
         dest_map: dict[str, Path] = {
             "AGENTS.md": project_dir / "AGENTS.md",
-            "GEMINI.md": project_dir / "GEMINI.md",
             "opencode.json": project_dir / "opencode.json",
             "config.toml": project_dir / ".codex" / "config.toml",
-            "settings.json": project_dir / ".gemini" / "settings.json",
         }
         dest = dest_map.get(item.name)
         if dest is None:
@@ -146,7 +144,7 @@ def main() -> None:
     parser.add_argument("--latest", action="store_true",
                         help="Restore the most recent snapshot for each target")
     parser.add_argument("--target", type=str, default=None,
-                        help="Limit restore to a specific target (codex/gemini/opencode)")
+                        help="Limit restore to a specific target (codex/opencode/cursor)")
     parser.add_argument("--list", action="store_true",
                         help="List available snapshots (default when no other flags)")
 

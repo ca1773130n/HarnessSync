@@ -53,9 +53,9 @@ def test_undo_stack_push_increases_depth(tmp_path):
 
 def test_undo_stack_max_depth_respected(tmp_path):
     """Stack depth never exceeds MAX_STACK_DEPTH."""
-    stack = HarnessUndoStack("gemini", root_dir=tmp_path / "stacks", project_dir=tmp_path)
+    stack = HarnessUndoStack("codex", root_dir=tmp_path / "stacks", project_dir=tmp_path)
     for i in range(MAX_STACK_DEPTH + 5):
-        stack.push({"GEMINI.md": f"v{i}"}, label=f"sync {i}")
+        stack.push({"AGENTS.md": f"v{i}"}, label=f"sync {i}")
     assert stack.depth() == MAX_STACK_DEPTH
 
 
@@ -110,7 +110,7 @@ def test_undo_push_clears_redo(tmp_path):
 
 def test_redo_empty_stack_returns_error(tmp_path):
     """Redoing an empty redo stack returns ok=False."""
-    stack = HarnessUndoStack("gemini", root_dir=tmp_path / "stacks", project_dir=tmp_path)
+    stack = HarnessUndoStack("codex", root_dir=tmp_path / "stacks", project_dir=tmp_path)
     result = stack.redo()
     assert not result.ok
     assert "empty" in result.error.lower()
@@ -159,23 +159,23 @@ def test_list_entries_returns_summary(tmp_path):
 
 def test_format_status_includes_harness_name(tmp_path):
     """format_status output includes harness name."""
-    stack = HarnessUndoStack("gemini", root_dir=tmp_path / "stacks", project_dir=tmp_path)
+    stack = HarnessUndoStack("codex", root_dir=tmp_path / "stacks", project_dir=tmp_path)
     status = stack.format_status()
-    assert "gemini" in status
+    assert "codex" in status
 
 
 def test_sync_undo_manager_push_and_undo(tmp_path):
     """SyncUndoManager.push and undo work via the facade."""
     project = tmp_path / "project"
     project.mkdir()
-    target_file = project / "GEMINI.md"
+    target_file = project / "AGENTS.md"
     target_file.write_text("v1", encoding="utf-8")
 
     manager = SyncUndoManager(root_dir=tmp_path / "stacks", project_dir=project)
-    manager.push("gemini", {"GEMINI.md": "v1"}, label="pre-sync")
+    manager.push("codex", {"AGENTS.md": "v1"}, label="pre-sync")
     target_file.write_text("v2", encoding="utf-8")
 
-    result = manager.undo("gemini")
+    result = manager.undo("codex")
     assert result.ok
     assert target_file.read_text(encoding="utf-8") == "v1"
 
@@ -184,10 +184,10 @@ def test_sync_undo_manager_format_all_status(tmp_path):
     """format_all_status lists configured harnesses."""
     manager = SyncUndoManager(root_dir=tmp_path / "stacks", project_dir=tmp_path)
     manager.push("codex", {"AGENTS.md": "x"})
-    manager.push("gemini", {"GEMINI.md": "y"})
-    status = manager.format_all_status(harnesses=["codex", "gemini"])
+    manager.push("cursor", {".cursorrules": "y"})
+    status = manager.format_all_status(harnesses=["codex", "cursor"])
     assert "codex" in status
-    assert "gemini" in status
+    assert "cursor" in status
 
 
 # ── RuleSimulator ─────────────────────────────────────────────────────────────
@@ -198,7 +198,6 @@ def test_simulate_returns_all_default_targets():
     sim = RuleSimulator()
     result = sim.simulate("Always use TypeScript over JavaScript.")
     assert "codex" in result.simulations
-    assert "gemini" in result.simulations
     assert "aider" in result.simulations
 
 
@@ -227,19 +226,17 @@ def test_simulate_detects_skill_diff_for_aider():
 
 def test_simulate_translates_claude_md_filename():
     """CLAUDE.md filename is translated to target-specific filename."""
-    sim = RuleSimulator(targets=["codex", "gemini"])
+    sim = RuleSimulator(targets=["codex"])
     result = sim.simulate("See CLAUDE.md for the project coding standards.")
     # codex should use AGENTS.md in translated text
     assert "AGENTS.md" in result.simulations["codex"].translated_text
-    # gemini should use GEMINI.md
-    assert "GEMINI.md" in result.simulations["gemini"].translated_text
 
 
 def test_simulate_detects_hook_diff():
     """Hook event names are flagged as behavioral differences for all non-CC harnesses."""
     sim = RuleSimulator()
     result = sim.simulate("Use PostToolUse hooks to validate tool output.")
-    for harness in ("codex", "gemini", "aider", "cursor", "windsurf"):
+    for harness in ("codex", "aider", "cursor", "windsurf"):
         assert result.simulations[harness].behavioral_diffs
 
 
@@ -249,7 +246,6 @@ def test_format_results_includes_harness_names():
     result = sim.simulate("Prefer async functions in Python.")
     output = sim.format_results(result)
     assert "codex" in output
-    assert "gemini" in output
     assert "aider" in output
 
 
@@ -275,16 +271,16 @@ def test_compare_two_returns_both_harnesses():
 
 def test_simulate_with_subset_targets():
     """Passing a subset of targets only simulates those harnesses."""
-    sim = RuleSimulator(targets=["codex", "gemini"])
+    sim = RuleSimulator(targets=["codex", "cursor"])
     result = sim.simulate("Use strict mode in JavaScript.")
-    assert set(result.simulations.keys()) == {"codex", "gemini"}
+    assert set(result.simulations.keys()) == {"codex", "cursor"}
 
 
 def test_simulate_section_with_title():
     """simulate_section prepends the heading to the rule text."""
-    sim = RuleSimulator(targets=["gemini"])
+    sim = RuleSimulator(targets=["codex"])
     result = sim.simulate_section("Always prefer async I/O.", "Async Patterns")
-    assert "Async Patterns" in result.simulations["gemini"].translated_text
+    assert "Async Patterns" in result.simulations["codex"].translated_text
 
 
 # ── ContextBudgetSync ─────────────────────────────────────────────────────────
@@ -338,7 +334,6 @@ def test_context_budget_sync_translate_all_targets():
     budget = ContextBudget(max_tokens=8192, context_limit=200_000)
     configs = syncer.translate_budget(budget)
     assert "codex" in configs
-    assert "gemini" in configs
     assert "aider" in configs
     assert "cursor" in configs
     assert "windsurf" in configs
@@ -351,15 +346,6 @@ def test_codex_translation_is_toml():
     configs = syncer.translate_budget(budget)
     assert configs["codex"].config_format == "toml"
     assert "max_tokens" in configs["codex"].config_snippet
-
-
-def test_gemini_translation_is_json():
-    """Gemini translation uses JSON format with maxOutputTokens."""
-    syncer = ContextBudgetSync(targets=["gemini"])
-    budget = ContextBudget(max_tokens=4096)
-    configs = syncer.translate_budget(budget)
-    assert configs["gemini"].config_format == "json"
-    assert "maxOutputTokens" in configs["gemini"].config_snippet
 
 
 def test_aider_translation_is_yaml():
@@ -404,7 +390,6 @@ def test_format_report_contains_harness_names():
     configs = syncer.translate_budget(budget)
     report = syncer.format_report(budget, configs)
     assert "codex" in report
-    assert "gemini" in report
     assert "aider" in report
 
 

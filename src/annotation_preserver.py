@@ -223,7 +223,6 @@ def get_target_file_paths(target: str, project_dir: Path) -> list[Path]:
     """
     mapping: dict[str, list[str]] = {
         "codex":    ["AGENTS.md"],
-        "gemini":   ["GEMINI.md"],
         "opencode": ["AGENTS.md"],
         "cursor":   [".cursor/rules/claude-code-rules.mdc"],
         "aider":    ["CONVENTIONS.md"],
@@ -261,7 +260,7 @@ class AnnotationPreserver:
             Dict mapping target_name -> list of FileAnnotations.
         """
         if targets is None:
-            targets = ["codex", "gemini", "opencode", "cursor", "aider", "windsurf"]
+            targets = ["codex", "opencode", "cursor", "aider", "windsurf"]
 
         captured: dict[str, list[FileAnnotations]] = {}
 
@@ -310,7 +309,7 @@ class AnnotationPreserver:
 # ---------------------------------------------------------------------------
 #
 # Embeds a provenance comment into each synced rule block so that developers
-# who open AGENTS.md / GEMINI.md / etc. can see exactly which source section
+# who open AGENTS.md / etc. can see exactly which source section
 # produced each rule and when it was last synced.
 #
 # Format (HTML comment, invisible in rendered Markdown):

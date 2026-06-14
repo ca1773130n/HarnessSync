@@ -11,7 +11,7 @@ Supported verifications:
 - TOML files (codex config.toml): tomllib / tomli fallback
 - YAML frontmatter in .mdc files: checked with the yaml module (if available)
   or regex-based fallback
-- Markdown files (AGENTS.md, GEMINI.md): basic structural checks
+- Markdown files (AGENTS.md): basic structural checks
   (non-empty, no obviously broken code fences)
 
 Usage:
@@ -141,7 +141,6 @@ class PostSyncVerifier:
         """Route to the appropriate verifier for each target."""
         target_verifiers = {
             "codex": self._verify_codex,
-            "gemini": self._verify_gemini,
             "opencode": self._verify_opencode,
             "cursor": self._verify_cursor,
             "aider": self._verify_aider,
@@ -164,19 +163,6 @@ class PostSyncVerifier:
         codex_toml = Path.home() / ".codex" / "config.toml"
         if codex_toml.exists():
             issues.extend(self._check_toml(codex_toml, "codex"))
-
-        return issues
-
-    def _verify_gemini(self) -> list[VerifyIssue]:
-        issues = []
-        gemini_md = self.project_dir / "GEMINI.md"
-        if gemini_md.exists():
-            issues.extend(self._check_markdown(gemini_md, "gemini"))
-
-        # settings.json
-        gemini_settings = Path.home() / ".gemini" / "settings.json"
-        if gemini_settings.exists():
-            issues.extend(self._check_json(gemini_settings, "gemini"))
 
         return issues
 
@@ -406,7 +392,6 @@ class PostSyncVerifier:
         count = 0
         file_candidates = [
             self.project_dir / "AGENTS.md",
-            self.project_dir / "GEMINI.md",
             self.project_dir / "opencode.json",
             self.project_dir / ".clinerules",
             self.project_dir / ".windsurfrules",
@@ -414,7 +399,6 @@ class PostSyncVerifier:
             self.project_dir / ".roo" / "mcp.json",
             self.project_dir / ".aider.conf.yml",
             Path.home() / ".codex" / "config.toml",
-            Path.home() / ".gemini" / "settings.json",
             Path.home() / ".codeium" / "windsurf" / "mcp_config.json",
         ]
         for p in file_candidates:

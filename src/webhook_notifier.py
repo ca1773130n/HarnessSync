@@ -38,7 +38,7 @@ Webhook payload (application/json):
         "status": "success" | "partial" | "failed",
         "timestamp": "2024-01-01T12:00:00Z",
         "project": "/absolute/path/to/project",
-        "targets": ["codex", "gemini"],
+        "targets": ["codex", "opencode"],
         "totals": {"synced": 5, "skipped": 2, "failed": 0},
         "dry_run": false
     }

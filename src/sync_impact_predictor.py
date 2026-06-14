@@ -51,14 +51,6 @@ _HARNESS_PREFERENCES: dict[str, list[tuple[re.Pattern, str]]] = {
         (re.compile(r"no auto.commit|never commit", re.I),
          "Aider auto-commits by default — add --no-auto-commits flag if needed"),
     ],
-    "gemini": [
-        (re.compile(r"use typescript|prefer ts over js", re.I),
-         "Gemini CLI is language-agnostic — TS preference may not be enforced"),
-        (re.compile(r"use\b.{0,30}\bskill\b|invoke\b.{0,30}\bskill", re.I),
-         "Gemini CLI has no slash command / skill system — skill invocations won't work"),
-        (re.compile(r"/[a-z][-a-z]+\b", re.I),
-         "Slash commands don't exist in Gemini CLI — prefix rules using them may be ignored"),
-    ],
     "windsurf": [
         (re.compile(r"cascade|flow\s+mode", re.I),
          "Windsurf-specific terminology may confuse other harnesses if rules reference it"),
@@ -308,12 +300,12 @@ class SyncImpactPredictor:
 
     # Number of adapter-written files per section per harness (conservative estimates)
     _FILES_PER_SECTION: dict[str, dict[str, int]] = {
-        "rules":    {"codex": 1, "gemini": 1, "opencode": 1, "cursor": 1, "aider": 1, "windsurf": 1},
-        "skills":   {"codex": 3, "gemini": 3, "opencode": 3, "cursor": 3, "aider": 1, "windsurf": 2},
-        "agents":   {"codex": 2, "gemini": 2, "opencode": 2, "cursor": 2, "aider": 0, "windsurf": 2},
-        "commands": {"codex": 2, "gemini": 2, "opencode": 2, "cursor": 2, "aider": 0, "windsurf": 0},
-        "mcp":      {"codex": 1, "gemini": 1, "opencode": 1, "cursor": 1, "aider": 0, "windsurf": 1},
-        "settings": {"codex": 1, "gemini": 1, "opencode": 1, "cursor": 0, "aider": 1, "windsurf": 0},
+        "rules":    {"codex": 1, "opencode": 1, "cursor": 1, "aider": 1, "windsurf": 1},
+        "skills":   {"codex": 3, "opencode": 3, "cursor": 3, "aider": 1, "windsurf": 2},
+        "agents":   {"codex": 2, "opencode": 2, "cursor": 2, "aider": 0, "windsurf": 2},
+        "commands": {"codex": 2, "opencode": 2, "cursor": 2, "aider": 0, "windsurf": 0},
+        "mcp":      {"codex": 1, "opencode": 1, "cursor": 1, "aider": 0, "windsurf": 1},
+        "settings": {"codex": 1, "opencode": 1, "cursor": 0, "aider": 1, "windsurf": 0},
     }
 
     # Sections considered "high importance" — changing them alters the AI's core behaviour

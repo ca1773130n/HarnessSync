@@ -8,7 +8,6 @@ Covers:
 - SourceReader.get_permissions() integration
 - Per-adapter format mapping:
     - Codex: intent-based approval_policy mapping
-    - Gemini: policy file creation + settings flags
     - OpenCode: grouped per-tool permission format
 - Round-trip: source -> extract -> adapter format
 """
@@ -342,112 +341,6 @@ class TestCodexPermissionMapping:
 
 
 # ---------------------------------------------------------------------------
-# Gemini adapter permission mapping tests
-# ---------------------------------------------------------------------------
-
-class TestGeminiPermissionMapping:
-    """Test Gemini adapter policy file creation and settings flags."""
-
-    def test_deny_rules_create_policy_file(self, tmp_path):
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-
-        settings = {
-            "permissions": {
-                "allow": [],
-                "deny": ["Bash(rm -rf *)", "Bash(sudo *)"],
-                "ask": [],
-            }
-        }
-        result = adapter.sync_settings(settings)
-        assert result.synced == 1
-
-        # Verify policy file created
-        policy_path = tmp_path / ".gemini" / "policies" / "harnesssync-policy.json"
-        assert policy_path.exists()
-
-        policy = json.loads(policy_path.read_text())
-        assert "rules" in policy
-        assert len(policy["rules"]) == 2
-        assert policy["rules"][0]["action"] == "deny"
-        assert policy["rules"][0]["tool"] == "bash"
-        assert policy["rules"][0]["pattern"] == "rm -rf *"
-
-    def test_deny_rules_set_settings_flags(self, tmp_path):
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-
-        settings = {
-            "permissions": {
-                "allow": [],
-                "deny": ["Bash(rm *)"],
-                "ask": [],
-            }
-        }
-        adapter.sync_settings(settings)
-
-        settings_path = tmp_path / ".gemini" / "settings.json"
-        settings_data = json.loads(settings_path.read_text())
-        assert settings_data.get("security", {}).get("disableAlwaysAllow") is True
-        assert settings_data.get("security", {}).get("disableYoloMode") is True
-        assert ".gemini/policies/harnesssync-policy.json" in settings_data.get("policyPaths", [])
-
-    def test_allow_only_no_policy_file(self, tmp_path):
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-
-        settings = {
-            "permissions": {
-                "allow": ["Read", "Write"],
-                "deny": [],
-                "ask": [],
-            }
-        }
-        adapter.sync_settings(settings)
-
-        # Policy file should NOT be created when there are no deny rules
-        policy_path = tmp_path / ".gemini" / "policies" / "harnesssync-policy.json"
-        assert not policy_path.exists()
-
-        # Settings should have tools.exclude (not tools.allowed which was removed)
-        settings_path = tmp_path / ".gemini" / "settings.json"
-        settings_data = json.loads(settings_path.read_text())
-        # Should NOT have security flags when no deny rules
-        assert "disableAlwaysAllow" not in settings_data.get("security", {})
-        assert "disableYoloMode" not in settings_data.get("security", {})
-
-    def test_empty_settings(self, tmp_path):
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-        result = adapter.sync_settings({})
-        assert result.synced == 0
-
-    def test_policy_with_bare_tool_deny(self, tmp_path):
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-
-        settings = {
-            "permissions": {
-                "allow": [],
-                "deny": ["WebFetch"],
-                "ask": [],
-            }
-        }
-        adapter.sync_settings(settings)
-
-        policy_path = tmp_path / ".gemini" / "policies" / "harnesssync-policy.json"
-        policy = json.loads(policy_path.read_text())
-        assert len(policy["rules"]) == 1
-        assert policy["rules"][0]["tool"] == "webfetch"
-        assert "pattern" not in policy["rules"][0]
-
-
-# ---------------------------------------------------------------------------
 # OpenCode adapter permission mapping tests
 # ---------------------------------------------------------------------------
 
@@ -656,22 +549,6 @@ class TestRoundTrip:
         assert result.synced == 1
         assert result.failed == 0
 
-    def test_roundtrip_gemini(self, tmp_path):
-        from src.adapters.gemini import GeminiAdapter
-
-        settings = self._make_settings()
-        perms = extract_permissions(settings)
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-        result = adapter.sync_settings(settings)
-        assert result.synced == 1
-        assert result.failed == 0
-
-        # Verify policy file has correct deny rules
-        policy_path = tmp_path / ".gemini" / "policies" / "harnesssync-policy.json"
-        policy = json.loads(policy_path.read_text())
-        assert len(policy["rules"]) == 2
-
     def test_roundtrip_opencode(self, tmp_path):
         from src.adapters.opencode import OpenCodeAdapter
 
@@ -699,12 +576,11 @@ class TestRoundTrip:
     def test_all_adapters_handle_no_permissions(self, tmp_path):
         """All adapters should handle settings without permissions gracefully."""
         from src.adapters.codex import CodexAdapter
-        from src.adapters.gemini import GeminiAdapter
         from src.adapters.opencode import OpenCodeAdapter
 
         settings = {"model": "claude-sonnet-4-20250514"}
 
-        for AdapterClass in [CodexAdapter, GeminiAdapter, OpenCodeAdapter]:
+        for AdapterClass in [CodexAdapter, OpenCodeAdapter]:
             adapter_dir = tmp_path / AdapterClass.__name__
             adapter_dir.mkdir()
             adapter = AdapterClass(project_dir=adapter_dir)
@@ -765,64 +641,3 @@ class TestCodexDenyPreventsAutoApprove:
         config_path = tmp_path / ".codex" / "config.toml"
         content = config_path.read_text()
         assert 'approval_policy = "on-request"' in content
-
-
-# ---------------------------------------------------------------------------
-# Gemini deny policy file content verification
-# ---------------------------------------------------------------------------
-
-class TestGeminiDenyPolicyContent:
-    """Verify Gemini policy file JSON structure and deny rule content."""
-
-    def test_deny_policy_json_structure(self, tmp_path):
-        """sync_settings with deny rules creates a well-formed policy JSON
-        with the expected deny rules, tool names, and patterns."""
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-
-        settings = {
-            "permissions": {
-                "allow": ["Read"],
-                "deny": [
-                    "Bash(rm -rf /)",
-                    "Bash(sudo *)",
-                    "WebFetch",
-                ],
-                "ask": [],
-            }
-        }
-        result = adapter.sync_settings(settings)
-        assert result.synced == 1
-        assert result.failed == 0
-
-        # Read back the policy file
-        policy_path = tmp_path / ".gemini" / "policies" / "harnesssync-policy.json"
-        assert policy_path.exists(), "Policy file was not created"
-
-        policy = json.loads(policy_path.read_text())
-
-        # Top-level structure
-        assert "_comment" in policy
-        assert "rules" in policy
-        assert isinstance(policy["rules"], list)
-        assert len(policy["rules"]) == 3
-
-        # Verify each deny rule
-        rules = policy["rules"]
-
-        # Rule 1: Bash(rm -rf /)
-        assert rules[0]["action"] == "deny"
-        assert rules[0]["tool"] == "bash"
-        assert rules[0]["pattern"] == "rm -rf /"
-        assert "description" in rules[0]
-
-        # Rule 2: Bash(sudo *)
-        assert rules[1]["action"] == "deny"
-        assert rules[1]["tool"] == "bash"
-        assert rules[1]["pattern"] == "sudo *"
-
-        # Rule 3: WebFetch (bare tool, no pattern)
-        assert rules[2]["action"] == "deny"
-        assert rules[2]["tool"] == "webfetch"
-        assert "pattern" not in rules[2]

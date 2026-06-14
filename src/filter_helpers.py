@@ -154,7 +154,7 @@ def extract_compliance_pinned(content: str) -> str:
 #
 # The annotation is stripped from the active rule text when writing to targets
 # that don't support HTML comments (Aider CONVENTIONS.md), and preserved as
-# a regular comment for targets that do (Cursor .mdc, GEMINI.md, AGENTS.md).
+# a regular comment for targets that do (Cursor .mdc, AGENTS.md).
 
 _EFFECTIVENESS_PROPAGATE_RE = re.compile(
     r"<!--\s*@effectiveness:\s*(.*?)\s*-->",
@@ -193,7 +193,7 @@ def propagate_effectiveness_annotations(
 ) -> str:
     """Transform effectiveness annotations for a target harness.
 
-    For targets that support HTML comments (Cursor, Gemini, Codex, OpenCode,
+    For targets that support HTML comments (Cursor, Codex, OpenCode,
     Windsurf) the annotations are kept as-is.  For plain-text targets (Aider)
     the annotations are rewritten as ``> Effectiveness note: ...`` blockquotes
     so the information is still visible.  When ``strip_comments=True`` the
@@ -208,7 +208,7 @@ def propagate_effectiveness_annotations(
         Transformed content string.
     """
     # Targets that render HTML comments as invisible metadata
-    html_comment_targets = {"cursor", "gemini", "opencode", "codex", "windsurf", "vscode", "cline"}
+    html_comment_targets = {"cursor", "opencode", "codex", "windsurf", "vscode", "cline"}
     # Plain-text targets that should see annotations as readable text
     plain_text_targets = {"aider", "neovim", "zed"}
 
@@ -241,8 +241,8 @@ def extract_section_annotations(content: str) -> list[dict]:
     Supported heading-line annotation forms:
       ## Section Name <!-- harness:codex-only -->
       ## Section Name <!-- harness:only=codex,cursor -->
-      ## Section Name <!-- harness:skip=gemini -->
-      ## Section Name <!-- skip:gemini -->
+      ## Section Name <!-- harness:skip=aider -->
+      ## Section Name <!-- skip:aider -->
 
     Args:
         content: Raw CLAUDE.md (or other Markdown) text.

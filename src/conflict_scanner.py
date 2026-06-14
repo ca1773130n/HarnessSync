@@ -60,7 +60,7 @@ class ConflictDetector:
         Check if target config files have been modified outside HarnessSync.
 
         Args:
-            target_name: Target to check ("codex", "gemini", "opencode")
+            target_name: Target to check ("codex", "opencode")
 
         Returns:
             List of conflict dicts with keys:
@@ -118,9 +118,9 @@ class ConflictDetector:
 
         Returns:
             Dict mapping target_name -> list of conflicts
-            Example: {"codex": [...], "gemini": [], "opencode": [...]}
+            Example: {"codex": [...], "opencode": [...]}
         """
-        targets = ["codex", "gemini", "opencode"]
+        targets = ["codex", "opencode"]
         result = {}
 
         for target in targets:

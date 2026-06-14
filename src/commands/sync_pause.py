@@ -16,7 +16,7 @@ While paused:
   - A warning banner is shown when any sync is attempted
 
 Examples:
-    /sync-pause --reason "debugging Gemini config" --duration 30
+    /sync-pause --reason "debugging Codex config" --duration 30
     /sync-pause --resume
     /sync-pause --status
 """

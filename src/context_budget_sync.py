@@ -26,7 +26,6 @@ Budget directive format in CLAUDE.md (inline comments after ## Context Budget)::
 
 Harness-specific translations:
   - Codex (config.toml):     max_tokens = <value>
-  - Gemini (settings.json):  "maxOutputTokens": <value>
   - OpenCode (opencode.json): "model": { "maxTokens": <value> }
   - Cursor (.cursorrules):   No direct equivalent — annotated as comment
   - Aider (.aider.conf.yml): --max-tokens <value>
@@ -167,24 +166,6 @@ def _translate_codex(budget: ContextBudget) -> HarnessBudgetConfig:
     )
 
 
-def _translate_gemini(budget: ContextBudget) -> HarnessBudgetConfig:
-    """Translate budget to Gemini settings.json format."""
-    import json
-    obj: dict = {"maxOutputTokens": budget.effective_output_tokens()}
-    if budget.thinking_budget > 0:
-        obj["thinkingConfig"] = {"thinkingBudget": budget.thinking_budget}
-    snippet = json.dumps(obj, indent=2)
-    return HarnessBudgetConfig(
-        harness="gemini",
-        config_snippet=snippet,
-        config_format="json",
-        field_mappings={
-            "max_tokens": "maxOutputTokens",
-            "thinking_budget": "thinkingConfig.thinkingBudget",
-        },
-    )
-
-
 def _translate_opencode(budget: ContextBudget) -> HarnessBudgetConfig:
     """Translate budget to opencode.json format."""
     import json
@@ -251,7 +232,6 @@ def _translate_windsurf(budget: ContextBudget) -> HarnessBudgetConfig:
 
 _TRANSLATORS = {
     "codex": _translate_codex,
-    "gemini": _translate_gemini,
     "opencode": _translate_opencode,
     "cursor": _translate_cursor,
     "aider": _translate_aider,

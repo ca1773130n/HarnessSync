@@ -27,7 +27,7 @@ class StateManager:
     Manages sync state with hash-based drift detection.
 
     State stored at ~/.harnesssync/state.json with per-target tracking
-    (codex, gemini, opencode). Each target maintains file hashes, sync
+    (codex, opencode, cursor). Each target maintains file hashes, sync
     methods, status, and timestamps.
 
     v2 schema (multi-account):
@@ -216,7 +216,7 @@ class StateManager:
         Record sync operation for target.
 
         Args:
-            target: Target name ("codex", "gemini", "opencode")
+            target: Target name ("codex", "opencode", "cursor")
             scope: Sync scope ("all", "user", "project", etc.)
             file_hashes: Dict mapping absolute file paths to SHA256 hashes
             sync_methods: Dict mapping file paths to sync method used
@@ -558,7 +558,7 @@ class StateManager:
         syncs) so callers can plot a sparkline trend without unbounded growth.
 
         Args:
-            target: Harness name (e.g. "codex", "gemini").
+            target: Harness name (e.g. "codex", "opencode").
             score:  0-100 health score from HarnessHealthScorer.
             label:  Optional human-readable label (e.g. "healthy", "warning").
         """

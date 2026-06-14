@@ -203,7 +203,7 @@ PORTABILITY_PARTIAL = "partial"          # Works in some harnesses, not all
 
 # Harnesses that fully support stdio MCP servers
 _MCP_CAPABLE_HARNESSES = {
-    "codex", "gemini", "opencode", "cursor", "cline", "continue", "windsurf", "zed", "neovim"
+    "codex", "opencode", "cursor", "cline", "continue", "windsurf", "zed", "neovim"
 }
 
 # Per-server portability overrides.  Key = server ID, value = portability level.
@@ -757,7 +757,7 @@ class PortabilityReport:
         if self.claude_only:
             lines.append("Note: Claude Code-only servers will be silently skipped when syncing")
             lines.append("  to other harnesses. Consider whether you need equivalent tools in")
-            lines.append("  Gemini, Cursor, etc. or if those features are harness-specific.")
+            lines.append("  Codex, Cursor, etc. or if those features are harness-specific.")
 
         if self.node_required:
             lines.append("")

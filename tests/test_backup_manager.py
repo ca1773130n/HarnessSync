@@ -108,9 +108,9 @@ class TestBackupTarget:
         target.write_text("data")
 
         bm = BackupManager(backup_root=tmp_path / "backups")
-        backup_dir = bm.backup_target(target, "gemini")
+        backup_dir = bm.backup_target(target, "opencode")
 
-        assert backup_dir.parent.name == "gemini"
+        assert backup_dir.parent.name == "opencode"
 
 
 # ---------------------------------------------------------------------------
@@ -193,12 +193,12 @@ class TestListSnapshots:
 
         bm = BackupManager(backup_root=tmp_path / "backups")
         bm.backup_target(f1, "codex")
-        bm.backup_target(f2, "gemini")
+        bm.backup_target(f2, "opencode")
 
         snapshots = bm.list_snapshots()
         targets = {s["target"] for s in snapshots}
         assert "codex" in targets
-        assert "gemini" in targets
+        assert "opencode" in targets
 
     def test_filter_by_target(self, tmp_path):
         f1 = tmp_path / "a.md"
@@ -206,7 +206,7 @@ class TestListSnapshots:
 
         bm = BackupManager(backup_root=tmp_path / "backups")
         bm.backup_target(f1, "codex")
-        bm.backup_target(f1, "gemini")
+        bm.backup_target(f1, "opencode")
 
         snapshots = bm.list_snapshots(target_name="codex")
         assert all(s["target"] == "codex" for s in snapshots)
@@ -386,7 +386,7 @@ class TestFormatSnapshotManifest:
         assert "no files" in format_snapshot_manifest({})
 
     def test_with_entries(self, tmp_path):
-        snapshot_map = {"codex": [tmp_path / "backup1"], "gemini": [tmp_path / "backup2"]}
+        snapshot_map = {"codex": [tmp_path / "backup1"], "opencode": [tmp_path / "backup2"]}
         output = format_snapshot_manifest(snapshot_map)
         assert "2 file(s)" in output
         assert "2 target(s)" in output

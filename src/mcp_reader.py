@@ -22,7 +22,6 @@ class MCPReaderMixin:
     - cc_home: Path
     - cc_settings: Path
     - cc_plugins_registry: Path
-    - cc_mcp_global: Path
     - cc_mcp_claude: Path
     - project_dir: Path | None
     - scope: str
@@ -277,6 +276,36 @@ class MCPReaderMixin:
                 valid[name] = config
         return valid
 
+    def _mcp_gate_settings(self) -> tuple[set, set, bool]:
+        """Read project ``.mcp.json`` enable/disable gates from settings.
+
+        Returns:
+            ``(disabled_names, enabled_names, enable_all)`` where
+            ``disabled_names`` come from ``disabledMcpjsonServers`` (never synced),
+            ``enabled_names`` from ``enabledMcpjsonServers`` (explicitly approved),
+            and ``enable_all`` from ``enableAllProjectMcpServers``.
+        """
+        try:
+            settings = self.get_settings()
+        except Exception:
+            return set(), set(), False
+
+        def _as_set(key: str) -> set:
+            v = settings.get(key, [])
+            return {x for x in v if isinstance(x, str)} if isinstance(v, list) else set()
+
+        enable_all = bool(settings.get("enableAllProjectMcpServers", False))
+        return _as_set("disabledMcpjsonServers"), _as_set("enabledMcpjsonServers"), enable_all
+
+    def get_skipped_mcp_servers(self) -> list[dict]:
+        """Project MCP servers skipped because the user disabled them.
+
+        Populated by :meth:`get_mcp_servers_with_scope`. Each entry is
+        ``{"name", "scope", "reason"}``. Surfaced so commands can report which
+        previously-syncable servers were intentionally omitted.
+        """
+        return list(getattr(self, "_mcp_skipped", []))
+
     def get_mcp_servers_with_scope(self) -> dict[str, dict]:
         """
         Discover all MCP servers with scope metadata and precedence resolution.
@@ -288,8 +317,15 @@ class MCPReaderMixin:
 
         Precedence: local > project > user (higher scope overrides lower).
         Plugin MCPs are treated as user-scope.
+
+        Project-scope servers (from ``.mcp.json``) are gated by the Claude Code
+        settings keys ``disabledMcpjsonServers`` / ``enabledMcpjsonServers`` /
+        ``enableAllProjectMcpServers``: a server the user explicitly disabled is
+        never returned (and is recorded for :meth:`get_skipped_mcp_servers`).
         """
         servers = {}
+        self._mcp_skipped = []
+        disabled, _enabled, _enable_all = self._mcp_gate_settings()
 
         # Layer 1 (lowest precedence): User-scope file-based MCPs
         if self.scope in ("user", "all"):
@@ -317,9 +353,16 @@ class MCPReaderMixin:
                         },
                     }
 
-        # Layer 3 (overrides user): Project-scope MCPs
+        # Layer 3 (overrides user): Project-scope MCPs (.mcp.json), enable/disable gated
         if self.scope in ("project", "all") and self.project_dir:
             for name, config in self._get_project_scope_mcps().items():
+                if name in disabled:
+                    self._mcp_skipped.append({
+                        "name": name,
+                        "scope": "project",
+                        "reason": "disabledMcpjsonServers",
+                    })
+                    continue
                 servers[name] = {
                     "config": config,
                     "metadata": {"scope": "project", "source": "file"},

@@ -14,10 +14,10 @@ TOML parsing scope:
 - Basic key-value pairs (strings, numbers, booleans, arrays)
 - Tables [table] and nested tables [table.subtable]
 - Sufficient for reading Codex config.toml we generate
-- Does NOT support multi-line strings, inline tables, etc.
+- Supports simple inline tables ({ k = v }); does NOT support multi-line strings, dates, etc.
 
 Escaping rules (TOML v1.0.0):
-- Backslash must be escaped FIRST: \ -> \\
+- Backslash must be escaped FIRST: \\ -> \\\\
 - Then quotes: " -> \"
 - Then control chars: \\n -> \\\\n, \\r -> \\\\r, \\t -> \\\\t
 
@@ -220,11 +220,18 @@ def format_mcp_server_toml(name: str, config: dict) -> str:
             # Preserve env var references like ${API_KEY} as-is
             lines.append(f'{key} = {format_toml_value(str(val))}')
 
-    # HTTP headers (nested table)
+    # HTTP headers (nested table) — static header values
     if 'http_headers' in config and isinstance(config['http_headers'], dict):
         lines.append('')
         lines.append(f'[mcp_servers."{name}".http_headers]')
         for key, val in config['http_headers'].items():
+            lines.append(f'{key} = {format_toml_value(str(val))}')
+
+    # HTTP headers sourced from environment (nested table) — header -> env var name
+    if 'env_http_headers' in config and isinstance(config['env_http_headers'], dict):
+        lines.append('')
+        lines.append(f'[mcp_servers."{name}".env_http_headers]')
+        for key, val in config['env_http_headers'].items():
             lines.append(f'{key} = {format_toml_value(str(val))}')
 
     return '\n'.join(lines)
@@ -413,6 +420,10 @@ def _parse_toml_value(val: str):
     if val == 'false':
         return False
 
+    # Inline table { k = v, ... } -> dict (supports nesting)
+    if val.startswith('{') and val.endswith('}'):
+        return _parse_inline_table(val)
+
     # Array
     if val.startswith('[') and val.endswith(']'):
         # Simple array parsing
@@ -458,6 +469,59 @@ def _parse_toml_value(val: str):
 
     # Fallback: return as string
     return val
+
+
+def _split_top_level(s: str, sep: str) -> list[str]:
+    """Split ``s`` on ``sep`` only at brace/bracket depth 0, respecting quotes."""
+    parts: list[str] = []
+    depth = 0
+    in_quotes = False
+    current = ''
+    for char in s:
+        if char == '"':
+            in_quotes = not in_quotes
+            current += char
+        elif in_quotes:
+            current += char
+        elif char in '{[':
+            depth += 1
+            current += char
+        elif char in '}]':
+            depth -= 1
+            current += char
+        elif char == sep and depth == 0:
+            parts.append(current)
+            current = ''
+        else:
+            current += char
+    if current.strip():
+        parts.append(current)
+    return parts
+
+
+def _parse_inline_table(val: str) -> dict:
+    """Parse a TOML inline table ``{ k = v, ... }`` into a dict (recursive)."""
+    inner = val.strip()[1:-1].strip()
+    result: dict = {}
+    if not inner:
+        return result
+    for pair in _split_top_level(inner, ','):
+        if '=' not in pair:
+            continue
+        key, raw = pair.split('=', 1)
+        result[key.strip().strip('"')] = _parse_toml_value(raw.strip())
+    return result
+
+
+def format_inline_table(data: dict) -> str:
+    """Format a dict as a TOML inline table ``{ k = v, ... }`` (recursive)."""
+    parts = []
+    for key, value in data.items():
+        if isinstance(value, dict):
+            parts.append(f'{key} = {format_inline_table(value)}')
+        else:
+            parts.append(f'{key} = {format_toml_value(value)}')
+    return '{ ' + ', '.join(parts) + ' }'
 
 
 def read_toml_safe(path: Path) -> dict:

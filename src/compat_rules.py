@@ -38,11 +38,6 @@ VERSIONED_FEATURES: dict[str, dict[str, tuple[str, str]]] = {
         "sandbox_mode":     ("1.1", "sandbox_mode field in config.toml"),
         "approval_policy":  ("1.2", "approval_policy field in config.toml"),
     },
-    "gemini": {
-        "mcp_servers":      ("1.0", "mcpServers in settings.json"),
-        "tools_exclude":    ("1.5", "tools.exclude permission field"),
-        "tools_allowed":    ("2.0", "tools.allowed permission field"),
-    },
     "opencode": {
         "mcp_type_field":   ("0.1", "type discriminator in MCP server config"),
     },
@@ -78,16 +73,6 @@ DEPRECATED_FIELDS: dict[str, dict[str, tuple[str, str]]] = {
         "model": (
             "1.1",
             "Move 'model' into the [provider] table in codex config.toml",
-        ),
-    },
-    "gemini": {
-        "contextWindowSize": (
-            "2.0",
-            "'contextWindowSize' removed — use 'context.maxTokens' instead",
-        ),
-        "theme": (
-            "1.8",
-            "Move 'theme' to 'ui.theme' in Gemini settings.json",
         ),
     },
     "opencode": {
@@ -307,10 +292,6 @@ _UPGRADE_COMMANDS: dict[str, list[str]] = {
         "npm install -g @openai/codex@latest",
         "Or: npx @openai/codex@latest (no global install)",
     ],
-    "gemini": [
-        "npm install -g @google/gemini-cli@latest",
-        "Or: pip install --upgrade gemini-cli  (if Python-based)",
-    ],
     "opencode": [
         "npm install -g opencode@latest",
         "Or: bun upgrade opencode",
@@ -437,7 +418,7 @@ def format_installed_version_warnings(project_dir: Path | None = None) -> list[s
     For each installed harness, detects the actual installed CLI version, then
     checks whether any features used in the current config require a newer version.
     Returns actionable warnings like:
-        'Gemini CLI 0.3.1 installed — MCP servers require >= 1.0. Upgrade to unlock sync.'
+        'Codex CLI 0.3.1 installed — MCP servers require >= 1.0. Upgrade to unlock sync.'
 
     Args:
         project_dir: Project root directory.
@@ -534,10 +515,6 @@ _NEW_CAPABILITIES: dict[str, list[tuple[str, str, str, str]]] = {
     "windsurf": [
         ("1.0", "mcp_servers", "Windsurf v1.0+ supports MCP — your MCP servers can now sync here", "mcp"),
         ("1.2", "memory_files", "Windsurf now supports memory files — your skills could sync as Windsurf memories", "skills"),
-    ],
-    "gemini": [
-        ("1.5", "tools_exclude", "Gemini now supports tool exclusion rules — your settings can propagate tool restrictions", "settings"),
-        ("2.0", "tools_allowed", "Gemini v2.0+ supports tools.allowed allowlist — finer permission control is now syncable", "settings"),
     ],
     "codex": [
         ("1.1", "sandbox_mode", "Codex now supports sandbox_mode — your safety settings can include this field", "settings"),

@@ -14,7 +14,7 @@ The daemon PID is stored at .claude/harness-sync/watch.pid so that
 Usage:
     /sync-watch                    # poll every 2 seconds (default)
     /sync-watch --interval 5       # poll every 5 seconds
-    /sync-watch --targets cursor,gemini  # only sync specific targets
+    /sync-watch --targets cursor,codex  # only sync specific targets
     /sync-watch --dry-run          # show what would sync, don't write
     /sync-watch --stop             # stop a running watcher daemon
 """
@@ -105,7 +105,6 @@ _WATCH_DIRS = [
 # Maps harness name -> list of paths relative to project root.
 _TARGET_FILES: dict[str, list[str]] = {
     "codex": ["AGENTS.md"],
-    "gemini": ["GEMINI.md"],
     "cursor": [".cursor/rules/CLAUDE.mdc", ".cursorrules"],
     "aider": [".aider.conf.yml", "aider.conf.yml"],
     "cline": [".clinerules"],

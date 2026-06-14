@@ -42,7 +42,7 @@ class SyncAnomaly:
     """A single detected anomaly."""
 
     kind: str           # "size_ratio" | "empty_source" | "source_shrinkage"
-    target_name: str    # e.g. "codex", "gemini"
+    target_name: str    # e.g. "codex", "opencode"
     file_path: str      # Absolute path to the target file
     detail: str         # Human-readable description
     severity: str = "warning"  # "warning" | "critical"
@@ -253,7 +253,7 @@ class SyncAnomalyDetector:
 def _target_from_path(file_path: str) -> str:
     """Infer target name from file path heuristically."""
     p = file_path.lower()
-    for name in ("codex", "gemini", "opencode", "cursor", "aider", "windsurf",
+    for name in ("codex", "opencode", "cursor", "aider", "windsurf",
                  "cline", "continue", "zed", "neovim"):
         if name in p:
             return name

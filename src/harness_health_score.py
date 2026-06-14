@@ -12,7 +12,7 @@ Assigns each harness a numeric health score based on observable state:
 The score is rendered as a terminal badge:
 
     codex    [████████░░]  84/100  (synced 2h ago)
-    gemini   [██████░░░░]  62/100  (drift detected)
+    opencode [██████░░░░]  62/100  (drift detected)
     aider    [████░░░░░░]  41/100  (never synced)
 
 Usage::
@@ -33,7 +33,6 @@ from src.utils.constants import CORE_TARGETS
 # --- Per-target expected section support (max coverage score denominator) ---
 _SUPPORTED_SECTIONS: dict[str, frozenset[str]] = {
     "codex":    frozenset({"rules", "skills", "agents", "commands", "mcp", "settings"}),
-    "gemini":   frozenset({"rules", "skills", "agents", "commands", "mcp", "settings"}),
     "opencode": frozenset({"rules", "skills", "agents", "commands", "mcp", "settings"}),
     "cursor":   frozenset({"rules", "skills", "agents", "commands", "mcp", "settings"}),
     "aider":    frozenset({"rules", "settings"}),
@@ -116,7 +115,7 @@ class HarnessHealthScorer:
         """Compute a health score for a single harness target.
 
         Args:
-            target: Harness name (e.g. "codex", "gemini").
+            target: Harness name (e.g. "codex", "opencode").
 
         Returns:
             HarnessHealthScore with all sub-scores populated.

@@ -47,7 +47,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--target",
-        help="Sync to this specific harness only (e.g. gemini, codex)",
+        help="Sync to this specific harness only (e.g. opencode, codex)",
     )
     parser.add_argument(
         "--project-dir", default=None,

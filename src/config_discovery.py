@@ -55,7 +55,6 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
         self.cc_skills = self.cc_home / "skills"
         self.cc_agents = self.cc_home / "agents"
         self.cc_commands = self.cc_home / "commands"
-        self.cc_mcp_global = Path.home() / ".mcp.json"  # Global MCP is always at ~
         self.cc_mcp_claude = self.cc_home / ".mcp.json"
 
     def _parse_rules_frontmatter(self, content: str) -> tuple[dict, str]:
@@ -276,7 +275,6 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
 
         Supported files (looked up in project_dir, then .claude/):
             CLAUDE.codex.md   -> codex
-            CLAUDE.gemini.md  -> gemini
             CLAUDE.opencode.md -> opencode
             CLAUDE.cursor.md  -> cursor
             CLAUDE.aider.md   -> aider
@@ -310,7 +308,7 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
         Returns:
             Dict mapping target_name -> Path for each existing override file.
         """
-        known_targets = ("codex", "gemini", "opencode", "cursor", "aider", "windsurf")
+        known_targets = ("codex", "opencode", "cursor", "aider", "windsurf")
         result: dict[str, Path] = {}
         if not self.project_dir:
             return result
@@ -342,7 +340,7 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
         unconditionally -- callers should treat the empty string as "no override".
 
         Args:
-            target_name: Target harness name (e.g. "codex", "gemini").
+            target_name: Target harness name (e.g. "codex", "opencode").
 
         Returns:
             Extracted block content (stripped), or empty string if none found.
@@ -406,8 +404,10 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
             Dictionary with keys: rules (fully resolved with includes inlined),
             include_refs (raw @include paths for adapters that prefer native imports),
             rules_files, skills, agents, commands,
-            mcp_servers (flat), mcp_servers_scoped (with metadata), settings,
-            permissions, hooks, plugins
+            mcp_servers (flat), mcp_servers_scoped (with metadata),
+            mcp_disabled (project servers skipped via disabledMcpjsonServers),
+            settings, env, model_config, sandbox, permissions, permission_mode,
+            output_styles, harness_overrides, hooks, plugins
         """
         scoped = self.get_mcp_servers_with_scope()
         flat = {name: entry["config"] for name, entry in scoped.items()}
@@ -422,8 +422,14 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
             "commands": self.get_commands(),
             "mcp_servers": flat,
             "mcp_servers_scoped": scoped,
+            "mcp_disabled": self.get_skipped_mcp_servers(),
             "settings": self.get_settings(),
+            "env": self.get_env(),
+            "model_config": self.get_model_config(),
+            "sandbox": self.get_sandbox(),
             "permissions": self.get_permissions(),
+            "permission_mode": self.get_permission_mode(),
+            "output_styles": self.get_output_styles(),
             "harness_overrides": self.get_harness_override_paths(),
             "hooks": self.get_hooks(),
             "plugins": self.get_plugins(),
@@ -468,6 +474,14 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
             p = self.project_dir / ".claude" / "CLAUDE.md"
             if p.exists():
                 paths["rules"].append(p)
+
+        # Active custom output-style file: injected into rules at sync time, so it
+        # must be hashed for incremental drift detection (changes to it change output).
+        out_styles = self.get_output_styles()
+        active_style = out_styles.get("active")
+        styles = out_styles.get("styles", {})
+        if active_style and isinstance(styles, dict) and active_style in styles:
+            paths["rules"].append(styles[active_style])
 
         # Skills sources (directories)
         skills = self.get_skills()

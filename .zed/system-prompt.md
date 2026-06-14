@@ -21,7 +21,7 @@ python3 src/commands/sync.py --dry-run   # preview without writing
 - `src/orchestrator.py` — central sync coordinator; reads source, runs adapters, writes targets
 - `src/source_reader.py` — discovers and reads Claude Code config (CLAUDE.md, .mcp.json, settings.json, skills/, agents/, commands/)
 - `src/adapters/` — one adapter per target harness, all extend `src/adapters/base.py`
-  - Targets: aider, cline, codex, continue, cursor, gemini, neovim, opencode, vscode, windsurf, zed
+  - Targets: aider, cline, codex, continue, cursor, neovim, opencode, vscode, windsurf, zed
 - `src/commands/` — slash command implementations (27 commands: sync, sync-status, sync-diff, sync-health, sync-lint, sync-scope, etc.)
 - `commands/` — slash command markdown definitions that Claude Code discovers
 - `hooks/hooks.json` — PostToolUse hook triggers sync on Edit/Write/MultiEdit; SessionStart hook runs startup checks

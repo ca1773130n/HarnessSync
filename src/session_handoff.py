@@ -3,7 +3,7 @@ from __future__ import annotations
 """Cross-harness session handoff (item 23).
 
 Generates a context-rich handoff prompt that lets users seamlessly continue
-a Claude Code conversation in another harness (Gemini CLI, Codex, OpenCode,
+a Claude Code conversation in another harness (Codex, OpenCode,
 Cursor, etc.) with full context about what was discussed and what needs to
 happen next.
 
@@ -28,12 +28,12 @@ Usage::
     handoff.add_file_context("src/auth/tokens.py", role="read")
     handoff.add_decision("Chose HS256 over RS256 because no PKI infra is available")
     handoff.add_todo("Write unit tests for refresh-token endpoint")
-    prompt = handoff.render(target_harness="gemini")
+    prompt = handoff.render(target_harness="codex")
     print(prompt)
 
 Or via the /sync-handoff command::
 
-    /sync-handoff --task "Refactoring auth module" --files src/auth/ --target gemini
+    /sync-handoff --task "Refactoring auth module" --files src/auth/ --target codex
 """
 
 import re
@@ -70,7 +70,6 @@ class HandoffContext:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _HARNESS_INTROS: dict[str, str] = {
-    "gemini":    "I'm continuing work from a Claude Code session. Please pick up where I left off.",
     "codex":     "Continuing from a Claude Code session. Context below — please continue the work.",
     "opencode":  "I'm handing off from Claude Code. Use the context below to continue this task.",
     "cursor":    "Resuming a Claude Code session in Cursor. Full context is provided below.",
@@ -182,7 +181,7 @@ class SessionHandoff:
         """Render the handoff prompt for *target_harness*.
 
         Args:
-            target_harness: Name of the receiving harness (e.g. "gemini").
+            target_harness: Name of the receiving harness (e.g. "codex").
 
         Returns:
             A paste-ready prompt string.

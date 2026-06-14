@@ -15,7 +15,7 @@ Annotation syntax in CLAUDE.md (immediately after the heading)::
 The ``<!-- why: ... -->`` annotation survives a round-trip through every
 supported adapter format:
 
-* **Markdown** targets (AGENTS.md, GEMINI.md, CONVENTIONS.md, .mdc):
+* **Markdown** targets (AGENTS.md, CONVENTIONS.md, .mdc):
   The annotation is preserved verbatim as an HTML comment.
 * **TOML** targets (Codex ``config.toml``):
   Translated to ``# Why: ...`` line comments above the relevant entry.

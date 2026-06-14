@@ -596,7 +596,7 @@ class DiffFormatter:
             ─────────────────────────────────────
               harness        files   added  removed  status
               codex              3    +142      -18  changes
-              gemini             1      +8       -2  changes
+              aider              1      +8       -2  changes
               opencode           0       —        —  no change
               cursor             5     +67      -11  changes
             ─────────────────────────────────────

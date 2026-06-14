@@ -52,7 +52,6 @@ class CloudBackupExporter:
         "CLAUDE.md",
         "CLAUDE.local.md",
         "AGENTS.md",
-        "GEMINI.md",
         "opencode.json",
         ".harnesssync",
     ]
@@ -294,7 +293,7 @@ class BackupManager:
 
         Args:
             target_path: Path to file or directory to backup
-            target_name: Target name (e.g., 'codex', 'opencode', 'gemini')
+            target_name: Target name (e.g., 'codex', 'opencode')
             label: Optional human-readable label (e.g., 'before-new-project-rules').
                    Appended to the backup directory name and stored in a metadata file.
 

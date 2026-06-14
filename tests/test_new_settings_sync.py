@@ -5,7 +5,6 @@ from __future__ import annotations
 Covers:
 - Codex: modelOverrides -> [profiles.*] TOML sections (various shapes)
 - Codex: attribution -> command_attribution (string, bool, dict forms)
-- Gemini: respectGitignore -> fileFiltering.respectGitignore
 - Skip behavior: verify skipped settings do NOT appear in any target output
 """
 
@@ -363,141 +362,6 @@ class TestCodexAttributionMapping:
 
 
 # ---------------------------------------------------------------------------
-# Gemini respectGitignore mapping tests
-# ---------------------------------------------------------------------------
-
-class TestGeminiRespectGitignoreMapping:
-    """Test Gemini adapter respectGitignore -> fileFiltering.respectGitignore."""
-
-    def test_respect_gitignore_true(self, tmp_path):
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-
-        settings = {"respectGitignore": True}
-        result = adapter.sync_settings(settings)
-        assert result.synced == 1
-
-        settings_path = tmp_path / ".gemini" / "settings.json"
-        data = json.loads(settings_path.read_text())
-
-        assert data.get('context', {}).get('fileFiltering', {}).get('respectGitIgnore') is True
-
-    def test_respect_gitignore_false(self, tmp_path):
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-
-        settings = {"respectGitignore": False}
-        result = adapter.sync_settings(settings)
-        assert result.synced == 1
-
-        settings_path = tmp_path / ".gemini" / "settings.json"
-        data = json.loads(settings_path.read_text())
-
-        assert data.get('context', {}).get('fileFiltering', {}).get('respectGitIgnore') is False
-
-    def test_respect_gitignore_not_present(self, tmp_path):
-        """When respectGitignore is not in settings, fileFiltering should not appear."""
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-
-        settings = {"some_other_key": "value"}
-        result = adapter.sync_settings(settings)
-        assert result.synced == 1
-
-        settings_path = tmp_path / ".gemini" / "settings.json"
-        data = json.loads(settings_path.read_text())
-
-        assert 'fileFiltering' not in data
-
-    def test_respect_gitignore_non_bool_ignored(self, tmp_path):
-        """Non-boolean respectGitignore should not be mapped."""
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-
-        settings = {"respectGitignore": "yes"}
-        result = adapter.sync_settings(settings)
-        assert result.synced == 1
-
-        settings_path = tmp_path / ".gemini" / "settings.json"
-        data = json.loads(settings_path.read_text())
-
-        assert 'fileFiltering' not in data
-
-    def test_respect_gitignore_preserves_existing_settings(self, tmp_path):
-        """respectGitignore should merge with existing settings.json content."""
-        from src.adapters.gemini import GeminiAdapter
-
-        # Pre-populate settings.json with existing content
-        gemini_dir = tmp_path / ".gemini"
-        gemini_dir.mkdir(parents=True)
-        settings_path = gemini_dir / "settings.json"
-        settings_path.write_text(json.dumps({
-            "mcpServers": {"test": {"command": "echo"}},
-            "theme": "dark",
-        }))
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-
-        settings = {"respectGitignore": True}
-        adapter.sync_settings(settings)
-
-        data = json.loads(settings_path.read_text())
-        assert data.get('context', {}).get('fileFiltering', {}).get('respectGitIgnore') is True
-        # Existing settings should be preserved
-        assert data.get('theme') == 'dark'
-        assert 'mcpServers' in data
-
-    def test_respect_gitignore_preserves_existing_file_filtering(self, tmp_path):
-        """respectGitignore should merge into existing context.fileFiltering, not replace it."""
-        from src.adapters.gemini import GeminiAdapter
-
-        gemini_dir = tmp_path / ".gemini"
-        gemini_dir.mkdir(parents=True)
-        settings_path = gemini_dir / "settings.json"
-        settings_path.write_text(json.dumps({
-            "context": {"fileFiltering": {"maxFileSize": 1048576}},
-        }))
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-
-        settings = {"respectGitignore": True}
-        adapter.sync_settings(settings)
-
-        data = json.loads(settings_path.read_text())
-        file_filtering = data.get('context', {}).get('fileFiltering', {})
-        assert file_filtering.get('respectGitIgnore') is True
-        assert file_filtering.get('maxFileSize') == 1048576
-
-    def test_respect_gitignore_with_permissions(self, tmp_path):
-        """respectGitignore and permissions should coexist."""
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-
-        settings = {
-            "permissions": {
-                "allow": ["Read"],
-                "deny": [],
-                "ask": [],
-            },
-            "respectGitignore": True,
-        }
-        result = adapter.sync_settings(settings)
-        assert result.synced == 1
-
-        settings_path = tmp_path / ".gemini" / "settings.json"
-        data = json.loads(settings_path.read_text())
-
-        assert data.get('context', {}).get('fileFiltering', {}).get('respectGitIgnore') is True
-        # tools.allowed was removed (not in Gemini schema); permissions map to tools.exclude
-        assert 'fileFiltering' not in data  # should be nested under context now
-
-
-# ---------------------------------------------------------------------------
 # Skip behavior: verify skipped settings do NOT appear in any target output
 # ---------------------------------------------------------------------------
 
@@ -529,25 +393,6 @@ class TestSkippedSettingsNotInOutput:
         for key in self.SKIPPED_KEYS:
             assert key not in content, f"Skipped setting '{key}' leaked into Codex config"
 
-    def test_gemini_skips_internal_settings(self, tmp_path):
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-
-        settings = {
-            "autoMemoryDirectory": "/home/user/.claude/memory",
-            "language": "en",
-            "cleanupPeriodDays": 30,
-            "permissions": {"allow": ["Read"], "deny": [], "ask": []},
-        }
-        adapter.sync_settings(settings)
-
-        settings_path = tmp_path / ".gemini" / "settings.json"
-        data = json.loads(settings_path.read_text())
-
-        for key in self.SKIPPED_KEYS:
-            assert key not in data, f"Skipped setting '{key}' leaked into Gemini settings"
-
     def test_opencode_skips_internal_settings(self, tmp_path):
         from src.adapters.opencode import OpenCodeAdapter
 
@@ -567,24 +412,6 @@ class TestSkippedSettingsNotInOutput:
         for key in self.SKIPPED_KEYS:
             assert key not in data, f"Skipped setting '{key}' leaked into OpenCode config"
 
-    def test_codex_model_overrides_not_in_gemini(self, tmp_path):
-        """modelOverrides should not appear in Gemini output (skip rationale: no equivalent)."""
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-
-        settings = {
-            "modelOverrides": {"planning": "opus"},
-            "permissions": {"allow": [], "deny": [], "ask": []},
-        }
-        adapter.sync_settings(settings)
-
-        settings_path = tmp_path / ".gemini" / "settings.json"
-        data = json.loads(settings_path.read_text())
-
-        assert 'modelOverrides' not in data
-        assert 'profiles' not in data
-
     def test_codex_model_overrides_not_in_opencode(self, tmp_path):
         """modelOverrides should not appear in OpenCode output."""
         from src.adapters.opencode import OpenCodeAdapter
@@ -602,24 +429,6 @@ class TestSkippedSettingsNotInOutput:
 
         assert 'modelOverrides' not in data
         assert 'profiles' not in data
-
-    def test_attribution_not_in_gemini(self, tmp_path):
-        """attribution should not appear in Gemini output."""
-        from src.adapters.gemini import GeminiAdapter
-
-        adapter = GeminiAdapter(project_dir=tmp_path)
-
-        settings = {
-            "attribution": True,
-            "permissions": {"allow": [], "deny": [], "ask": []},
-        }
-        adapter.sync_settings(settings)
-
-        settings_path = tmp_path / ".gemini" / "settings.json"
-        data = json.loads(settings_path.read_text())
-
-        assert 'attribution' not in data
-        assert 'command_attribution' not in data
 
     def test_attribution_not_in_opencode(self, tmp_path):
         """attribution should not appear in OpenCode output."""

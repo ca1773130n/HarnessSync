@@ -471,7 +471,7 @@ class SkillDependencyGraph:
 
         # Harnesses where skills are synced (non-"none" support)
         _HARNESS_SKILL_SUPPORT = {
-            "codex": "partial", "gemini": "partial", "opencode": "partial",
+            "codex": "partial", "opencode": "partial",
             "cursor": "full", "aider": "none", "windsurf": "partial",
             "cline": "partial", "continue": "partial", "vscode": "partial",
             "neovim": "none", "zed": "partial",

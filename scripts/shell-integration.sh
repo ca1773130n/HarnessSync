@@ -4,7 +4,7 @@
 # Source this from ~/.bashrc or ~/.zshrc:
 #   source /path/to/HarnessSync/shell-integration.sh
 #
-# This wraps codex, gemini, opencode commands to
+# This wraps codex, opencode commands to
 # auto-sync from Claude Code before launch.
 # Claude Code itself is untouched — it's the master.
 # ─────────────────────────────────────────────
@@ -57,15 +57,6 @@ if command -v codex &>/dev/null; then
     }
 fi
 
-# ─── Wrapper: gemini ───
-if command -v gemini &>/dev/null; then
-    _harnesssync_original_gemini="$(command -v gemini)"
-    gemini() {
-        _harnesssync_auto_sync all &
-        "$_harnesssync_original_gemini" "$@"
-    }
-fi
-
 # ─── Wrapper: opencode ───
 if command -v opencode &>/dev/null; then
     _harnesssync_original_opencode="$(command -v opencode)"
@@ -104,7 +95,6 @@ o.sync_all()
             echo ""
             echo "  Targets:"
             _harnesssync_check_target "Codex"    "${CODEX_HOME:-$HOME/.codex}/AGENTS.md"
-            _harnesssync_check_target "Gemini"   "$HOME/.gemini/GEMINI.md"
             _harnesssync_check_target "OpenCode" "$HOME/.config/opencode/AGENTS.md"
             ;;
         force)
@@ -132,7 +122,7 @@ Options:
   HARNESSSYNC_VERBOSE=1     Show sync output on auto-sync
 
 Auto-sync happens transparently when you run:
-  codex, gemini, opencode
+  codex, opencode
 EOF
             ;;
         *)

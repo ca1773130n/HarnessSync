@@ -188,7 +188,6 @@ class ConfigComplexityScorer:
         found = []
         rules_files = {
             "codex": "AGENTS.md",
-            "gemini": "GEMINI.md",
             "opencode": "OPENCODE.md",
             "cursor": ".cursor/rules/claude-code-rules.mdc",
             "aider": "CONVENTIONS.md",
@@ -242,7 +241,6 @@ class ConfigComplexityScorer:
         """Collect raw complexity metrics for a target from its output files."""
         rules_files = {
             "codex": ["AGENTS.md"],
-            "gemini": ["GEMINI.md"],
             "opencode": ["OPENCODE.md"],
             "cursor": [".cursor/rules/claude-code-rules.mdc"],
             "aider": ["CONVENTIONS.md"],
@@ -254,7 +252,6 @@ class ConfigComplexityScorer:
         }
         skills_dirs = {
             "codex": ".agents/skills",
-            "gemini": ".gemini/skills",
             "opencode": ".opencode/skills",
             "cursor": ".cursor/rules/skills",
             "cline": ".roo/rules/skills",
@@ -264,7 +261,6 @@ class ConfigComplexityScorer:
         }
         mcp_files = {
             "codex": ".codex/config.toml",
-            "gemini": ".gemini/settings.json",
             "opencode": ".opencode/settings.json",
             "cursor": ".cursor/mcp.json",
             "cline": ".roo/mcp.json",
@@ -689,7 +685,7 @@ class ClaudeMdQualityChecker:
             self.project_dir / "CLAUDE.local.md",
         ]
         # Include per-harness override files
-        for target in ("codex", "gemini", "opencode", "cursor", "aider", "windsurf"):
+        for target in ("codex", "opencode", "cursor", "aider", "windsurf"):
             candidates.append(self.project_dir / f"CLAUDE.{target}.md")
             candidates.append(self.project_dir / ".claude" / f"CLAUDE.{target}.md")
 

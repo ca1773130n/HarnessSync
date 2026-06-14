@@ -3,10 +3,10 @@ from __future__ import annotations
 """Skill portability linter with per-harness incompatibility analysis.
 
 Scans skill .md files for patterns that are Claude Code-specific and
-won't work in Codex, Gemini, Cursor, Aider, or other harnesses.
+won't work in Codex, Cursor, Aider, or other harnesses.
 
 Each issue includes:
-- The affected harnesses (e.g. "Gemini, Codex")
+- The affected harnesses (e.g. "Cursor, Codex")
 - The line number
 - An inline fix suggestion
 
@@ -57,49 +57,49 @@ _CHECKS: list[tuple[re.Pattern, str, str, list[str], str]] = [
         re.compile(r"\bmcp__\w+__\w+\b"),
         "MCP_TOOL_CALL",
         "MCP tool call `{match}` is Claude Code-specific",
-        ["Gemini", "Codex", "Cursor", "Aider", "Windsurf"],
+        ["Codex", "Cursor", "Aider", "Windsurf"],
         "wrap in an availability check or provide a non-MCP fallback",
     ),
     (
         re.compile(r"(?<!\w)/(commit|review-pr|sync|hookify|grd:|harness-sync:)\S*"),
         "CC_SLASH_CMD",
         "Claude Code slash command `{match}` is not available in other harnesses",
-        ["Gemini", "Codex", "Cursor", "Aider"],
+        ["Codex", "Cursor", "Aider"],
         "replace with plain-text instruction or make the step conditional on harness",
     ),
     (
         re.compile(r"\.claude/"),
         "CLAUDE_DIR_REF",
         "Reference to `.claude/` directory is Claude Code-specific",
-        ["Gemini", "Codex", "Cursor", "Aider", "Windsurf"],
+        ["Codex", "Cursor", "Aider", "Windsurf"],
         "use a relative path or a harness-agnostic config variable instead",
     ),
     (
         re.compile(r"(?:^|[^a-zA-Z0-9_/])(/(?:Users|home|root)/[^\s\"']+)"),
         "ABSOLUTE_PATH",
         "Absolute file path `{match}` is not portable across machines",
-        ["Gemini", "Codex", "Cursor", "Aider", "Windsurf"],
+        ["Codex", "Cursor", "Aider", "Windsurf"],
         "replace with a relative path or an environment variable like $HOME",
     ),
     (
         re.compile(r"\bTodoWrite\b|\bWebFetch\b|\bWebSearch\b|\bAgent\b|\bBash\b|\bGlob\b|\bGrep\b|\bRead\b|\bEdit\b|\bWrite\b"),
         "CC_TOOL_NAME",
         "Claude Code internal tool name `{match}` referenced directly",
-        ["Gemini", "Codex"],
+        ["Codex"],
         "describe the action in natural language instead of using the tool name",
     ),
     (
         re.compile(r"CLAUDE\.md", re.IGNORECASE),
         "CLAUDE_MD_REF",
-        "Reference to `CLAUDE.md` — Gemini uses `GEMINI.md`, Codex uses `AGENTS.md`",
-        ["Gemini", "Codex"],
+        "Reference to `CLAUDE.md` — Codex uses `AGENTS.md`",
+        ["Codex"],
         "use a harness-agnostic term like 'project instructions file' or check at runtime",
     ),
     (
         re.compile(r"settings\.(?:local\.)?json"),
         "CC_SETTINGS_FILE",
         "Reference to Claude Code `settings.json` is harness-specific",
-        ["Gemini", "Codex", "Cursor", "Aider"],
+        ["Codex", "Cursor", "Aider"],
         "abstract behind a configuration variable or document the harness-specific equivalent",
     ),
 ]

@@ -82,7 +82,7 @@ class OverrideManager:
         """Merge override content for target into base_content.
 
         Args:
-            target: Harness target name (e.g. 'cursor', 'gemini').
+            target: Harness target name (e.g. 'cursor', 'codex').
             base_content: str for Markdown, dict for JSON.
             content_type: 'md' or 'json'.
 

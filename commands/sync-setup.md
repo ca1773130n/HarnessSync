@@ -9,9 +9,9 @@ Usage: /sync-setup [--auto] [--add NAME --source PATH [--targets CLI=PATH,...]] 
 Default (no args): Auto-discover accounts (no TTY) or interactive wizard (TTY).
 
 Options:
-- --auto: Auto-scan ~/  for .claude*/.codex*/.gemini*/.opencode* dirs, match by suffix, filter by auth credentials
+- --auto: Auto-scan ~/  for .claude*/.codex*/.opencode* dirs, match by suffix, filter by auth credentials
 - --add NAME --source PATH: Add account manually (use --targets for custom paths)
-- --targets CLI=PATH,...: Target paths (e.g. codex=~/.codex,gemini=~/.gemini). Defaults to ~/.{cli} or ~/.{cli}-{name}
+- --targets CLI=PATH,...: Target paths (e.g. codex=~/.codex,opencode=~/.opencode). Defaults to ~/.{cli} or ~/.{cli}-{name}
 - --list: List all configured accounts
 - --remove NAME: Remove account configuration
 - --show NAME: Show detailed account configuration

@@ -14,7 +14,6 @@ Checks performed per harness:
   - cursor: validates MDC frontmatter (YAML parseable, required keys present)
   - aider: validates YAML in .aider.conf.yml read-files list is syntactically valid
   - codex: validates SKILL.md file exists and has non-empty content
-  - gemini: validates SKILL.md has non-empty content
   - opencode: validates skill directory structure
   - windsurf: validates memory markdown file is parseable
 """
@@ -116,7 +115,7 @@ class SkillSmokeTester:
         report = SkillSmokeReport()
 
         all_targets = targets or [
-            "cursor", "aider", "codex", "gemini", "opencode", "windsurf"
+            "cursor", "aider", "codex", "opencode", "windsurf"
         ]
 
         for target in all_targets:
@@ -281,36 +280,6 @@ def _test_codex_skills(project_dir: Path) -> list[SkillSmokeResult]:
     return results
 
 
-def _test_gemini_skills(project_dir: Path) -> list[SkillSmokeResult]:
-    """Validate .gemini/skills/<name>/SKILL.md files."""
-    skills_dir = project_dir / ".gemini" / "skills"
-    if not skills_dir.is_dir():
-        return []
-
-    results: list[SkillSmokeResult] = []
-    for skill_dir in sorted(d for d in skills_dir.iterdir() if d.is_dir()):
-        skill_name = skill_dir.name
-        skill_file = skill_dir / "SKILL.md"
-
-        if not skill_file.exists():
-            results.append(SkillSmokeResult(
-                skill_name, "gemini", False,
-                "SKILL.md missing",
-                str(skill_dir),
-            ))
-        else:
-            try:
-                content = skill_file.read_text(encoding="utf-8")
-                if not content.strip():
-                    results.append(SkillSmokeResult(skill_name, "gemini", False, "SKILL.md is empty", str(skill_file)))
-                else:
-                    results.append(SkillSmokeResult(skill_name, "gemini", True, "ok", str(skill_file)))
-            except OSError as e:
-                results.append(SkillSmokeResult(skill_name, "gemini", False, f"read error: {e}", str(skill_file)))
-
-    return results
-
-
 def _test_opencode_skills(project_dir: Path) -> list[SkillSmokeResult]:
     """Validate .opencode/skills/ structure."""
     skills_dir = project_dir / ".opencode" / "skills"
@@ -364,7 +333,6 @@ _TARGET_TESTERS: dict[str, object] = {
     "cursor":   _test_cursor_skills,
     "aider":    _test_aider_skills,
     "codex":    _test_codex_skills,
-    "gemini":   _test_gemini_skills,
     "opencode": _test_opencode_skills,
     "windsurf": _test_windsurf_skills,
 }

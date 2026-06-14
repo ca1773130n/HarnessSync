@@ -27,7 +27,7 @@ Usage::
     from src.prompt_consistency_checker import PromptConsistencyChecker
 
     checker = PromptConsistencyChecker()
-    report = checker.check(source_data, targets=["codex", "gemini", "aider"])
+    report = checker.check(source_data, targets=["codex", "opencode", "aider"])
     print(checker.format_report(report))
 """
 
@@ -48,14 +48,6 @@ _SECTION_FIDELITY: dict[str, dict[str, str]] = {
         "agents":   "partial",   # translated to AGENTS.md subagent sections
         "commands": "none",
         "mcp":      "partial",   # written to agents.json but not executed
-        "settings": "partial",
-    },
-    "gemini": {
-        "rules":    "full",
-        "skills":   "partial",   # translated to GEMINI.md sections
-        "agents":   "none",
-        "commands": "none",
-        "mcp":      "partial",
         "settings": "partial",
     },
     "opencode": {
@@ -239,13 +231,6 @@ class PromptConsistencyChecker:
                 "commands": "Commands not supported; content dropped",
                 "mcp":      "MCP configs written to agents.json but not executed by Codex",
                 "settings": "Only subset of settings have Codex equivalents",
-            },
-            "gemini": {
-                "skills":   "Skills translated to GEMINI.md sections (no execution model)",
-                "agents":   "Agents not supported; content dropped",
-                "commands": "Commands not supported; content dropped",
-                "mcp":      "MCP servers written to GEMINI.md but require manual Gemini MCP setup",
-                "settings": "Settings partially mapped; some fields silently ignored",
             },
             "opencode": {
                 "skills":   "Skills not supported; content dropped",

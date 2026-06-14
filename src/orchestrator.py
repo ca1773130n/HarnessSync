@@ -70,7 +70,7 @@ class SyncOrchestrator:
                          Falls back to HARNESS_ENV environment variable if not provided.
             cli_per_target_only: Per-target section overrides from --only-for CLI flag.
                                  Maps target_name -> set of section names to sync for that target only.
-                                 E.g. {"gemini": {"skills", "rules"}, "codex": {"rules", "mcp"}}
+                                 E.g. {"opencode": {"skills", "rules"}, "codex": {"rules", "mcp"}}
             minimal: If True, activate Minimal Footprint Mode -- sync only the highest-value
                      subset to each target (rules + essential MCP servers only). Skills, agents,
                      commands, and non-essential MCP servers are skipped. This is equivalent to
@@ -266,6 +266,7 @@ class SyncOrchestrator:
         pre.check_skill_dependencies(source_data)
         pre.substitute_config_vars(source_data)
         pre.normalize_rules(source_data)
+        pre.inject_output_styles(source_data)
         pre.annotate_rules(source_data)
         pre.record_rule_attribution(source_data)
 

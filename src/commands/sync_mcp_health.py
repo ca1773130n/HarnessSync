@@ -27,7 +27,6 @@ from src.mcp_reachability import McpReachabilityChecker, McpReachabilityResult
 # Known per-harness MCP config file locations
 _HARNESS_MCP_FILES: dict[str, list[str]] = {
     "codex":    [".codex/config.toml"],           # Codex stores MCP in TOML
-    "gemini":   [".gemini/settings.json"],          # Gemini settings.json
     "opencode": ["opencode.json"],                  # opencode.json
     "cursor":   [".cursor/mcp.json"],               # Cursor mcp.json
 }

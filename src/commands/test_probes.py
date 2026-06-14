@@ -122,7 +122,6 @@ def run_probes(
 # Map harness name -> candidate config file paths (relative to project_dir or HOME)
 HARNESS_CONFIG_PATHS: dict[str, list[str]] = {
     "codex":     ["AGENTS.md", ".codex/AGENTS.md"],
-    "gemini":    ["GEMINI.md", ".gemini/GEMINI.md"],
     "opencode":  ["AGENTS.md", ".opencode/AGENTS.md"],
     "cursor":    [".cursor/rules/harnesssync.mdc", ".cursor/rules/CLAUDE.mdc"],
     "aider":     ["CONVENTIONS.md", ".aider/CONVENTIONS.md"],

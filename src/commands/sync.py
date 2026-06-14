@@ -104,13 +104,13 @@ def _parse_args(tokens: list[str]) -> argparse.Namespace | None:
     parser.add_argument("--profile-save", type=str, default=None, metavar="NAME",
                         help="Save current --scope/--only/--skip options as a named profile")
     parser.add_argument("--only-targets", type=str, default=None,
-                        help="Sync only these harness targets (comma-separated): codex,gemini,cursor,cline,...")
+                        help="Sync only these harness targets (comma-separated): codex,cursor,cline,...")
     parser.add_argument("--skip-targets", type=str, default=None,
-                        help="Skip these harness targets (comma-separated): codex,gemini,cursor,cline,...")
+                        help="Skip these harness targets (comma-separated): codex,cursor,cline,...")
     parser.add_argument("--only-for", type=str, default=None, metavar="TARGET:SECTIONS",
                         action="append", dest="only_for",
                         help=("Sync only specific sections to a specific target. "
-                              "Format: TARGET:section1,section2 (e.g. 'gemini:skills,rules'). "
+                              "Format: TARGET:section1,section2 (e.g. 'codex:skills,rules'). "
                               "Repeat for multiple targets."))
     parser.add_argument("--html-report", type=str, default=None, metavar="PATH",
                         help="Write a self-contained HTML dry-run report to PATH (implies --dry-run)")

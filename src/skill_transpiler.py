@@ -7,7 +7,6 @@ reusable behaviours.  This module converts them to the closest equivalent
 in each target harness, preserving intent even when the format differs.
 
 Supported output formats:
-  gemini   → Plain-text system-instruction block (GEMINI.md section)
   codex    → AGENTS.md instruction block
   opencode → AGENTS.md-style markdown instruction block
   cursor   → .cursor/rules/<skill-name>.mdc  (with frontmatter)
@@ -21,7 +20,7 @@ Usage::
     transpiler = SkillTranspiler()
 
     # Single skill from a Path:
-    result = transpiler.transpile_skill(Path("skills/commit/SKILL.md"), target="gemini")
+    result = transpiler.transpile_skill(Path("skills/commit/SKILL.md"), target="codex")
     print(result.output)
 
     # All skills in a directory:
@@ -147,20 +146,6 @@ def _rewrite_tool_refs(body: str, target: str) -> tuple[str, list[str]]:
 # Format renderers
 # ---------------------------------------------------------------------------
 
-def _render_gemini(meta: dict, body: str, skill_name: str) -> tuple[str, float, list[str]]:
-    """Render skill as a GEMINI.md system-instruction section."""
-    body, warnings = _rewrite_tool_refs(body, "gemini")
-    title = meta.get("name") or skill_name.replace("-", " ").replace("_", " ").title()
-    description = meta.get("description", "")
-    output_lines = [f"## {title}"]
-    if description:
-        output_lines.append(f"> {description}")
-        output_lines.append("")
-    output_lines.append(body)
-    fidelity = 0.8 if not warnings else 0.65
-    return "\n".join(output_lines), fidelity, warnings
-
-
 def _render_codex(meta: dict, body: str, skill_name: str) -> tuple[str, float, list[str]]:
     """Render skill as an AGENTS.md instruction block."""
     body, warnings = _rewrite_tool_refs(body, "codex")
@@ -244,7 +229,7 @@ _NO_SKILL_SUPPORT: frozenset[str] = frozenset({"neovim", "vscode", "continue", "
 
 # Harnesses that have partial skill support (transpile with low fidelity)
 _PARTIAL_SKILL_SUPPORT: frozenset[str] = frozenset(
-    {"codex", "gemini", "opencode", "windsurf", "aider", "cursor"}
+    {"codex", "opencode", "windsurf", "aider", "cursor"}
 )
 
 
@@ -258,7 +243,7 @@ def generate_capability_stub(skill_name: str, target: str, invoke_hint: str = ""
     - Preserves discoverability so the gap is visible instead of silent
 
     The stub is suitable for embedding in the harness's instruction file
-    (AGENTS.md, GEMINI.md, .aider.conf.yml, etc.).
+    (AGENTS.md, .aider.conf.yml, etc.).
 
     Args:
         skill_name:  The Claude Code skill identifier (e.g. ``"commit"``).
@@ -323,12 +308,11 @@ class SkillTranspiler:
     Usage::
 
         t = SkillTranspiler()
-        result = t.transpile_skill(Path("skills/commit/SKILL.md"), "gemini")
+        result = t.transpile_skill(Path("skills/commit/SKILL.md"), "codex")
         print(result.output)
     """
 
     _RENDERERS = {
-        "gemini": _render_gemini,
         "codex": _render_codex,
         "opencode": _render_codex,   # same format as Codex AGENTS.md
         "cursor": _render_cursor,
@@ -341,7 +325,7 @@ class SkillTranspiler:
 
         Args:
             skill_path: Path to the SKILL.md file (or directory containing it).
-            target: Target harness name (e.g. "gemini", "codex", "aider").
+            target: Target harness name (e.g. "codex", "opencode", "aider").
 
         Returns:
             TranspileResult with output text and fidelity score.

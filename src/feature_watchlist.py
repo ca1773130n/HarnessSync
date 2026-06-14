@@ -110,7 +110,7 @@ class FeatureWatchlist:
 
         Args:
             feature: Feature name (e.g. "mcp", "skills", "agents").
-            harness: Harness name (e.g. "aider", "gemini", "codex").
+            harness: Harness name (e.g. "aider", "opencode", "codex").
 
         Returns:
             ``(success, message)`` tuple.
