@@ -2,11 +2,13 @@
 
 All notable changes to HarnessSync are documented here.
 
-## [Unreleased] — 2026-06-14 — Modernization (Claude Code + Codex)
+## [0.2.0] — 2026-06-14 — Modernization (Claude Code + Codex)
 
-A maintenance pass bringing the source reader and the Codex adapter up to the
-mid-2026 Claude Code and Codex CLI feature sets, and removing the deprecated
-Gemini target.
+Brings the source reader and the Codex adapter up to the mid-2026 Claude Code and
+Codex CLI feature sets, removes the deprecated Gemini target, and wires the
+previously-surfaced config surfaces into the adapters. **Breaking:** Gemini is no
+longer a sync target (its CLI was discontinued), so the supported-target count
+drops from 12 to 10.
 
 ### Removed
 - **Gemini target dropped entirely.** Google discontinued the Gemini CLI, so
