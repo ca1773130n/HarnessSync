@@ -47,11 +47,11 @@ After this, syncing happens automatically via PostToolUse hooks whenever Claude 
 | `.claude/agents/` | Symlinked or inlined per target capability |
 | `.claude/commands/` | Symlinked or summarized per target capability (namespaced/nested supported) |
 | `.mcp.json` (honors `disabledMcpjsonServers`) | `config.toml`, `settings.json`, or equivalent |
-| `settings.json` (env, model, effort, sandbox, permissions) | Target-specific env / model / reasoning-effort / sandbox config |
+| `settings.json` (env, model, effort, sandbox, permissions, statusLine) | Target-specific env / model / reasoning-effort / sandbox config (e.g. Codex `[shell_environment_policy]`, aider `set-env`) |
 | `outputStyle` + `.claude/output-styles/` | Active custom style appended to each target's system-prompt content |
 | `hooks` (settings.json / `hooks/hooks.json`) | Native lifecycle hooks where supported (e.g. Codex `[hooks.*]`) |
 
-Both **user scope** (`~/.claude/`) and **project scope** (`.claude/`, `CLAUDE.md`) are supported.
+Both **user scope** (`~/.claude/`) and **project scope** (`.claude/`, `CLAUDE.md`) are supported. In a monorepo, ancestor `CLAUDE.md` files up to the git root are included, and an enterprise `managed-settings.json` (if present) overrides everything.
 
 ## How It Works
 
