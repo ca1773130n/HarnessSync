@@ -1,12 +1,12 @@
 # HarnessSync Interactive Tutorial
 
-Learn HarnessSync by building a real project. The `/sync-tutorial` command scaffolds a Python CLI app called **TaskFlow** and walks you through syncing every config surface to all 11 target harnesses, step by step.
+Learn HarnessSync by building a real project. The `/sync-tutorial` command scaffolds a Python CLI app called **TaskFlow** and walks you through syncing every config surface to all 10 target harnesses, step by step.
 
 ## Prerequisites
 
 - Claude Code installed
 - HarnessSync plugin installed (`/install-plugin HarnessSync`)
-- Python 3.9+
+- Python 3.10+
 
 ## Quick Start
 
@@ -23,7 +23,7 @@ The tutorial covers 9 config surfaces in progressive steps:
 | Step | Config Surface | What You'll See |
 |------|---------------|----------------|
 | 1 | **Setup** | Scaffold TaskFlow app, verify it works |
-| 2 | **CLAUDE.md** | Project rules synced as `.cursorrules`, `AGENTS.md`, etc. |
+| 2 | **CLAUDE.md** | Project rules synced as `.cursor/rules/*.mdc`, `AGENTS.md`, etc. |
 | 3 | **Rules directory** | `.claude/rules/*.md` files merged into target configs |
 | 4 | **Permissions** | `settings.json` allow/deny translated per harness |
 | 5 | **Commands** | `/check` command represented as slash commands, aliases, or instructions |
