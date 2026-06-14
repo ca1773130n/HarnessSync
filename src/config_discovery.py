@@ -215,6 +215,7 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
             # Ancestor / monorepo CLAUDE.md: walk up from the project dir to the
             # git repo root so a monorepo-root CLAUDE.md contributes broader
             # context. Emitted root-to-leaf (broad -> specific) before project rules.
+            git_root = self._git_root(self.project_dir)
             ancestor_rules: list[str] = []
             for ancestor in self._ancestor_dirs(self.project_dir):
                 ap = ancestor / "CLAUDE.md"
@@ -223,7 +224,13 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
                         content = ap.read_text(encoding='utf-8', errors='replace')
                         all_include_refs.extend(extract_include_refs(content))
                         content, _included = resolve_includes(content, ap.parent)
-                        ancestor_rules.append(f"# [Ancestor rules from {ap}]\n\n{content}")
+                        # Repo-relative label so synced files are identical across
+                        # checkouts and never leak an absolute local path.
+                        try:
+                            label = ap.relative_to(git_root).as_posix() if git_root else "CLAUDE.md"
+                        except ValueError:
+                            label = "CLAUDE.md"
+                        ancestor_rules.append(f"# [Ancestor rules from {label}]\n\n{content}")
                     except (OSError, UnicodeDecodeError):
                         pass
             rules.extend(reversed(ancestor_rules))  # _ancestor_dirs is nearest-first
@@ -257,6 +264,21 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
         return "\n\n---\n\n".join(rules)
 
     @staticmethod
+    def _git_root(start: Path) -> Path | None:
+        """Return the nearest enclosing git repo root for ``start``, or None."""
+        try:
+            node = start.resolve()
+        except OSError:
+            return None
+        for _ in range(40):  # safety cap
+            if (node / ".git").exists():
+                return node
+            if node.parent == node:
+                return None
+            node = node.parent
+        return None
+
+    @staticmethod
     def _ancestor_dirs(start: Path):
         """Yield strict ancestor dirs of ``start`` up to and including the git repo
         root, nearest-first.
@@ -270,16 +292,7 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
         except OSError:
             return
 
-        git_root = None
-        node = start
-        for _ in range(40):  # safety cap
-            if (node / ".git").exists():
-                git_root = node
-                break
-            if node.parent == node:
-                break
-            node = node.parent
-
+        git_root = SourceReader._git_root(start)
         if git_root is None or git_root == start:
             return
 
@@ -575,5 +588,11 @@ class SourceReader(MCPReaderMixin, ModularReaderMixin):
             local_settings = self.project_dir / ".claude" / "settings.local.json"
             if local_settings.exists():
                 paths["settings"].append(local_settings)
+
+        # Enterprise managed-settings.json contributes to the merged settings, so
+        # hash it too — otherwise incremental sync / sync-status miss policy changes.
+        managed = self._managed_settings_path()
+        if managed and managed.exists():
+            paths["settings"].append(managed)
 
         return paths

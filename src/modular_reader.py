@@ -233,13 +233,26 @@ class ModularReaderMixin:
         Enterprise/MDM-deployed policy that overrides user and project settings,
         matching Claude Code's precedence. Locations:
           - macOS:   /Library/Application Support/ClaudeCode/managed-settings.json
-          - Windows: C:\\ProgramData\\ClaudeCode\\managed-settings.json
+          - Windows: C:\\ProgramData\\ClaudeCode or C:\\Program Files\\ClaudeCode
           - Linux:   /etc/claude-code/managed-settings.json
+
+        On Windows both documented install locations are checked; the one that
+        exists is returned (falling back to the ProgramData default).
         """
         if sys.platform == "darwin":
             return Path("/Library/Application Support/ClaudeCode/managed-settings.json")
         if sys.platform.startswith("win"):
-            return Path(r"C:\ProgramData\ClaudeCode\managed-settings.json")
+            candidates = [
+                Path(r"C:\ProgramData\ClaudeCode\managed-settings.json"),
+                Path(r"C:\Program Files\ClaudeCode\managed-settings.json"),
+            ]
+            for c in candidates:
+                try:
+                    if c.exists():
+                        return c
+                except OSError:
+                    pass
+            return candidates[0]
         return Path("/etc/claude-code/managed-settings.json")
 
     def get_hooks(self) -> dict:

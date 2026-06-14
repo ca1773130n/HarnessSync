@@ -322,8 +322,19 @@ def test_ancestor_monorepo_claude_md(tmp_path):
     assert "App-specific." in rules
     # broad -> specific ordering: ancestor appears before the project rules
     assert rules.index("Shared conventions.") < rules.index("App-specific.")
+    # repo-relative label only — no absolute checkout path leaks into synced rules
+    assert "[Ancestor rules from CLAUDE.md]" in rules
+    assert str(root) not in rules
     # tracked for incremental sync
     assert (root / "CLAUDE.md") in r.get_source_paths()["rules"]
+
+
+def test_managed_settings_tracked_in_source_paths(tmp_path, monkeypatch):
+    managed = tmp_path / "managed-settings.json"
+    managed.write_text(json.dumps({"model": "x"}))
+    r = _reader(tmp_path, settings={})
+    monkeypatch.setattr(r, "_managed_settings_path", lambda: managed)
+    assert managed in r.get_source_paths()["settings"]
 
 
 def test_ancestor_traversal_stops_at_nearest_repo_root(tmp_path):
